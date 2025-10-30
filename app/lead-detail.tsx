@@ -1,0 +1,988 @@
+import React, { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  ActivityIndicator,
+  Alert,
+  Linking,
+  Platform,
+} from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { ArrowLeft, Phone, Mail, Calendar, MapPin, Users, DollarSign, Building2, CreditCard as Edit, Trash2, Clock, Tag, FileText, MessageSquare, CircleCheck as CheckCircle, Circle as XCircle } from 'lucide-react-native';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
+import { Lead, LeadActivity, STATUS_OPTIONS, PRIORITY_OPTIONS } from '@/types/leads';
+import { getTimeAgo, formatEventDate } from '@/lib/timeUtils';
+
+export default function LeadDetailScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
+  const { user } = useAuth();
+
+  const [lead, setLead] = useState<Lead | null>(null);
+  const [activities, setActivities] = useState<LeadActivity[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'overview' | 'activity' | 'notes'>('overview');
+  const [newNote, setNewNote] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
+  const [editingField, setEditingField] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+
+  useEffect(() => {
+    if (id) {
+      fetchLeadDetails();
+      fetchActivities();
+    }
+  }, [id]);
+
+  const fetchLeadDetails = async () => {
+    try {
+      setLoading(true);
+
+      const { data: businessData } = await supabase
+        .from('businesses')
+        .select('id')
+        .eq('user_id', user?.id);
+
+      if (!businessData || businessData.length === 0) {
+        Alert.alert('Error', 'No businesses found');
+        router.back();
+        return;
+      }
+
+      const businessIds = businessData.map((b) => b.id);
+
+      const { data, error } = await supabase
+        .from('leads')
+        .select(
+          `
+          *,
+          businesses (
+            business_name,
+            id
+          )
+        `
+        )
+        .eq('id', id)
+        .in('business_id', businessIds)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (!data) {
+        Alert.alert('Error', 'Lead not found');
+        router.back();
+        return;
+      }
+
+      setLead(data);
+    } catch (error) {
+      console.error('Error fetching lead:', error);
+      Alert.alert('Error', 'Failed to load lead details');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchActivities = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('lead_activities')
+        .select('*')
+        .eq('lead_id', id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setActivities(data || []);
+    } catch (error) {
+      console.error('Error fetching activities:', error);
+    }
+  };
+
+  const handleCallPress = () => {
+    if (lead?.customer_phone) {
+      const phoneUrl = `tel:${lead.customer_phone}`;
+      Linking.canOpenURL(phoneUrl).then((supported) => {
+        if (supported) {
+          Linking.openURL(phoneUrl);
+          logActivity('call', 'Called customer', `Phone call to ${lead.customer_phone}`);
+        }
+      });
+    }
+  };
+
+  const handleEmailPress = () => {
+    if (lead?.customer_email) {
+      const emailUrl = `mailto:${lead.customer_email}`;
+      Linking.canOpenURL(emailUrl).then((supported) => {
+        if (supported) {
+          Linking.openURL(emailUrl);
+          logActivity('email', 'Sent email', `Email sent to ${lead.customer_email}`);
+        }
+      });
+    }
+  };
+
+  const logActivity = async (type: string, title: string, description: string) => {
+    try {
+      await supabase.from('lead_activities').insert({
+        lead_id: id,
+        activity_type: type,
+        title,
+        description,
+        performed_by: user?.id,
+      });
+      fetchActivities();
+    } catch (error) {
+      console.error('Error logging activity:', error);
+    }
+  };
+
+  const handleStatusChange = async (newStatus: string) => {
+    if (!lead) return;
+
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .update({ status: newStatus })
+        .eq('id', lead.id);
+
+      if (error) throw error;
+
+      await logActivity(
+        'status_change',
+        'Status changed',
+        `Status changed from ${lead.status} to ${newStatus}`
+      );
+
+      setLead({ ...lead, status: newStatus as any });
+      Alert.alert('Success', 'Status updated successfully');
+    } catch (error) {
+      console.error('Error updating status:', error);
+      Alert.alert('Error', 'Failed to update status');
+    }
+  };
+
+  const handleSaveNote = async () => {
+    if (!newNote.trim() || !lead) return;
+
+    try {
+      setSavingNote(true);
+
+      await supabase.from('lead_notes').insert({
+        lead_id: lead.id,
+        content: newNote.trim(),
+        created_by: user?.id,
+      });
+
+      await logActivity('note', 'Note added', newNote.trim());
+
+      setNewNote('');
+      fetchActivities();
+      Alert.alert('Success', 'Note added successfully');
+    } catch (error) {
+      console.error('Error saving note:', error);
+      Alert.alert('Error', 'Failed to save note');
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const handleDeleteLead = () => {
+    Alert.alert(
+      'Delete Lead',
+      'Are you sure you want to delete this lead? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await supabase.from('leads').delete().eq('id', id);
+
+              if (error) throw error;
+
+              Alert.alert('Success', 'Lead deleted successfully');
+              router.back();
+            } catch (error) {
+              console.error('Error deleting lead:', error);
+              Alert.alert('Error', 'Failed to delete lead');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const startEditing = (field: string, currentValue: string) => {
+    setEditingField(field);
+    setEditValue(currentValue || '');
+  };
+
+  const saveEdit = async () => {
+    if (!lead || !editingField) return;
+
+    try {
+      const { error } = await supabase
+        .from('leads')
+        .update({ [editingField]: editValue })
+        .eq('id', lead.id);
+
+      if (error) throw error;
+
+      setLead({ ...lead, [editingField]: editValue });
+      setEditingField(null);
+      Alert.alert('Success', 'Field updated successfully');
+    } catch (error) {
+      console.error('Error updating field:', error);
+      Alert.alert('Error', 'Failed to update field');
+    }
+  };
+
+  const cancelEdit = () => {
+    setEditingField(null);
+    setEditValue('');
+  };
+
+  const getStatusInfo = (status: string) => {
+    return STATUS_OPTIONS.find((s) => s.value === status) || STATUS_OPTIONS[0];
+  };
+
+  const getPriorityInfo = (priority: string) => {
+    return PRIORITY_OPTIONS.find((p) => p.value === priority) || PRIORITY_OPTIONS[0];
+  };
+
+  const getActivityIcon = (type: string) => {
+    switch (type) {
+      case 'call':
+        return <Phone size={16} color="#007AFF" />;
+      case 'email':
+        return <Mail size={16} color="#007AFF" />;
+      case 'note':
+        return <FileText size={16} color="#007AFF" />;
+      case 'meeting':
+        return <Users size={16} color="#007AFF" />;
+      case 'status_change':
+        return <CheckCircle size={16} color="#34C759" />;
+      default:
+        return <MessageSquare size={16} color="#007AFF" />;
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#007AFF" />
+      </View>
+    );
+  }
+
+  if (!lead) {
+    return (
+      <View style={styles.errorContainer}>
+        <Text style={styles.errorText}>Lead not found</Text>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <Text style={styles.backButtonText}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const statusInfo = getStatusInfo(lead.status);
+  const priorityInfo = getPriorityInfo(lead.priority || 'medium');
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <ArrowLeft size={24} color="#007AFF" strokeWidth={2} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Lead Details</Text>
+        <TouchableOpacity onPress={handleDeleteLead} style={styles.deleteBtn}>
+          <Trash2 size={20} color="#FF3B30" strokeWidth={2} />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.heroCard}>
+        <View style={styles.heroHeader}>
+          <View style={styles.heroLeft}>
+            <Text style={styles.heroName}>{lead.customer_name}</Text>
+            <Text style={styles.heroBusiness}>{lead.businesses.business_name}</Text>
+          </View>
+          <View style={styles.badges}>
+            <View
+              style={[styles.statusBadge, { backgroundColor: statusInfo.color + '20' }]}
+            >
+              <Text style={[styles.statusText, { color: statusInfo.color }]}>
+                {statusInfo.label}
+              </Text>
+            </View>
+            <View
+              style={[styles.priorityBadge, { backgroundColor: priorityInfo.color + '20' }]}
+            >
+              <Text style={[styles.priorityText, { color: priorityInfo.color }]}>
+                {priorityInfo.label}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.quickActions}>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={handleCallPress}
+            disabled={!lead.customer_phone}
+          >
+            <Phone size={20} color="#007AFF" strokeWidth={2} />
+            <Text style={styles.actionButtonText}>Call</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={handleEmailPress}
+            disabled={!lead.customer_email}
+          >
+            <Mail size={20} color="#007AFF" strokeWidth={2} />
+            <Text style={styles.actionButtonText}>Email</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionButton}>
+            <MessageSquare size={20} color="#007AFF" strokeWidth={2} />
+            <Text style={styles.actionButtonText}>Message</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View style={styles.tabs}>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'overview' && styles.activeTab]}
+          onPress={() => setActiveTab('overview')}
+        >
+          <Text
+            style={[styles.tabText, activeTab === 'overview' && styles.activeTabText]}
+          >
+            Overview
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'activity' && styles.activeTab]}
+          onPress={() => setActiveTab('activity')}
+        >
+          <Text
+            style={[styles.tabText, activeTab === 'activity' && styles.activeTabText]}
+          >
+            Activity
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'notes' && styles.activeTab]}
+          onPress={() => setActiveTab('notes')}
+        >
+          <Text style={[styles.tabText, activeTab === 'notes' && styles.activeTabText]}>
+            Notes
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {activeTab === 'overview' && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Contact Information</Text>
+            </View>
+
+            <View style={styles.infoCard}>
+              <View style={styles.infoRow}>
+                <Phone size={20} color="#666" />
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Phone</Text>
+                  <Text style={styles.infoValue}>{lead.customer_phone}</Text>
+                </View>
+              </View>
+
+              {lead.customer_email && (
+                <View style={styles.infoRow}>
+                  <Mail size={20} color="#666" />
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoLabel}>Email</Text>
+                    <Text style={styles.infoValue}>{lead.customer_email}</Text>
+                  </View>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Event Details</Text>
+            </View>
+
+            <View style={styles.infoCard}>
+              <View style={styles.infoRow}>
+                <Calendar size={20} color="#666" />
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Event Type</Text>
+                  <Text style={styles.infoValue}>{lead.event_type}</Text>
+                </View>
+              </View>
+
+              {lead.event_date && (
+                <View style={styles.infoRow}>
+                  <Clock size={20} color="#666" />
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoLabel}>Event Date</Text>
+                    <Text style={styles.infoValue}>
+                      {formatEventDate(lead.event_date)}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {lead.city && (
+                <View style={styles.infoRow}>
+                  <MapPin size={20} color="#666" />
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoLabel}>Location</Text>
+                    <Text style={styles.infoValue}>{lead.city}</Text>
+                  </View>
+                </View>
+              )}
+
+              {lead.venue && (
+                <View style={styles.infoRow}>
+                  <Building2 size={20} color="#666" />
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoLabel}>Venue</Text>
+                    <Text style={styles.infoValue}>{lead.venue}</Text>
+                  </View>
+                </View>
+              )}
+
+              {lead.guest_count && (
+                <View style={styles.infoRow}>
+                  <Users size={20} color="#666" />
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoLabel}>Guest Count</Text>
+                    <Text style={styles.infoValue}>{lead.guest_count} guests</Text>
+                  </View>
+                </View>
+              )}
+
+              {lead.budget_range && (
+                <View style={styles.infoRow}>
+                  <DollarSign size={20} color="#666" />
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoLabel}>Budget Range</Text>
+                    <Text style={styles.infoValue}>{lead.budget_range}</Text>
+                  </View>
+                </View>
+              )}
+            </View>
+
+            {lead.message && (
+              <>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Customer Message</Text>
+                </View>
+                <View style={styles.messageCard}>
+                  <Text style={styles.messageText}>{lead.message}</Text>
+                </View>
+              </>
+            )}
+
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Change Status</Text>
+            </View>
+
+            <View style={styles.statusGrid}>
+              {STATUS_OPTIONS.map((status) => (
+                <TouchableOpacity
+                  key={status.value}
+                  style={[
+                    styles.statusOption,
+                    lead.status === status.value && styles.statusOptionActive,
+                    { borderColor: status.color },
+                  ]}
+                  onPress={() => handleStatusChange(status.value)}
+                >
+                  <Text
+                    style={[
+                      styles.statusOptionText,
+                      lead.status === status.value && { color: status.color },
+                    ]}
+                  >
+                    {status.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {activeTab === 'activity' && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Activity Timeline</Text>
+              <Text style={styles.activityCount}>{activities.length} activities</Text>
+            </View>
+
+            {activities.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Clock size={48} color="#ddd" />
+                <Text style={styles.emptyStateText}>No activities yet</Text>
+              </View>
+            ) : (
+              <View style={styles.timeline}>
+                {activities.map((activity, index) => (
+                  <View key={activity.id} style={styles.timelineItem}>
+                    <View style={styles.timelineDot}>
+                      {getActivityIcon(activity.activity_type)}
+                    </View>
+                    {index < activities.length - 1 && <View style={styles.timelineLine} />}
+                    <View style={styles.activityCard}>
+                      <View style={styles.activityHeader}>
+                        <Text style={styles.activityTitle}>{activity.title}</Text>
+                        <Text style={styles.activityTime}>
+                          {getTimeAgo(activity.created_at)}
+                        </Text>
+                      </View>
+                      {activity.description && (
+                        <Text style={styles.activityDescription}>
+                          {activity.description}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+
+        {activeTab === 'notes' && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Add Note</Text>
+            </View>
+
+            <View style={styles.noteInputCard}>
+              <TextInput
+                style={styles.noteInput}
+                placeholder="Add a note about this lead..."
+                placeholderTextColor="#999"
+                value={newNote}
+                onChangeText={setNewNote}
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+              />
+              <TouchableOpacity
+                style={[styles.saveNoteButton, !newNote.trim() && styles.disabledButton]}
+                onPress={handleSaveNote}
+                disabled={!newNote.trim() || savingNote}
+              >
+                {savingNote ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.saveNoteButtonText}>Save Note</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Notes History</Text>
+            </View>
+
+            {activities.filter((a) => a.activity_type === 'note').length === 0 ? (
+              <View style={styles.emptyState}>
+                <FileText size={48} color="#ddd" />
+                <Text style={styles.emptyStateText}>No notes yet</Text>
+              </View>
+            ) : (
+              <View style={styles.notesList}>
+                {activities
+                  .filter((a) => a.activity_type === 'note')
+                  .map((note) => (
+                    <View key={note.id} style={styles.noteCard}>
+                      <View style={styles.noteHeader}>
+                        <FileText size={16} color="#007AFF" />
+                        <Text style={styles.noteTime}>{getTimeAgo(note.created_at)}</Text>
+                      </View>
+                      <Text style={styles.noteContent}>{note.description}</Text>
+                    </View>
+                  ))}
+              </View>
+            )}
+          </View>
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+    backgroundColor: '#f5f5f5',
+  },
+  errorText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 24,
+  },
+  backButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  backButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingTop: 60,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  backBtn: {
+    padding: 4,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1a1a1a',
+  },
+  deleteBtn: {
+    padding: 4,
+  },
+  heroCard: {
+    backgroundColor: '#fff',
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  heroHeader: {
+    marginBottom: 16,
+  },
+  heroLeft: {
+    marginBottom: 12,
+  },
+  heroName: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    marginBottom: 4,
+  },
+  heroBusiness: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  badges: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  priorityBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  priorityText: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  quickActions: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  actionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#f5f5f5',
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  actionButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  tabs: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 12,
+    padding: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  activeTab: {
+    backgroundColor: '#007AFF',
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+  },
+  activeTabText: {
+    color: '#fff',
+  },
+  content: {
+    flex: 1,
+  },
+  section: {
+    padding: 16,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    marginTop: 8,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1a1a1a',
+  },
+  activityCount: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  infoCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    gap: 16,
+    marginBottom: 8,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  infoContent: {
+    flex: 1,
+  },
+  infoLabel: {
+    fontSize: 12,
+    color: '#999',
+    fontWeight: '500',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  infoValue: {
+    fontSize: 16,
+    color: '#1a1a1a',
+    fontWeight: '500',
+  },
+  messageCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 8,
+  },
+  messageText: {
+    fontSize: 15,
+    color: '#333',
+    lineHeight: 22,
+  },
+  statusGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  statusOption: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    backgroundColor: '#fff',
+  },
+  statusOptionActive: {
+    backgroundColor: '#f5f5f5',
+  },
+  statusOptionText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
+  },
+  timeline: {
+    gap: 0,
+  },
+  timelineItem: {
+    flexDirection: 'row',
+    position: 'relative',
+  },
+  timelineDot: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+    marginTop: 8,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    zIndex: 1,
+  },
+  timelineLine: {
+    position: 'absolute',
+    left: 15,
+    top: 40,
+    bottom: -8,
+    width: 2,
+    backgroundColor: '#e0e0e0',
+  },
+  activityCard: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  activityHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  activityTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    flex: 1,
+  },
+  activityTime: {
+    fontSize: 12,
+    color: '#999',
+    fontWeight: '500',
+  },
+  activityDescription: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+  },
+  emptyState: {
+    alignItems: 'center',
+    padding: 48,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    color: '#999',
+    marginTop: 12,
+  },
+  noteInputCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 8,
+  },
+  noteInput: {
+    fontSize: 15,
+    color: '#1a1a1a',
+    minHeight: 100,
+    marginBottom: 12,
+    padding: 0,
+  },
+  saveNoteButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  disabledButton: {
+    opacity: 0.5,
+  },
+  saveNoteButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  notesList: {
+    gap: 12,
+  },
+  noteCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+  },
+  noteHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  noteTime: {
+    fontSize: 12,
+    color: '#999',
+    fontWeight: '500',
+  },
+  noteContent: {
+    fontSize: 15,
+    color: '#333',
+    lineHeight: 22,
+  },
+});
