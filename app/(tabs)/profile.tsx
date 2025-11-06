@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -30,11 +30,31 @@ const profileSchema = Yup.object().shape({
 export default function ProfileScreen() {
   const { user, profile, signOut, refreshProfile } = useAuth();
   const insets = useSafeAreaInsets();
-  const [photoUri, setPhotoUri] = useState<string | null>(
-    profile?.profile_photo_url || null
-  );
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const router = useRouter();
+
+  // Fetch image URL from file_storage when profile loads
+  useEffect(() => {
+    const fetchImageUrl = async () => {
+      if (profile?.image_file_id) {
+        const { data: fileData } = await supabase
+          .from('file_storage')
+          .select('file_path, storage_bucket')
+          .eq('id', profile.image_file_id)
+          .single();
+
+        if (fileData) {
+          const { data: urlData } = supabase.storage
+            .from(fileData.storage_bucket || 'avatars')
+            .getPublicUrl(fileData.file_path);
+          setPhotoUri(urlData.publicUrl);
+        }
+      }
+    };
+
+    fetchImageUrl();
+  }, [profile?.image_file_id]);
 
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -114,19 +134,43 @@ export default function ProfileScreen() {
     setUploading(true);
 
     try {
-      let photoUrl = profile?.profile_photo_url;
+      let imageFileId = profile?.image_file_id;
 
-      if (photoUri && photoUri !== profile?.profile_photo_url) {
-        photoUrl = await uploadImage(photoUri);
+      // If a new photo was selected, upload it and create file_storage record
+      if (photoUri) {
+        const photoUrl = await uploadImage(photoUri);
+        if (photoUrl) {
+          // Create file_storage record
+          const fileExt = photoUri.split('.').pop();
+          const fileName = `${user?.id}-${Date.now()}.${fileExt}`;
+          
+          const { data: fileData, error: fileError } = await supabase
+            .from('file_storage')
+            .insert({
+              original_filename: fileName,
+              stored_filename: fileName,
+              file_path: `profile-photos/${fileName}`,
+              storage_provider: 'supabase',
+              storage_bucket: 'avatars',
+              uploaded_by_type: 'vendor',
+              uploaded_by_id: user?.id,
+            })
+            .select()
+            .single();
+
+          if (!fileError && fileData) {
+            imageFileId = fileData.id;
+          }
+        }
       }
 
       const { error } = await supabase
-        .from('user_profiles')
+        .from('vendors')
         .update({
           first_name: values.firstName,
           last_name: values.lastName,
           email: values.email,
-          profile_photo_url: photoUrl,
+          image_file_id: imageFileId || null,
         })
         .eq('id', user?.id);
 
@@ -215,7 +259,7 @@ export default function ProfileScreen() {
 
               <View style={styles.infoCard}>
                 <Text style={styles.infoLabel}>Phone Number</Text>
-                <Text style={styles.infoValue}>{profile?.phone_number}</Text>
+                <Text style={styles.infoValue}>{profile?.phone}</Text>
               </View>
 
               <View style={styles.inputGroup}>

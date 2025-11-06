@@ -29,9 +29,13 @@ function RootLayoutNav() {
         router.replace('/(auth)/login');
       }
     } else if (session && profile) {
-      if (!profile.is_profile_complete && !inCompleteProfile) {
+      // Remove is_profile_complete check (if it exists)
+      // Since vendors table doesn't have this field, you may need to:
+      // 1. Remove the check entirely, OR
+      // 2. Use a different field (like checking if first_name exists)
+      if (!profile?.first_name && !inCompleteProfile) {
         router.replace('/complete-profile');
-      } else if (profile.is_profile_complete && (inAuthGroup || inCompleteProfile)) {
+      } else if (profile?.first_name && (inAuthGroup || inCompleteProfile)) {
         router.replace('/(tabs)');
       }
     }

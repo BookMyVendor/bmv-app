@@ -100,6 +100,7 @@ export default function CompleteProfileScreen() {
     }
   };
 
+  // Update handleSubmit - Need to upload file first to get image_file_id
   const handleSubmit = async (values: {
     firstName: string;
     lastName: string;
@@ -113,16 +114,47 @@ export default function CompleteProfileScreen() {
     setUploading(true);
 
     try {
-      const photoUrl = await uploadImage(photoUri);
+      // Upload image to cms.file_storage first
+      const response = await fetch(photoUri);
+      const blob = await response.blob();
+      const fileExt = photoUri.split('.').pop();
+      const fileName = `${user?.id}-${Date.now()}.${fileExt}`;
+      const filePath = `vendor-images/${fileName}`;
 
+      // Upload to storage bucket
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('vendor-images')  // Adjust bucket name as needed
+        .upload(filePath, blob);
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('vendor-images')
+        .getPublicUrl(filePath);
+
+      // Create file_storage record
+      const { data: fileData, error: fileError } = await supabase
+        .from('file_storage')  // Table in cms schema
+        .insert({
+          file_url: urlData.publicUrl,
+          file_path: filePath,
+          // Add other required fields for file_storage table
+        })
+        .select()
+        .single();
+
+      if (fileError) throw fileError;
+
+      // Now update vendors table with image_file_id
       const { error } = await supabase
-        .from('user_profiles')
+        .from('vendors')  // Changed from user_profiles
         .update({
           first_name: values.firstName,
           last_name: values.lastName,
           email: values.email,
-          profile_photo_url: photoUrl,
-          is_profile_complete: true,
+          image_file_id: fileData.id,  // Changed from profile_photo_url
+          // Removed: is_profile_complete
         })
         .eq('id', user?.id);
 

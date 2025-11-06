@@ -66,25 +66,46 @@ export default function BusinessRegistrationScreen() {
     setSubmitting(true);
 
     try {
-      const { error } = await supabase.from('businesses').insert({
-        user_id: user?.id,
+      // Convert yearsOfExperience string to integer
+      // Handle formats like "1-3 years", "5-10 years", "More than 10 years"
+      const parseYearsOfExperience = (yearsStr: string): number => {
+        if (!yearsStr) return 0;
+        
+        // Extract numbers from string
+        const match = yearsStr.match(/\d+/);
+        if (match) {
+          const num = parseInt(match[0], 10);
+          // If it's a range like "5-10", take the lower bound
+          return num;
+        }
+        
+        // Handle "More than 10 years"
+        if (yearsStr.toLowerCase().includes('more')) {
+          return 10;
+        }
+        
+        return 0;
+      };
+
+      const { error } = await supabase.from('vendor_businesses').insert({
+        vendor_id: user?.id,
         business_name: businessData.businessName,
-        contact_person_name: businessData.contactPersonName,
-        email: businessData.email,
-        phone_number: businessData.phoneNumber,
-        vendor_service_category: businessData.vendorServiceCategory,
-        event_types: businessData.eventTypes || [],
-        business_description: businessData.businessDescription,
-        years_of_experience: businessData.yearsOfExperience,
-        business_address: businessData.businessAddress,
+        description: businessData.businessDescription,
+        address: businessData.businessAddress,
         city: businessData.city,
         state: businessData.state,
-        gst_number: businessData.gstNumber || null,
+        contact_person_name: businessData.contactPersonName,
         business_registration_number: businessData.businessRegistrationNumber || null,
         website_url: businessData.websiteUrl || null,
         instagram_url: businessData.instagramUrl || null,
         facebook_url: businessData.facebookUrl || null,
         youtube_url: businessData.youtubeUrl || null,
+        operating_locations: businessData.eventTypes || [],
+        years_experience: parseYearsOfExperience(businessData.yearsOfExperience || '0'),
+        gst_number: businessData.gstNumber || null,
+        service_radius_km: 0, // Default value, can be updated later
+        status: 'pending', // Default status
+        subscription_status: 'trial', // Default subscription status
       });
 
       if (error) throw error;

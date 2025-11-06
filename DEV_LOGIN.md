@@ -9,7 +9,7 @@ The app is configured with a development mode to bypass SMS OTP during developme
 Location: `app/(auth)/login.tsx`
 
 ```typescript
-const DEV_MODE = true;
+const DEV_MODE = false;
 const DEV_OTP = '123456';
 ```
 
@@ -39,7 +39,7 @@ const DEV_OTP = '123456';
 To disable development mode for production:
 
 ```typescript
-const DEV_MODE = false;  // Change to false
+const DEV_MODE = true;  // Change to false
 ```
 
 This will revert to normal Supabase OTP authentication via SMS.
@@ -47,8 +47,8 @@ This will revert to normal Supabase OTP authentication via SMS.
 ### Test Users
 
 You can create multiple test accounts by using different phone numbers:
-- `9876543210` → `9876543210@dev.local`
-- `1234567890` → `1234567890@dev.local`
+- `9876543210` → `dev+9876543210@dev.local`
+- `1234567890` → `dev+1234567890@dev.local`
 - etc.
 
 All use the same OTP: **123456**

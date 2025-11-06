@@ -25,7 +25,7 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [devInfo, setDevInfo] = useState('');
-  const { signInWithOTP, verifyOTP, devSignIn } = useAuth();
+  const { signInWithOTP, verifyOTP, dummyLogin } = useAuth();
   const router = useRouter();
 
   const handleSendOTP = async () => {
@@ -65,16 +65,7 @@ export default function LoginScreen() {
     setLoading(true);
     setError('');
 
-    if (DEV_MODE && otp === DEV_OTP) {
-      const { error } = await devSignIn(phone);
-      setLoading(false);
-
-      if (error) {
-        setError(error.message);
-      }
-      return;
-    }
-
+    // verifyOTP now handles dev mode internally
     const { error } = await verifyOTP(phone, otp);
 
     setLoading(false);
@@ -110,6 +101,17 @@ export default function LoginScreen() {
                 : 'Enter the OTP sent to your phone'}
             </Text>
           </View>
+
+          {DEV_MODE && (
+            <TouchableOpacity
+              style={styles.dummyLoginButton}
+              onPress={async () => {
+                await dummyLogin();
+              }}
+            >
+              <Text style={styles.dummyLoginText}>🚀 Skip Login (Dev Mode)</Text>
+            </TouchableOpacity>
+          )}
 
           {step === 'phone' ? (
             <>
@@ -321,6 +323,18 @@ const styles = StyleSheet.create({
   },
   devInfo: {
     color: Colors.success.dark,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  dummyLoginButton: {
+    marginTop: 20,
+    padding: 12,
+    backgroundColor: '#FF6B6B',
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  dummyLoginText: {
+    color: '#fff',
     fontSize: 14,
     fontWeight: '600',
   },
