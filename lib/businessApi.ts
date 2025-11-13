@@ -782,6 +782,13 @@ export const uploadVerificationDocument = async (
       throw new Error('File size exceeds 10MB limit');
     }
 
+    // Get authenticated user ID (vendor_id) first for folder structure
+    const { data: { user } } = await supabaseCore.auth.getUser();
+    if (!user) {
+      throw new Error('User not authenticated');
+    }
+    const vendorId = user.id;
+
     // Get document type ID
     const { data: docType, error: docTypeError } = await supabaseCore
       .from('document_types')
@@ -816,7 +823,7 @@ export const uploadVerificationDocument = async (
       fileData = new Uint8Array(byteNumbers);
 
       fileExtension = mimeType.includes('png') ? 'png' : 'jpg';
-      fileName = `verification-${businessId}-${documentTypeCode}-${Date.now()}.${fileExtension}`;
+      fileName = `verification-${Date.now()}.${fileExtension}`;
       contentType = mimeType;
     } else if (isPdfFile(mimeType)) {
       // For PDFs, read as base64 and convert to Uint8Array
@@ -868,16 +875,19 @@ export const uploadVerificationDocument = async (
       fileData = new Uint8Array(byteNumbers);
 
       fileExtension = 'pdf';
-      fileName = `verification-${businessId}-${documentTypeCode}-${Date.now()}.${fileExtension}`;
+      fileName = `verification-${Date.now()}.${fileExtension}`;
       contentType = 'application/pdf';
     } else {
       throw new Error('Unsupported file type');
     }
 
-    // Upload to storage (using vendor-media bucket)
+    // Create folder structure: vendor-{vendor_id}/{document_type_code}/{filename}
+    const filePath = `vendor-${vendorId}/${documentTypeCode}/${fileName}`;
+
+    // Upload to storage (using document_urls bucket for verification documents)
     const { data: uploadData, error: uploadError } = await supabaseCore.storage
-      .from('vendor-media')
-      .upload(fileName, fileData, {
+      .from('document_urls')
+      .upload(filePath, fileData, {
         contentType,
         upsert: false,
       });
@@ -896,7 +906,7 @@ export const uploadVerificationDocument = async (
         mime_type: contentType,
         file_extension: fileExtension,
         storage_provider: 'supabase',
-        storage_bucket: 'vendor-media',
+        storage_bucket: 'document_urls',
         upload_status: 'completed',
         uploaded_by_type: 'vendor',
         uploaded_by_id: businessId,
@@ -912,6 +922,7 @@ export const uploadVerificationDocument = async (
       .from('vendor_verification_documents')
       .insert({
         business_id: businessId,
+        vendor_id: vendorId, // Include vendor_id for RLS policy
         document_type_id: docType.id,
         file_id: fileStorageData.id,
         verification_status: 'pending',
@@ -925,7 +936,7 @@ export const uploadVerificationDocument = async (
 
     // Get public URL
     const { data: urlData } = supabaseCore.storage
-      .from('vendor-media')
+      .from('document_urls')
       .getPublicUrl(uploadData.path);
 
     const result: VerificationDocument = {
@@ -985,7 +996,8 @@ export const getBusinessVerificationDocuments = async (
   businessId: string
 ): Promise<{ data: VerificationDocument[] | null; error: Error | null }> => {
   try {
-    const { data, error } = await supabaseCms
+    // Fetch verification documents with file_storage (same schema)
+    const { data: documents, error: documentsError } = await supabaseCms
       .from('vendor_verification_documents')
       .select(`
         id,
@@ -994,10 +1006,6 @@ export const getBusinessVerificationDocuments = async (
         file_id,
         verification_status,
         uploaded_at,
-        document_types:document_type_id (
-          type_code,
-          display_name
-        ),
         file_storage:file_id (
           file_path,
           storage_bucket,
@@ -1008,10 +1016,43 @@ export const getBusinessVerificationDocuments = async (
       .eq('business_id', businessId)
       .order('uploaded_at', { ascending: false });
 
-    if (error) throw error;
+    if (documentsError) throw documentsError;
+    if (!documents || documents.length === 0) {
+      return { data: [], error: null };
+    }
 
-    const transformedData: VerificationDocument[] = (data || []).map((item: any) => {
-      const docType = item.document_types;
+    // Get unique document_type_ids
+    const documentTypeIds = [...new Set(
+      documents
+        .map((doc: any) => doc.document_type_id)
+        .filter((id: string | null) => id !== null)
+    )];
+
+    // Fetch document_types from core schema
+    let documentTypesMap = new Map<string, { type_code: string; display_name: string }>();
+    if (documentTypeIds.length > 0) {
+      const { data: docTypes, error: docTypesError } = await supabaseCore
+        .from('document_types')
+        .select('id, type_code, display_name')
+        .in('id', documentTypeIds);
+
+      if (docTypesError) {
+        console.error('Error fetching document types:', docTypesError);
+      } else if (docTypes) {
+        docTypes.forEach((dt: any) => {
+          documentTypesMap.set(dt.id, {
+            type_code: dt.type_code,
+            display_name: dt.display_name,
+          });
+        });
+      }
+    }
+
+    // Transform data with manual join
+    const transformedData: VerificationDocument[] = documents.map((item: any) => {
+      const docType = item.document_type_id 
+        ? documentTypesMap.get(item.document_type_id) 
+        : null;
       const fileStorage = item.file_storage;
 
       let fileUrl: string | null = null;
