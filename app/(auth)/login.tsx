@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -27,6 +27,17 @@ export default function LoginScreen() {
   const [devInfo, setDevInfo] = useState('');
   const { signInWithOTP, verifyOTP, dummyLogin } = useAuth();
   const router = useRouter();
+  const otpInputRef = useRef<TextInput>(null);
+
+  // Auto-focus OTP input when step changes to 'otp'
+  useEffect(() => {
+    if (step === 'otp') {
+      // Small delay to ensure the input is rendered
+      setTimeout(() => {
+        otpInputRef.current?.focus();
+      }, 100);
+    }
+  }, [step]);
 
   const handleSendOTP = async () => {
     if (!phone || phone.length < 10) {
@@ -39,6 +50,7 @@ export default function LoginScreen() {
     setDevInfo('');
 
     if (DEV_MODE) {
+      // In dev mode, skip Twilio entirely - just proceed to OTP step
       setLoading(false);
       setStep('otp');
       setDevInfo(`Development Mode: Use OTP ${DEV_OTP}`);
@@ -127,6 +139,9 @@ export default function LoginScreen() {
                   value={phone}
                   onChangeText={setPhone}
                   maxLength={10}
+                  returnKeyType="send"
+                  onSubmitEditing={handleSendOTP}
+                  blurOnSubmit={true}
                 />
               </View>
               <TouchableOpacity
@@ -156,6 +171,7 @@ export default function LoginScreen() {
                   <Shield size={20} color={Colors.secondary.main} />
                 </View>
                 <TextInput
+                  ref={otpInputRef}
                   style={styles.input}
                   placeholder="Enter 6-digit OTP"
                   placeholderTextColor={Colors.text.tertiary}
@@ -163,6 +179,9 @@ export default function LoginScreen() {
                   value={otp}
                   onChangeText={setOtp}
                   maxLength={6}
+                  returnKeyType="done"
+                  onSubmitEditing={handleVerifyOTP}
+                  blurOnSubmit={true}
                 />
               </View>
               <TouchableOpacity

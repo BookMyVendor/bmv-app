@@ -22,7 +22,7 @@ import {
   X,
 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
+import { supabaseCore, supabaseCrm } from '@/lib/supabase';
 import FilterModal from '@/components/FilterModal';
 import SortModal from '@/components/SortModal';
 import ReplyModal from '@/components/ReplyModal';
@@ -77,10 +77,10 @@ export default function ReviewsScreen() {
       const isRefresh = refreshing;
       if (!isRefresh) setLoading(true);
 
-      const { data: businessData } = await supabase
-        .from('businesses')
-        .select('id')
-        .eq('user_id', user?.id);
+      const { data: businessData } = await supabaseCore
+        .from('vendor_businesses')
+        .select('id, business_name')
+        .eq('vendor_id', user?.id);
 
       if (!businessData || businessData.length === 0) {
         setReviews([]);
@@ -90,22 +90,24 @@ export default function ReviewsScreen() {
       }
 
       const businessIds = businessData.map((b) => b.id);
+      const businessMap = new Map(businessData.map((b) => [b.id, b.business_name]));
 
-      const { data, error } = await supabase
-        .from('reviews')
-        .select(
-          `
-          *,
-          businesses (
-            business_name
-          )
-        `
-        )
+      // Fetch reviews without join
+      const { data, error } = await supabaseCrm
+        .from('customer_reviews')
+        .select('*')
         .in('business_id', businessIds)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setReviews(data || []);
+
+      // Map business names to reviews
+      const reviewsWithBusiness = (data || []).map((review) => ({
+        ...review,
+        business_name: businessMap.get(review.business_id) || 'Unknown Business',
+      }));
+
+      setReviews(reviewsWithBusiness);
     } catch (error) {
       console.error('Error fetching reviews:', error);
     } finally {
@@ -128,8 +130,8 @@ export default function ReviewsScreen() {
     if (!selectedReview) return;
 
     try {
-      const { error } = await supabase
-        .from('reviews')
+      const { error } = await supabaseCrm
+        .from('customer_reviews')
         .update({
           vendor_response: replyText,
           responded_at: new Date().toISOString(),

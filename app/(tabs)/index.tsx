@@ -13,7 +13,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Plus, TrendingUp, Calendar, Eye, X } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
+import { supabaseCore, supabaseCrm } from '@/lib/supabase';
 import { STATUS_OPTIONS, LeadStatus } from '@/types/leads';
 import FilterChip from '@/components/FilterChip';
 import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
@@ -64,10 +64,10 @@ export default function DashboardScreen() {
 
   const fetchBusinesses = async () => {
     try {
-      const { data, error } = await supabase
-        .from('businesses')
+      const { data, error } = await supabaseCore
+        .from('vendor_businesses')
         .select('*')
-        .eq('user_id', user?.id)
+        .eq('vendor_id', user?.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -81,10 +81,10 @@ export default function DashboardScreen() {
 
   const fetchLeadStats = async () => {
     try {
-      const { data: businessData } = await supabase
-        .from('businesses')
+      const { data: businessData } = await supabaseCore
+        .from('vendor_businesses')
         .select('id')
-        .eq('user_id', user?.id);
+        .eq('vendor_id', user?.id);
 
       if (!businessData || businessData.length === 0) {
         setLeadStats({
@@ -108,13 +108,13 @@ export default function DashboardScreen() {
 
       const statusFilter = selectedStatuses.length > 0 ? selectedStatuses : undefined;
 
-      let totalQuery = supabase
-        .from('leads')
+      let totalQuery = supabaseCrm
+        .from('customer_leads')
         .select('*', { count: 'exact', head: true })
         .in('business_id', businessIds);
 
       if (statusFilter) {
-        totalQuery = totalQuery.in('status', statusFilter);
+        totalQuery = totalQuery.in('lead_status', statusFilter);
       }
 
       const { count: totalCount } = await totalQuery;
@@ -123,14 +123,14 @@ export default function DashboardScreen() {
       startOfMonth.setDate(1);
       startOfMonth.setHours(0, 0, 0, 0);
 
-      let monthlyQuery = supabase
-        .from('leads')
+      let monthlyQuery = supabaseCrm
+        .from('customer_leads')
         .select('*', { count: 'exact', head: true })
         .in('business_id', businessIds)
         .gte('created_at', startOfMonth.toISOString());
 
       if (statusFilter) {
-        monthlyQuery = monthlyQuery.in('status', statusFilter);
+        monthlyQuery = monthlyQuery.in('lead_status', statusFilter);
       }
 
       const { count: monthlyCount } = await monthlyQuery;
@@ -138,21 +138,21 @@ export default function DashboardScreen() {
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
 
-      let todayQuery = supabase
-        .from('leads')
+      let todayQuery = supabaseCrm
+        .from('customer_leads')
         .select('*', { count: 'exact', head: true })
         .in('business_id', businessIds)
         .gte('created_at', startOfDay.toISOString());
 
       if (statusFilter) {
-        todayQuery = todayQuery.in('status', statusFilter);
+        todayQuery = todayQuery.in('lead_status', statusFilter);
       }
 
       const { count: todayCount } = await todayQuery;
 
-      const { data: allLeads } = await supabase
-        .from('leads')
-        .select('status')
+      const { data: allLeads } = await supabaseCrm
+        .from('customer_leads')
+        .select('lead_status')
         .in('business_id', businessIds);
 
       const statusCounts: Record<LeadStatus, number> = {
@@ -166,8 +166,8 @@ export default function DashboardScreen() {
       };
 
       allLeads?.forEach((lead) => {
-        if (lead.status in statusCounts) {
-          statusCounts[lead.status as LeadStatus]++;
+        if (lead.lead_status in statusCounts) {
+          statusCounts[lead.lead_status as LeadStatus]++;
         }
       });
 

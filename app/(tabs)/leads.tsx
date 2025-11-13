@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Calendar, MapPin, Clock, ArrowUpDown, ChevronRight, Search, Plus, X, Download, MoveVertical as MoreVertical, SquareCheck as CheckSquare, Square } from 'lucide-react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
+import { supabaseCore, supabaseCrm } from '@/lib/supabase';
 import { getTimeAgo, formatEventDate } from '@/lib/timeUtils';
 import FilterChip from '@/components/FilterChip';
 import SortModal, { SortOption } from '@/components/SortModal';
@@ -85,10 +85,10 @@ export default function LeadsScreen() {
     try {
       setLoading(true);
 
-      const { data: businessData } = await supabase
-        .from('businesses')
-        .select('id')
-        .eq('user_id', user?.id);
+      const { data: businessData } = await supabaseCore
+        .from('vendor_businesses')
+        .select('id, business_name')
+        .eq('vendor_id', user?.id);
 
       if (!businessData || businessData.length === 0) {
         setLeads([]);
@@ -97,27 +97,28 @@ export default function LeadsScreen() {
       }
 
       const businessIds = businessData.map((b) => b.id);
+      const businessMap = new Map(businessData.map((b) => [b.id, b.business_name]));
 
-      const { data, error } = await supabase
-        .from('leads')
-        .select(
-          `
-          *,
-          businesses (
-            business_name
-          )
-        `
-        )
+      // Fetch leads without join
+      const { data, error } = await supabaseCrm
+        .from('customer_leads')
+        .select('*')
         .in('business_id', businessIds)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setLeads(data || []);
+
+      // Map business names to leads
+      const leadsWithBusiness = (data || []).map((lead) => ({
+        ...lead,
+        business_name: businessMap.get(lead.business_id) || 'Unknown Business',
+      }));
+
+      setLeads(leadsWithBusiness);
     } catch (error) {
       console.error('Error fetching leads:', error);
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   };
 
@@ -241,9 +242,9 @@ export default function LeadsScreen() {
 
   const handleBulkStatusChange = async (newStatus: string) => {
     try {
-      const { error } = await supabase
-        .from('leads')
-        .update({ status: newStatus })
+      const { error } = await supabaseCrm
+        .from('customer_leads')
+        .update({ lead_status: newStatus })
         .in('id', selectedLeads);
 
       if (error) throw error;
@@ -269,8 +270,8 @@ export default function LeadsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const { error } = await supabase
-                .from('leads')
+              const { error } = await supabaseCrm
+                .from('customer_leads')
                 .delete()
                 .in('id', selectedLeads);
 
@@ -351,8 +352,8 @@ export default function LeadsScreen() {
                 </View>
               </View>
             </View>
-            {item.businesses && (
-              <Text style={styles.businessName}>{item.businesses.business_name}</Text>
+            {item.business_name && (
+              <Text style={styles.businessName}>{item.business_name}</Text>
             )}
           </View>
 

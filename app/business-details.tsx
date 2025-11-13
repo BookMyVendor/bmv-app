@@ -43,6 +43,7 @@ import {
   pickImage,
   pickMultipleImages,
   uploadMultipleBusinessImages,
+  setCoverImage,
   Offer,
   PortfolioImage,
 } from '@/lib/businessApi';
@@ -240,11 +241,20 @@ export default function BusinessDetailsScreen() {
     if (uri) {
       try {
         setUploading(true);
+        console.log('Starting image upload, URI:', uri);
         const { data, error: uploadError } = await uploadBusinessImage(id, uri);
-        if (uploadError) throw uploadError;
-        setImages([...images, data!]);
+        if (uploadError) {
+          console.error('Upload error:', uploadError);
+          throw uploadError;
+        }
+        console.log('Upload successful, data:', data);
+        
+        // Reload images to get the persisted data
+        await loadData();
+        
         Alert.alert('Success', 'Image uploaded successfully');
       } catch (error: any) {
+        console.error('Upload failed:', error);
         Alert.alert('Error', error.message || 'Failed to upload image');
       } finally {
         setUploading(false);
@@ -325,7 +335,7 @@ export default function BusinessDetailsScreen() {
             try {
               const { error } = await deleteBusinessImage(image.id);
               if (error) throw error;
-              setImages(images.filter((img) => img.id !== image.id));
+              await loadData(); // Reload to get updated list
               Alert.alert('Success', 'Image deleted successfully');
             } catch (error: any) {
               Alert.alert('Error', error.message || 'Failed to delete image');
@@ -334,6 +344,17 @@ export default function BusinessDetailsScreen() {
         },
       ]
     );
+  };
+
+  const handleSetCoverImage = async (image: PortfolioImage) => {
+    try {
+      const { error } = await setCoverImage(id, image.id);
+      if (error) throw error;
+      await loadData(); // Reload to get updated list with cover status
+      Alert.alert('Success', 'Cover image updated successfully');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to set cover image');
+    }
   };
 
   const openOfferModal = (offer?: Offer) => {
@@ -437,6 +458,7 @@ export default function BusinessDetailsScreen() {
 
   const renderImageItem = ({ item }: { item: PortfolioImage }) => {
     const imageSource = item.image_base64 || item.image_url;
+    const isCover = item.image_type === 'cover';
 
     return (
       <TouchableOpacity
@@ -447,12 +469,27 @@ export default function BusinessDetailsScreen() {
         }}
       >
         <Image source={{ uri: imageSource || undefined }} style={styles.galleryImage} />
-        <TouchableOpacity
-          style={styles.deleteImageButton}
-          onPress={() => handleDeleteImage(item)}
-        >
-          <Trash2 size={16} color="#fff" />
-        </TouchableOpacity>
+        {isCover && (
+          <View style={styles.coverBadge}>
+            <Text style={styles.coverBadgeText}>Cover</Text>
+          </View>
+        )}
+        <View style={styles.imageActions}>
+          {!isCover && (
+            <TouchableOpacity
+              style={[styles.imageActionButton, styles.setCoverButton]}
+              onPress={() => handleSetCoverImage(item)}
+            >
+              <Tag size={14} color="#fff" />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            style={[styles.imageActionButton, styles.deleteImageButton]}
+            onPress={() => handleDeleteImage(item)}
+          >
+            <Trash2 size={14} color="#fff" />
+          </TouchableOpacity>
+        </View>
       </TouchableOpacity>
     );
   };
@@ -484,7 +521,13 @@ export default function BusinessDetailsScreen() {
         <View style={styles.headerContent}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={() => {
+              if (router.canGoBack()) {
+                router.back();
+              } else {
+                router.replace('/(tabs)');
+              }
+            }}
           >
             <ChevronLeft size={24} color="#fff" />
           </TouchableOpacity>
@@ -697,11 +740,22 @@ export default function BusinessDetailsScreen() {
               </View>
 
               <View style={styles.editField}>
+                <Text style={styles.editLabel}>Contact Person Role</Text>
+                <TextInput
+                  style={styles.editInput}
+                  value={editData.contact_person_role || ''}
+                  onChangeText={(text) => setEditData({ ...editData, contact_person_role: text })}
+                  placeholder="e.g., Owner, Manager, Director"
+                  placeholderTextColor="#999"
+                />
+              </View>
+
+              <View style={styles.editField}>
                 <Text style={styles.editLabel}>Email</Text>
                 <TextInput
                   style={styles.editInput}
-                  value={editData.email || ''}
-                  onChangeText={(text) => setEditData({ ...editData, email: text })}
+                  value={editData.business_email || ''}
+                  onChangeText={(text) => setEditData({ ...editData, business_email: text })}
                   placeholder="Enter email"
                   placeholderTextColor="#999"
                   keyboardType="email-address"
@@ -713,8 +767,8 @@ export default function BusinessDetailsScreen() {
                 <Text style={styles.editLabel}>Phone Number</Text>
                 <TextInput
                   style={styles.editInput}
-                  value={editData.phone_number || ''}
-                  onChangeText={(text) => setEditData({ ...editData, phone_number: text })}
+                  value={editData.contact_person_phone || ''}
+                  onChangeText={(text) => setEditData({ ...editData, contact_person_phone: text })}
                   placeholder="Enter phone number"
                   placeholderTextColor="#999"
                   keyboardType="phone-pad"
@@ -740,8 +794,8 @@ export default function BusinessDetailsScreen() {
                 <Text style={styles.editLabel}>Business Description</Text>
                 <TextInput
                   style={[styles.editInput, styles.textArea]}
-                  value={editData.business_description || ''}
-                  onChangeText={(text) => setEditData({ ...editData, business_description: text })}
+                  value={editData.description || ''}
+                  onChangeText={(text) => setEditData({ ...editData, description: text })}
                   placeholder="Describe your business"
                   placeholderTextColor="#999"
                   multiline
@@ -753,8 +807,8 @@ export default function BusinessDetailsScreen() {
                 <Text style={styles.editLabel}>Years of Experience</Text>
                 <TextInput
                   style={styles.editInput}
-                  value={editData.years_of_experience || ''}
-                  onChangeText={(text) => setEditData({ ...editData, years_of_experience: text })}
+                  value={editData.years_experience?.toString() || ''}
+                  onChangeText={(text) => setEditData({ ...editData, years_experience: text ? parseInt(text, 10) : null })}
                   placeholder="e.g., 5"
                   placeholderTextColor="#999"
                   keyboardType="numeric"
@@ -769,8 +823,8 @@ export default function BusinessDetailsScreen() {
                 <Text style={styles.editLabel}>Business Address</Text>
                 <TextInput
                   style={styles.editInput}
-                  value={editData.business_address || ''}
-                  onChangeText={(text) => setEditData({ ...editData, business_address: text })}
+                  value={editData.address || ''}
+                  onChangeText={(text) => setEditData({ ...editData, address: text })}
                   placeholder="Enter business address"
                   placeholderTextColor="#999"
                 />
@@ -795,6 +849,34 @@ export default function BusinessDetailsScreen() {
                   onChangeText={(text) => setEditData({ ...editData, state: text })}
                   placeholder="Enter state"
                   placeholderTextColor="#999"
+                />
+              </View>
+
+              <View style={styles.field}>
+                <Text style={styles.label}>Pincode</Text>
+                <TextInput
+                  style={styles.input}
+                  value={editData.pincode || ''}
+                  onChangeText={(text) => setEditData({ ...editData, pincode: text })}
+                  placeholder="Enter pincode"
+                  placeholderTextColor="#999"
+                  keyboardType="numeric"
+                  maxLength={6}
+                />
+              </View>
+
+              <View style={styles.field}>
+                <Text style={styles.label}>Service Radius (km)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={editData.service_radius_km?.toString() || ''}
+                  onChangeText={(text) => {
+                    const num = parseInt(text) || 0;
+                    setEditData({ ...editData, service_radius_km: num });
+                  }}
+                  placeholder="Enter service radius in kilometers"
+                  placeholderTextColor="#999"
+                  keyboardType="numeric"
                 />
               </View>
             </View>
@@ -1305,15 +1387,42 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   deleteImageButton: {
+    backgroundColor: 'rgba(239, 68, 68, 0.8)',
+  },
+  coverBadge: {
     position: 'absolute',
-    top: 8,
-    right: 8,
+    top: 4,
+    left: 4,
+    backgroundColor: '#2563EB',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    zIndex: 2,
+  },
+  coverBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  imageActions: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    flexDirection: 'row',
+    gap: 4,
+    zIndex: 2,
+  },
+  imageActionButton: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  setCoverButton: {
+    backgroundColor: 'rgba(37, 99, 235, 0.8)',
   },
   editSection: {
     backgroundColor: '#fff',

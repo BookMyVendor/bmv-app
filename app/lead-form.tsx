@@ -13,7 +13,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Save } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
+import { supabaseCore, supabaseCrm } from '@/lib/supabase';
 import {
   EVENT_TYPES,
   BUDGET_RANGES,
@@ -63,10 +63,10 @@ export default function LeadFormScreen() {
 
   const fetchBusinesses = async () => {
     try {
-      const { data, error } = await supabase
-        .from('businesses')
+      const { data, error } = await supabaseCore
+        .from('vendor_businesses')
         .select('id, business_name')
-        .eq('user_id', user?.id)
+        .eq('vendor_id', user?.id)
         .order('business_name');
 
       if (error) throw error;
@@ -83,8 +83,8 @@ export default function LeadFormScreen() {
 
   const fetchLead = async () => {
     try {
-      const { data, error } = await supabase
-        .from('leads')
+      const { data, error } = await supabaseCrm
+        .from('customer_leads')
         .select('*')
         .eq('id', id)
         .maybeSingle();
@@ -104,7 +104,7 @@ export default function LeadFormScreen() {
           guest_count: data.guest_count?.toString() || '',
           budget_range: data.budget_range || '',
           message: data.message || '',
-          status: data.status || 'new',
+          status: data.lead_status || 'new',
           priority: data.priority || 'medium',
           notes: data.notes || '',
         });
@@ -167,14 +167,14 @@ export default function LeadFormScreen() {
         guest_count: formData.guest_count ? parseInt(formData.guest_count) : null,
         budget_range: formData.budget_range || null,
         message: formData.message.trim() || null,
-        status: formData.status,
+        lead_status: formData.status,
         priority: formData.priority,
         notes: formData.notes.trim() || null,
       };
 
       if (isEditMode) {
-        const { error } = await supabase
-          .from('leads')
+        const { error } = await supabaseCrm
+          .from('customer_leads')
           .update(leadData)
           .eq('id', id);
 
@@ -184,11 +184,12 @@ export default function LeadFormScreen() {
           { text: 'OK', onPress: () => router.back() },
         ]);
       } else {
-        const { data, error } = await supabase.from('leads').insert(leadData).select();
+        const { data, error } = await supabaseCrm.from('customer_leads').insert(leadData).select();
 
         if (error) throw error;
 
-        await supabase.from('lead_activities').insert({
+        // Note: lead_activities table might be in crm schema - update if needed
+        await supabaseCrm.from('lead_activities').insert({
           lead_id: data[0].id,
           activity_type: 'note',
           title: 'Lead created',

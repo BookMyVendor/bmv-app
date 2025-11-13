@@ -22,7 +22,7 @@ export default function PortfolioSocialStep({
   data,
   onUpdate,
 }: PortfolioSocialStepProps) {
-  const [portfolioImages, setPortfolioImages] = useState<string[]>([]);
+  const [portfolioImages, setPortfolioImages] = useState<string[]>(data.portfolioImages || []);
   const [uploading, setUploading] = useState(false);
 
   const handleChange = (field: string, value: string) => {
@@ -30,11 +30,8 @@ export default function PortfolioSocialStep({
   };
 
   const handlePickImages = async () => {
-    if (!data.businessId) {
-      Alert.alert('Error', 'Business ID not found. Please complete previous steps first.');
-      return;
-    }
-
+    // Don't upload during registration - just store URIs
+    // Images will be uploaded after business creation
     if (portfolioImages.length >= 20) {
       Alert.alert('Limit Reached', 'Maximum 20 images allowed per business.');
       return;
@@ -57,47 +54,17 @@ export default function PortfolioSocialStep({
       return;
     }
 
-    setUploading(true);
-
-    const { results, successCount, error: uploadError } = await uploadMultipleBusinessImages(
-      data.businessId,
-      uris,
-      (current, total) => {
-        console.log(`Uploading ${current}/${total}`);
-      }
-    );
-
-    setUploading(false);
-
-    if (uploadError) {
-      Alert.alert('Upload Error', uploadError.message);
-      return;
-    }
-
-    const successfulUploads = results
-      .filter((r) => r.success && r.imageUrl)
-      .map((r) => r.imageUrl!);
-
-    setPortfolioImages([...portfolioImages, ...successfulUploads]);
-
-    if (successCount > 0) {
-      Alert.alert('Success', `${successCount} image(s) uploaded successfully!`);
-    }
-
-    const failedCount = results.length - successCount;
-    if (failedCount > 0) {
-      const errors = results
-        .filter((r) => !r.success)
-        .map((r) => r.error)
-        .join('\n');
-      Alert.alert('Some Uploads Failed', errors);
-    }
+    // Store image URIs - they'll be uploaded after business creation
+    const newImages = [...portfolioImages, ...uris];
+    setPortfolioImages(newImages);
+    onUpdate({ portfolioImages: newImages });
   };
 
   const handleRemoveImage = (index: number) => {
     const newImages = [...portfolioImages];
     newImages.splice(index, 1);
     setPortfolioImages(newImages);
+    onUpdate({ portfolioImages: newImages });
   };
 
   return (

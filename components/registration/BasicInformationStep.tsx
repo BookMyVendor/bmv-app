@@ -45,6 +45,17 @@ export default function BasicInformationStep({
       </View>
 
       <View style={styles.field}>
+        <Text style={styles.label}>Contact Person Role</Text>
+        <TextInput
+          style={styles.input}
+          value={data.contactPersonRole || ''}
+          onChangeText={(text) => handleChange('contactPersonRole', text)}
+          placeholder="e.g., Owner, Manager, Director"
+          placeholderTextColor="#999"
+        />
+      </View>
+
+      <View style={styles.field}>
         <Text style={styles.label}>Email *</Text>
         <TextInput
           style={styles.input}

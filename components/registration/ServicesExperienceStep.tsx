@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -6,39 +6,21 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import Dropdown from '@/components/Dropdown';
+import { supabaseCore } from '@/lib/supabase';
 
 interface ServicesExperienceStepProps {
   data: any;
   onUpdate: (data: any) => void;
 }
 
-const SERVICE_CATEGORIES = [
-  'Photographer',
-  'Videographer',
-  'Caterer',
-  'Decorator',
-  'DJ/Music',
-  'Makeup Artist',
-  'Mehendi Artist',
-  'Venue',
-  'Wedding Planner',
-  'Florist',
-  'Invitation Designer',
-  'Choreographer',
-];
-
-const EVENT_TYPES = [
-  'Wedding',
-  'Engagement',
-  'Reception',
-  'Birthday',
-  'Corporate Event',
-  'Anniversary',
-  'Baby Shower',
-  'Other',
-];
+interface Category {
+  id: string;
+  name: string;
+  icon?: string;
+}
 
 const EXPERIENCE_OPTIONS = [
   'Less than 1 year',
@@ -52,26 +34,81 @@ export default function ServicesExperienceStep({
   data,
   onUpdate,
 }: ServicesExperienceStepProps) {
+  const [businessCategories, setBusinessCategories] = useState<Category[]>([]);
+  const [eventCategories, setEventCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchCategories();
+  }, []);
+
+  const fetchCategories = async () => {
+    try {
+      setLoading(true);
+
+      // Fetch business categories
+      const { data: businessCats, error: businessError } = await supabaseCore
+        .from('categories')
+        .select('id, name, icon')
+        .eq('category_type', 'business')
+        .eq('visible', true)
+        .order('sort_order', { ascending: true });
+
+      if (businessError) {
+        console.error('Error fetching business categories:', businessError);
+      } else {
+        setBusinessCategories(businessCats || []);
+      }
+
+      // Fetch event categories
+      const { data: eventCats, error: eventError } = await supabaseCore
+        .from('categories')
+        .select('id, name, icon')
+        .eq('category_type', 'event')
+        .eq('visible', true)
+        .order('sort_order', { ascending: true });
+
+      if (eventError) {
+        console.error('Error fetching event categories:', eventError);
+      } else {
+        setEventCategories(eventCats || []);
+      }
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleChange = (field: string, value: any) => {
     onUpdate({ [field]: value });
   };
 
-  const toggleEventType = (eventType: string) => {
+  const toggleEventType = (eventTypeName: string) => {
     const currentTypes = data.eventTypes || [];
-    const newTypes = currentTypes.includes(eventType)
-      ? currentTypes.filter((t: string) => t !== eventType)
-      : [...currentTypes, eventType];
+    const newTypes = currentTypes.includes(eventTypeName)
+      ? currentTypes.filter((t: string) => t !== eventTypeName)
+      : [...currentTypes, eventTypeName];
     handleChange('eventTypes', newTypes);
   };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Loading categories...</Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.field}>
         <Text style={styles.label}>Service Category *</Text>
         <Dropdown
-          options={SERVICE_CATEGORIES.map((cat) => ({
-            label: cat,
-            value: cat,
+          options={businessCategories.map((cat) => ({
+            label: cat.icon ? `${cat.icon} ${cat.name}` : cat.name,
+            value: cat.name,
           }))}
           value={data.vendorServiceCategory || ''}
           placeholder="Select service category"
@@ -81,29 +118,36 @@ export default function ServicesExperienceStep({
 
       <View style={styles.field}>
         <Text style={styles.label}>Event Types *</Text>
-        <View style={styles.chipContainer}>
-          {EVENT_TYPES.map((eventType) => (
-            <TouchableOpacity
-              key={eventType}
-              style={[
-                styles.chip,
-                (data.eventTypes || []).includes(eventType) &&
-                  styles.chipSelected,
-              ]}
-              onPress={() => toggleEventType(eventType)}
-            >
-              <Text
-                style={[
-                  styles.chipText,
-                  (data.eventTypes || []).includes(eventType) &&
-                    styles.chipTextSelected,
-                ]}
-              >
-                {eventType}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {eventCategories.length === 0 ? (
+          <Text style={styles.errorText}>No event categories available</Text>
+        ) : (
+          <View style={styles.chipContainer}>
+            {eventCategories.map((eventCategory) => {
+              const eventName = eventCategory.name;
+              const isSelected = (data.eventTypes || []).includes(eventName);
+              return (
+                <TouchableOpacity
+                  key={eventCategory.id}
+                  style={[
+                    styles.chip,
+                    isSelected && styles.chipSelected,
+                  ]}
+                  onPress={() => toggleEventType(eventName)}
+                >
+                  <Text
+                    style={[
+                      styles.chipText,
+                      isSelected && styles.chipTextSelected,
+                    ]}
+                  >
+                    {eventCategory.icon ? `${eventCategory.icon} ` : ''}
+                    {eventName}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
       </View>
 
       <View style={styles.field}>
@@ -143,6 +187,15 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 24,
+  },
+  centerContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#666',
   },
   field: {
     marginBottom: 20,
@@ -191,5 +244,10 @@ const styles = StyleSheet.create({
   chipTextSelected: {
     color: '#fff',
     fontWeight: '600',
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#ff3b30',
+    fontStyle: 'italic',
   },
 });

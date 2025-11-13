@@ -14,8 +14,40 @@ export const compressAndConvertToBase64 = async (
   uri: string
 ): Promise<CompressionResult> => {
   try {
+    let imageUri = uri;
+
+    // Handle blob URLs by converting them to data URIs
+    if (uri.startsWith('blob:')) {
+      try {
+        const response = await fetch(uri);
+        const blob = await response.blob();
+        const reader = new FileReader();
+        
+        const dataUri = await new Promise<string>((resolve, reject) => {
+          reader.onloadend = () => {
+            if (typeof reader.result === 'string') {
+              resolve(reader.result);
+            } else {
+              reject(new Error('Failed to convert blob to data URI'));
+            }
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+
+        imageUri = dataUri;
+      } catch (blobError) {
+        return {
+          base64: null,
+          error: blobError instanceof Error 
+            ? blobError 
+            : new Error('Failed to process blob URL'),
+        };
+      }
+    }
+
     const manipResult = await ImageManipulator.manipulateAsync(
-      uri,
+      imageUri,
       [{ resize: { width: MAX_IMAGE_WIDTH } }],
       {
         compress: COMPRESSION_QUALITY,
@@ -56,7 +88,8 @@ export const validateImageUri = (uri: string): boolean => {
   return (
     uri.startsWith('file://') ||
     uri.startsWith('content://') ||
-    uri.startsWith('data:image/')
+    uri.startsWith('data:image/') ||
+    uri.startsWith('blob:')
   );
 };
 

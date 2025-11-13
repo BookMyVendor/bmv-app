@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase';
+import { supabaseCore } from '@/lib/supabase';
 
 interface UserProfile {
   id: string;
@@ -32,23 +32,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchProfile = async (userId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('vendors')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
+const fetchProfile = async (userId: string) => {
+  try {
+    const { data, error } = await supabaseCore
+      .from('vendors')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
 
-      if (error) throw error;
-      setProfile(data);
-    } catch (error) {
-      console.error('Error fetching profile:', error);
-    }
-  };
+    if (error) throw error;
+    setProfile(data);
+  } catch (error) {
+    console.error('Error fetching profile:', error);
+  }
+};
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    supabaseCore.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
@@ -57,7 +57,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabaseCore.auth.onAuthStateChange((_event, session) => {
       (async () => {
         setSession(session);
         setUser(session?.user ?? null);
@@ -70,210 +70,174 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })();
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
-  const signInWithOTP = async (phone: string) => {
-    try {
-      // Format phone with country code for Supabase
-      const formattedPhone = phone.startsWith('+') ? phone : `+1${phone}`;
-      
-      const { error } = await supabase.auth.signInWithOtp({
-        phone: formattedPhone,
-      });
-      return { error };
-    } catch (error) {
-      return { error: error as Error };
+  // Separate effect for polling - only runs when user.id changes
+  useEffect(() => {
+    if (!user?.id) {
+      return; // No user, no polling
     }
-  };
 
-  const verifyOTP = async (phone: string, token: string) => {
-    try {
-      const DEV_MODE = false; // TODO: Move to config
-      const DEV_OTP = '123456';
+    // Poll profile every 30 minutes (30 * 60 * 1000 ms)
+    const pollInterval = setInterval(() => {
+      fetchProfile(user.id).catch((error) => {
+        console.error('Error polling profile:', error);
+      });
+    }, 30 * 60 * 1000);
 
-      // Format phone with country code for Supabase
-      const formattedPhone = phone.startsWith('+') ? phone : `+1${phone}`;
+    return () => {
+      clearInterval(pollInterval);
+    };
+  }, [user?.id]);
 
-      // For dev mode with dummy OTP, use database function to create phone-only user
-      if (DEV_MODE && token === DEV_OTP) {
-        // Check if vendor profile exists
-        const { data: existingProfile } = await supabase
-          .from('vendors')
-          .select('id')
-          .eq('phone', phone)
-          .maybeSingle();
+  const signInWithOTP = async (phone: string) => {
+  try {
+    const formattedPhone = phone.startsWith('+') ? phone : `+1${phone}`;
+    
+    // In development, just return success since we'll use hardcoded OTP
+    if (process.env.EXPO_PUBLIC_NODE_ENV === 'development') {
+      console.log('Development mode: Use OTP code: 123456');
+      return { error: null };
+    }
 
-        let userId: string;
+    // In production, this will trigger real SMS
+    const { error } = await supabaseCore.auth.signInWithOtp({
+      phone: formattedPhone,
+      options: {
+        shouldCreateUser: true,
+      }
+    });
 
-        if (existingProfile) {
-          // Vendor exists - check if auth user exists
-          userId = existingProfile.id;
-          
-          const { data: authUser } = await supabase.auth.getUser(userId);
-          
-          if (!authUser.user) {
-            // Create auth user via database function
-            const { data: functionData, error: functionError } = await supabase.rpc(
-              'create_phone_auth_user',
-              { phone_number: formattedPhone }
-            );
-            
-            if (functionError) {
-              console.error('Error creating auth user:', functionError);
-              return { error: functionError };
-            }
-            
-            userId = functionData;
-            
-            // Update vendor profile ID if it changed
-            if (existingProfile.id !== userId) {
-              await supabase.from('vendors').delete().eq('id', existingProfile.id);
-              await supabase.from('vendors').insert({
-                id: userId,
-                phone: phone,
-                first_name: '',
-                last_name: '',
-                email: '',
-              });
-            }
-          }
-        } else {
-          // New vendor - create auth user via database function
-          const { data: functionData, error: functionError } = await supabase.rpc(
-            'create_phone_auth_user',
-            { phone_number: formattedPhone }
-          );
-          
-          if (functionError) {
-            console.error('Error creating auth user:', functionError);
-            return { error: functionError };
-          }
-          
-          userId = functionData;
+    return { error };
+  } catch (error) {
+    return { error: error as Error };
+  }
+};
 
-          // Create vendor profile
-          const { error: vendorError } = await supabase.from('vendors').insert({
-            id: userId,
-            phone: phone,
-            first_name: '',
-            last_name: '',
-            email: '',
-          });
 
-          if (vendorError) {
-            console.error('Error creating vendor profile:', vendorError);
-            return { 
-              error: new Error(`Failed to create vendor profile: ${vendorError.message}`) 
-            };
-          }
-        }
+const verifyOTP = async (phone: string, token: string) => {
+  try {
+    const formattedPhone = phone.startsWith('+') ? phone : `+1${phone}`;
+    const isDevelopment = process.env.EXPO_PUBLIC_NODE_ENV === 'development';
 
-        // After creating user via database function, set password using Edge Function
-        const tempEmail = `dev-${userId}@dev.local`;
-        const password = 'dev-password-123';
-        
-        // Sign out first to clear any existing session
-        await supabase.auth.signOut();
-        
-        // Set password using Edge Function (admin API)
-        const { error: passwordError } = await supabase.functions.invoke(
-          'set-dev-password',
-          {
-            body: { userId, password },
-          }
-        );
+    if (isDevelopment) {
+      if (token !== '123456') {
+        return { error: new Error('Invalid OTP') };
+      }
 
-        if (passwordError) {
-          return { 
-            error: new Error(`Failed to set password: ${passwordError.message}`) 
-          };
-        }
+      // Format email properly (can't start with number)
+      const phoneDigits = formattedPhone.replace(/\D/g, ''); // Remove all non-digits
+      const userEmail = `umesh.bihani@bnt-soft.com`;
 
-        // Now sign in with password
-        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-          email: tempEmail,
-          password: password,
+      // First check if vendor exists with this phone number
+      const { data: existingVendor, error: vendorCheckError } = await supabaseCore
+        .from('vendors')
+        .select('*')
+        .eq('phone', phoneDigits)
+        .maybeSingle();
+
+      if (!vendorCheckError && existingVendor) {
+        // Vendor exists, use existing vendor's auth credentials
+        const { data: authData, error: signInError } = await supabaseCore.auth.signInWithPassword({
+          email: userEmail,
+          password: 'dev-password-123'
         });
 
-        if (signInError) {
-          return { 
-            error: new Error(`Failed to sign in: ${signInError.message}`) 
-          };
+        if (signInError) throw signInError;
+
+        if (authData.session && authData.user) {
+          setSession(authData.session);
+          setUser(authData.user);
+          setProfile(existingVendor);
+          return { error: null };
+        }
+      } else {
+        // No existing vendor, create new auth user and vendor
+        const { data: newAuthData, error: createError } = await supabaseCore.auth.signUp({
+          email: userEmail,
+          password: 'dev-password-123',
+          phone: formattedPhone,
+          options: {
+            data: {
+              phone: formattedPhone
+            }
+          }
+        });
+
+        if (createError && !createError.message.includes('User already registered')) {
+          throw createError;
         }
 
-        // Get the session
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError || !session) {
-          return { 
-            error: new Error('Failed to create session after sign in') 
-          };
-        }
+        // Sign in with new credentials
+        const { data: authData, error: signInError } = await supabaseCore.auth.signInWithPassword({
+          email: userEmail,
+          password: 'dev-password-123'
+        });
 
-        setSession(session);
-        setUser(session.user);
-        await fetchProfile(userId);
-        return { error: null };
+        if (signInError) throw signInError;
+
+        if (authData.session && authData.user) {
+          setSession(authData.session);
+          setUser(authData.user);
+
+          // Create new vendor profile
+          const { error: vendorError } = await supabaseCore
+            .from('vendors')
+            .insert({
+              id: authData.user.id,
+              phone: phoneDigits,
+              first_name: '',
+              last_name: '',
+              email: userEmail
+            });
+
+          if (vendorError) {
+            console.error('Vendor creation error:', vendorError);
+            throw vendorError;
+          }
+
+          await fetchProfile(authData.user.id);
+          return { error: null };
+        }
       }
-
-      // Real OTP verification (production mode)
-      const { data, error } = await supabase.auth.verifyOtp({
-        phone: formattedPhone,
-        token,
-        type: 'sms',
-      });
-
-      if (error) return { error };
-
-      if (data.user) {
-        const { data: existingProfile } = await supabase
-          .from('vendors')
-          .select('*')
-          .eq('id', data.user.id)
-          .maybeSingle();
-
-        if (!existingProfile) {
-          await supabase.from('vendors').insert({
-            id: data.user.id,
-            phone: phone,
-            first_name: '',
-            last_name: '',
-            email: '',
-          });
-        }
-
-        await fetchProfile(data.user.id);
-      }
-
-      return { error: null };
-    } catch (error) {
-      return { error: error as Error };
     }
-  };
+
+    return { error: new Error('Failed to create session') };
+  } catch (error) {
+    console.error('Verification error:', error);
+    return { error: error as Error };
+  }
+};
+
+
+
+
 
   const devSignIn = async (phone: string) => {
     try {
-      const { data: existingProfiles } = await supabase
+      const { data: existingProfiles } = await supabaseCore
         .from('vendors')
         .select('id')
         .eq('phone', phone);
 
       let userId: string;
-      let emailFormat = `dev+${phone}@dev.local`; // New format (default)
+      let emailFormat = `dev+${phone}@dev.loc`; // New format (default)
 
       if (existingProfiles && existingProfiles.length > 0) {
         userId = existingProfiles[0].id;
         // Try to sign in with new format first
-        const { error: newFormatError } = await supabase.auth.signInWithPassword({
+        const { error: newFormatError } = await supabaseCore.auth.signInWithPassword({
           email: emailFormat,
           password: 'dev-password-123',
         });
 
         // If new format fails, try old format for backward compatibility
         if (newFormatError) {
-          emailFormat = `${phone}@dev.local`; // Old format
-          const { error: oldFormatError } = await supabase.auth.signInWithPassword({
+          emailFormat = `dev${phone}@dev.local`; // Old format
+          const { error: oldFormatError } = await supabaseCore.auth.signInWithPassword({
             email: emailFormat,
             password: 'dev-password-123',
           });
@@ -281,13 +245,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } else {
         // Create new account with new format
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        const { data: authData, error: authError } = await supabaseCore.auth.signInWithPassword({
           email: emailFormat,
           password: 'dev-password-123',
         });
 
         if (authError) {
-          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          const { data: signUpData, error: signUpError } = await supabaseCore.auth.signUp({
             email: emailFormat,
             password: 'dev-password-123',
           });
@@ -295,7 +259,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (signUpError) return { error: signUpError };
           userId = signUpData.user!.id;
 
-          await supabase.from('vendors').insert({
+          await supabaseCore.from('vendors').insert({
             id: userId,
             phone: phone,
             first_name: '',
@@ -308,7 +272,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Final sign in with determined email format
-      const { data: sessionData, error: sessionError } = await supabase.auth.signInWithPassword({
+      const { data: sessionData, error: sessionError } = await supabaseCore.auth.signInWithPassword({
         email: emailFormat,
         password: 'dev-password-123',
       });
@@ -380,7 +344,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       setProfile(null);
 
-      const { error } = await supabase.auth.signOut();
+      const { error } = await supabaseCore.auth.signOut();
       if (error) {
         console.error('Error signing out:', error);
         throw error;

@@ -14,11 +14,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { Camera, LogOut, Save } from 'lucide-react-native';
 import { Formik } from 'formik';
 import * as Yup from 'yup';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
+import { supabaseCore, supabaseCms } from '@/lib/supabase';
 import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
 
 const profileSchema = Yup.object().shape({
@@ -38,15 +39,15 @@ export default function ProfileScreen() {
   useEffect(() => {
     const fetchImageUrl = async () => {
       if (profile?.image_file_id) {
-        const { data: fileData } = await supabase
+        const { data: fileData } = await supabaseCms
           .from('file_storage')
           .select('file_path, storage_bucket')
           .eq('id', profile.image_file_id)
           .single();
 
         if (fileData) {
-          const { data: urlData } = supabase.storage
-            .from(fileData.storage_bucket || 'avatars')
+          const { data: urlData } = supabaseCore.storage
+            .from(fileData.storage_bucket || 'vendor-media')
             .getPublicUrl(fileData.file_path);
           setPhotoUri(urlData.publicUrl);
         }
@@ -55,6 +56,29 @@ export default function ProfileScreen() {
 
     fetchImageUrl();
   }, [profile?.image_file_id]);
+
+  const resizeImage = async (uri: string): Promise<string> => {
+    try {
+      console.log('Resizing image from:', uri);
+      // Resize to max 800x800 for profile photos (good balance between quality and size)
+      const manipulatedImage = await ImageManipulator.manipulateAsync(
+        uri,
+        [
+          { resize: { width: 800, height: 800 } }, // Max dimensions, maintains aspect ratio
+        ],
+        {
+          compress: 0.8, // 80% quality
+          format: ImageManipulator.SaveFormat.JPEG, // Use JPEG for smaller file size
+        }
+      );
+      console.log('Image resized to:', manipulatedImage.uri);
+      return manipulatedImage.uri;
+    } catch (error) {
+      console.error('Error resizing image:', error);
+      // Return original URI if resize fails
+      return uri;
+    }
+  };
 
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -68,11 +92,13 @@ export default function ProfileScreen() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.8,
+      quality: 1.0, // Use full quality initially, we'll compress after resize
     });
 
-    if (!result.canceled) {
-      setPhotoUri(result.assets[0].uri);
+    if (!result.canceled && result.assets && result.assets[0]) {
+      // Resize the image before setting it
+      const resizedUri = await resizeImage(result.assets[0].uri);
+      setPhotoUri(resizedUri);
     }
   };
 
@@ -87,11 +113,13 @@ export default function ProfileScreen() {
     const result = await ImagePicker.launchCameraAsync({
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.8,
+      quality: 1.0, // Use full quality initially, we'll compress after resize
     });
 
-    if (!result.canceled) {
-      setPhotoUri(result.assets[0].uri);
+    if (!result.canceled && result.assets && result.assets[0]) {
+      // Resize the image before setting it
+      const resizedUri = await resizeImage(result.assets[0].uri);
+      setPhotoUri(resizedUri);
     }
   };
 
@@ -103,28 +131,8 @@ export default function ProfileScreen() {
     ]);
   };
 
-  const uploadImage = async (uri: string): Promise<string | null> => {
-    try {
-      const response = await fetch(uri);
-      const blob = await response.blob();
-      const fileExt = uri.split('.').pop();
-      const fileName = `${user?.id}-${Date.now()}.${fileExt}`;
-      const filePath = `profile-photos/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(filePath, blob);
-
-      if (uploadError) throw uploadError;
-
-      const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
-
-      return data.publicUrl;
-    } catch (error) {
-      console.error('Error uploading image:', error);
-      return null;
-    }
-  };
+  // Note: uploadImage function is no longer used directly
+  // Upload logic is now in handleSubmit to properly create file_storage records
 
   const handleSubmit = async (values: {
     firstName: string;
@@ -136,35 +144,72 @@ export default function ProfileScreen() {
     try {
       let imageFileId = profile?.image_file_id;
 
-      // If a new photo was selected, upload it and create file_storage record
-      if (photoUri) {
-        const photoUrl = await uploadImage(photoUri);
-        if (photoUrl) {
-          // Create file_storage record
-          const fileExt = photoUri.split('.').pop();
-          const fileName = `${user?.id}-${Date.now()}.${fileExt}`;
-          
-          const { data: fileData, error: fileError } = await supabase
-            .from('file_storage')
-            .insert({
-              original_filename: fileName,
-              stored_filename: fileName,
-              file_path: `profile-photos/${fileName}`,
-              storage_provider: 'supabase',
-              storage_bucket: 'avatars',
-              uploaded_by_type: 'vendor',
-              uploaded_by_id: user?.id,
-            })
-            .select()
-            .single();
+      // If a new photo was selected (local URI, not a URL), upload it and create file_storage record
+      if (photoUri && (photoUri.startsWith('file://') || photoUri.startsWith('content://') || photoUri.startsWith('ph://'))) {
+        // Step 1: Upload image to storage bucket
+        const response = await fetch(photoUri);
+        const blob = await response.blob();
+        const fileExt = photoUri.split('.').pop() || 'jpg';
+        const fileName = `${user?.id}-${Date.now()}.${fileExt}`;
+        const filePath = `profile-photos/${fileName}`;
 
-          if (!fileError && fileData) {
-            imageFileId = fileData.id;
+        // Upload to storage bucket
+        const { error: uploadError } = await supabaseCore.storage
+          .from('vendor-media')
+          .upload(filePath, blob);
+
+        if (uploadError) throw uploadError;
+
+        // Step 2: Create file_storage record
+        const { data: fileData, error: fileError } = await supabaseCms
+          .from('file_storage')
+          .insert({
+            original_filename: fileName,
+            stored_filename: fileName,
+            file_path: filePath,
+            file_size: blob.size,
+            mime_type: blob.type,
+            file_extension: fileExt,
+            storage_provider: 'supabase',
+            storage_bucket: 'vendor-media',
+            upload_status: 'completed',
+            uploaded_by_type: 'vendor',
+            uploaded_by_id: user?.id,
+          })
+          .select()
+          .single();
+
+        if (fileError) throw fileError;
+        imageFileId = fileData.id;
+
+        // Step 3: Create vendor_verification_documents entry for profile photo
+        const { data: docTypeData } = await supabaseCore
+          .from('document_types')
+          .select('id')
+          .eq('type_code', 'profile_photo')
+          .maybeSingle();
+
+        if (docTypeData) {
+          // Create verification document entry
+          const { error: verificationDocError } = await supabaseCms
+            .from('vendor_verification_documents')
+            .insert({
+              vendor_id: user?.id,
+              document_type_id: docTypeData.id,
+              file_id: fileData.id,
+              verification_status: 'pending',
+              uploaded_at: new Date().toISOString(),
+            });
+
+          // Don't throw error if this fails - it's optional tracking
+          if (verificationDocError) {
+            console.warn('Failed to create verification document entry:', verificationDocError);
           }
         }
       }
 
-      const { error } = await supabase
+      // Step 4: Update vendors table
+      const { error } = await supabaseCore
         .from('vendors')
         .update({
           first_name: values.firstName,
@@ -179,7 +224,7 @@ export default function ProfileScreen() {
       await refreshProfile();
       Alert.alert('Success', 'Profile updated successfully');
     } catch (error: any) {
-      Alert.alert('Error', error.message);
+      Alert.alert('Error', error.message || 'Failed to save profile');
     } finally {
       setUploading(false);
     }

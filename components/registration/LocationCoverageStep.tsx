@@ -94,6 +94,34 @@ export default function LocationCoverageStep({
         />
       </View>
 
+      <View style={styles.field}>
+        <Text style={styles.label}>Pincode</Text>
+        <TextInput
+          style={styles.input}
+          value={data.pincode || ''}
+          onChangeText={(text) => handleChange('pincode', text)}
+          placeholder="Enter pincode"
+          placeholderTextColor="#999"
+          keyboardType="numeric"
+          maxLength={6}
+        />
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.label}>Service Radius (km)</Text>
+        <TextInput
+          style={styles.input}
+          value={data.serviceRadiusKm?.toString() || ''}
+          onChangeText={(text) => {
+            const num = parseInt(text) || 0;
+            handleChange('serviceRadiusKm', num);
+          }}
+          placeholder="Enter service radius in kilometers"
+          placeholderTextColor="#999"
+          keyboardType="numeric"
+        />
+      </View>
+
       <View style={styles.infoBox}>
         <Text style={styles.infoText}>
           This information helps customers find vendors in their area. Make sure

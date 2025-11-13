@@ -5,20 +5,26 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
+import { supabaseCore } from '@/lib/supabase';
 import BasicInformationStep from '@/components/registration/BasicInformationStep';
 import ServicesExperienceStep from '@/components/registration/ServicesExperienceStep';
 import LocationCoverageStep from '@/components/registration/LocationCoverageStep';
 import VerificationStep from '@/components/registration/VerificationStep';
 import PortfolioSocialStep from '@/components/registration/PortfolioSocialStep';
+import { pickMultipleImages, uploadMultipleBusinessImages } from '@/lib/businessApi';
+import { INDIAN_STATES } from '@/constants/indianStates';
+import { TextInput } from '@/components/TextInput';
+import { Dropdown } from '@/components/Dropdown';
 
 interface BusinessData {
   businessName: string;
   contactPersonName: string;
+  contactPersonRole?: string; // Add this
   email: string;
   phoneNumber: string;
   vendorServiceCategory: string;
@@ -28,6 +34,9 @@ interface BusinessData {
   businessAddress: string;
   city: string;
   state: string;
+  pincode?: string; // Add this
+  serviceRadiusKm?: number; // Add this
+  operatingLocations?: string[]; // Add this (for future use)
   gstNumber: string;
   businessRegistrationNumber: string;
   websiteUrl: string;
@@ -35,6 +44,7 @@ interface BusinessData {
   facebookUrl: string;
   youtubeUrl: string;
   portfolioImages: string[];
+  coverPhotoUri?: string; // Add this
 }
 
 export default function BusinessRegistrationScreen() {
@@ -66,49 +76,126 @@ export default function BusinessRegistrationScreen() {
     setSubmitting(true);
 
     try {
-      // Convert yearsOfExperience string to integer
-      // Handle formats like "1-3 years", "5-10 years", "More than 10 years"
       const parseYearsOfExperience = (yearsStr: string): number => {
         if (!yearsStr) return 0;
-        
-        // Extract numbers from string
         const match = yearsStr.match(/\d+/);
         if (match) {
           const num = parseInt(match[0], 10);
-          // If it's a range like "5-10", take the lower bound
           return num;
         }
-        
-        // Handle "More than 10 years"
         if (yearsStr.toLowerCase().includes('more')) {
           return 10;
         }
-        
         return 0;
       };
 
-      const { error } = await supabase.from('vendor_businesses').insert({
-        vendor_id: user?.id,
-        business_name: businessData.businessName,
-        description: businessData.businessDescription,
-        address: businessData.businessAddress,
-        city: businessData.city,
-        state: businessData.state,
-        contact_person_name: businessData.contactPersonName,
-        business_registration_number: businessData.businessRegistrationNumber || null,
-        website_url: businessData.websiteUrl || null,
-        instagram_url: businessData.instagramUrl || null,
-        facebook_url: businessData.facebookUrl || null,
-        youtube_url: businessData.youtubeUrl || null,
-        operating_locations: businessData.eventTypes || [],
-        years_experience: parseYearsOfExperience(businessData.yearsOfExperience || '0'),
-        gst_number: businessData.gstNumber || null,
-        service_radius_km: 0, // Default value, can be updated later
-        status: 'pending', // Default status
-        subscription_status: 'trial', // Default subscription status
-      });
+      // Step 1: Upload cover photo if provided
+      let coverPhotoUrl = null;
+      if (businessData.coverPhotoUri) {
+        // Upload cover photo to storage and get URL
+        // This should use the same logic as profile photo upload
+        // For now, we'll handle it after business creation
+      }
 
-      if (error) throw error;
+      // Step 2: Create business with all fields
+      const { data: createdBusiness, error: businessError } = await supabaseCore
+        .from('vendor_businesses')
+        .insert({
+          vendor_id: user?.id,
+          business_name: businessData.businessName,
+          business_email: businessData.email,
+          description: businessData.businessDescription,
+          address: businessData.businessAddress,
+          city: businessData.city,
+          state: businessData.state,
+          pincode: businessData.pincode || null,
+          latitude: null,
+          longitude: null,
+          operating_locations: businessData.operatingLocations || [],
+          service_radius_km: businessData.serviceRadiusKm || 0,
+          contact_person_name: businessData.contactPersonName,
+          contact_person_phone: businessData.phoneNumber, // Add this line
+          contact_person_role: businessData.contactPersonRole || null,
+          business_registration_number: businessData.businessRegistrationNumber || null,
+          website_url: businessData.websiteUrl || null,
+          instagram_url: businessData.instagramUrl || null,
+          facebook_url: businessData.facebookUrl || null,
+          youtube_url: businessData.youtubeUrl || null,
+          cover_photo_url: coverPhotoUrl,
+          years_experience: parseYearsOfExperience(businessData.yearsOfExperience || '0'),
+          gst_number: businessData.gstNumber || null,
+          status: 'pending',
+          subscription_status: 'trial',
+        })
+        .select()
+        .single();
+
+      if (businessError) throw businessError;
+      if (!createdBusiness) throw new Error('Failed to create business');
+
+      // Step 3: Upload portfolio images if provided (after business is created)
+      if (businessData.portfolioImages && businessData.portfolioImages.length > 0) {
+        try {
+          await uploadMultipleBusinessImages(
+            createdBusiness.id,
+            businessData.portfolioImages,
+            (current, total) => {
+              console.log(`Uploading portfolio images ${current}/${total}`);
+            }
+          );
+        } catch (imageError) {
+          console.error('Error uploading portfolio images:', imageError);
+          // Don't fail the entire registration if images fail
+        }
+      }
+
+      // Step 4: Look up and insert category mappings
+      const categoryMappings = [];
+
+      if (businessData.vendorServiceCategory) {
+        const { data: businessCategory } = await supabaseCore
+          .from('categories')
+          .select('id')
+          .eq('name', businessData.vendorServiceCategory)
+          .eq('category_type', 'business')
+          .maybeSingle();
+
+        if (businessCategory) {
+          categoryMappings.push({
+            vendor_id: user?.id,
+            business_id: createdBusiness.id,
+            category_id: businessCategory.id,
+          });
+        }
+      }
+
+      if (businessData.eventTypes && businessData.eventTypes.length > 0) {
+        const { data: eventCategories } = await supabaseCore
+          .from('categories')
+          .select('id')
+          .in('name', businessData.eventTypes)
+          .eq('category_type', 'event');
+
+        if (eventCategories && eventCategories.length > 0) {
+          eventCategories.forEach((category) => {
+            categoryMappings.push({
+              vendor_id: user?.id,
+              business_id: createdBusiness.id,
+              category_id: category.id,
+            });
+          });
+        }
+      }
+
+      if (categoryMappings.length > 0) {
+        const { error: mappingError } = await supabaseCore
+          .from('vendor_business_category_mappings')
+          .insert(categoryMappings);
+
+        if (mappingError) {
+          console.error('Error inserting category mappings:', mappingError);
+        }
+      }
 
       router.replace('/(tabs)');
     } catch (error: any) {
@@ -301,5 +388,23 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.6,
+  },
+  field: {
+    marginBottom: 16,
+  },
+  label: {
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 8,
+    fontWeight: '600',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    fontSize: 16,
+    color: '#1a1a1a',
   },
 });

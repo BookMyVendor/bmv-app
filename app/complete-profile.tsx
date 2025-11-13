@@ -9,14 +9,16 @@ import {
   Image,
   ActivityIndicator,
   Alert,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { Camera } from 'lucide-react-native';
 import { Formik } from 'formik';
 import * as Yup from 'yup';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
+import { supabaseCore, supabaseCms } from '@/lib/supabase';
 
 const profileSchema = Yup.object().shape({
   firstName: Yup.string().required('First name is required'),
@@ -29,24 +31,56 @@ export default function CompleteProfileScreen() {
   const [uploading, setUploading] = useState(false);
   const { user, refreshProfile } = useAuth();
   const router = useRouter();
+  const resizeImage = async (uri: string): Promise<string> => {
+    try {
+      console.log('Resizing image from:', uri);
+      // Resize to max 800x800 for profile photos (good balance between quality and size)
+      const manipulatedImage = await ImageManipulator.manipulateAsync(
+        uri,
+        [
+          { resize: { width: 800, height: 800 } }, // Max dimensions, maintains aspect ratio
+        ],
+        {
+          compress: 0.8, // 80% quality
+          format: ImageManipulator.SaveFormat.JPEG, // Use JPEG for smaller file size
+        }
+      );
+      console.log('Image resized to:', manipulatedImage.uri);
+      return manipulatedImage.uri;
+    } catch (error) {
+      console.error('Error resizing image:', error);
+      // Return original URI if resize fails
+      return uri;
+    }
+  };
 
   const pickImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    try {
+      // On web, permissions are usually granted automatically
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission needed', 'Please allow access to your photos');
+          return;
+        }
+      }
 
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Please allow access to your photos');
-      return;
-    }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 1.0, // Use full quality initially, we'll compress after resize
+      });
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
-
-    if (!result.canceled) {
-      setPhotoUri(result.assets[0].uri);
+      if (!result.canceled && result.assets && result.assets[0]) {
+        console.log('Image selected:', result.assets[0].uri);
+        // Resize the image before setting it
+        const resizedUri = await resizeImage(result.assets[0].uri);
+        setPhotoUri(resizedUri);
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to pick image. Please try again.');
     }
   };
 
@@ -61,110 +95,187 @@ export default function CompleteProfileScreen() {
     const result = await ImagePicker.launchCameraAsync({
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.8,
+      quality: 1.0, // Use full quality initially, we'll compress after resize
     });
 
-    if (!result.canceled) {
-      setPhotoUri(result.assets[0].uri);
+    if (!result.canceled && result.assets && result.assets[0]) {
+      console.log('Photo taken:', result.assets[0].uri);
+      // Resize the image before setting it
+      const resizedUri = await resizeImage(result.assets[0].uri);
+      setPhotoUri(resizedUri);
     }
   };
 
   const showImageOptions = () => {
-    Alert.alert('Choose Photo', 'Select an option', [
-      { text: 'Take Photo', onPress: takePhoto },
-      { text: 'Choose from Gallery', onPress: pickImage },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
-
-  const uploadImage = async (uri: string): Promise<string | null> => {
-    try {
-      const response = await fetch(uri);
-      const blob = await response.blob();
-      const fileExt = uri.split('.').pop();
-      const fileName = `${user?.id}-${Date.now()}.${fileExt}`;
-      const filePath = `profile-photos/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(filePath, blob);
-
-      if (uploadError) throw uploadError;
-
-      const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
-
-      return data.publicUrl;
-    } catch (error) {
-      console.error('Error uploading image:', error);
-      return null;
+    console.log('showImageOptions called, Platform:', Platform.OS);
+    
+    if (Platform.OS === 'web') {
+      // On web, directly open file picker
+      console.log('Web platform - opening image picker directly');
+      pickImage();
+    } else {
+      // On mobile, use Alert to choose between camera and gallery
+      Alert.alert('Choose Photo', 'Select an option', [
+        { text: 'Take Photo', onPress: takePhoto },
+        { text: 'Choose from Gallery', onPress: pickImage },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
     }
   };
 
-  // Update handleSubmit - Need to upload file first to get image_file_id
+  // Upload logic is now directly in handleSubmit to properly create file_storage records
   const handleSubmit = async (values: {
     firstName: string;
     lastName: string;
     email: string;
   }) => {
+    console.log('handleSubmit called', { 
+      values, 
+      photoUri, 
+      userId: user?.id,
+      hasPhoto: !!photoUri,
+      hasUser: !!user?.id
+    });
+    
     if (!photoUri) {
+      console.log('❌ No photo URI - returning early');
       Alert.alert('Photo Required', 'Please upload a profile photo');
       return;
     }
 
+    if (!user?.id) {
+      console.log('❌ No user ID - returning early');
+      Alert.alert('Error', 'User not found. Please try logging in again.');
+      return;
+    }
+
+    console.log('✅ Starting upload process');
     setUploading(true);
 
     try {
-      // Upload image to cms.file_storage first
+      // Step 1: Upload image to storage bucket
+      console.log('📤 Step 1: Fetching image from URI:', photoUri);
       const response = await fetch(photoUri);
+      if (!response.ok) {
+        console.error('❌ Failed to fetch image:', response.status, response.statusText);
+        throw new Error('Failed to load image');
+      }
+      console.log('✅ Image fetched successfully');
+      
       const blob = await response.blob();
-      const fileExt = photoUri.split('.').pop();
-      const fileName = `${user?.id}-${Date.now()}.${fileExt}`;
-      const filePath = `vendor-images/${fileName}`;
+      console.log('✅ Blob created, size:', blob.size);
+      
+      const fileExt = photoUri.split('.').pop() || 'jpg';
+      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+      const filePath = `profile-photos/${fileName}`;
+      console.log('📤 Step 2: Uploading to storage:', filePath);
 
       // Upload to storage bucket
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('vendor-images')  // Adjust bucket name as needed
+      const { error: uploadError } = await supabase.storage
+        .from('profile_image')
         .upload(filePath, blob);
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        console.error('❌ Storage upload error:', uploadError);
+        throw uploadError;
+      }
+      console.log('✅ Image uploaded to storage');
 
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('vendor-images')
-        .getPublicUrl(filePath);
-
-      // Create file_storage record
-      const { data: fileData, error: fileError } = await supabase
-        .from('file_storage')  // Table in cms schema
+      // Step 2: Create file_storage record
+      console.log('📤 Step 3: Creating file_storage record');
+      const { data: fileData, error: fileError } = await supabaseCms
+        .from('file_storage')
         .insert({
-          file_url: urlData.publicUrl,
+          original_filename: fileName,
+          stored_filename: fileName,
           file_path: filePath,
-          // Add other required fields for file_storage table
+          file_size: blob.size,
+          mime_type: blob.type || `image/${fileExt}`,
+          file_extension: fileExt,
+          storage_provider: 'supabase',
+          storage_bucket: 'profile_image',
+          upload_status: 'completed',
+          uploaded_by_type: 'vendor',
+          uploaded_by_id: user?.id,
         })
         .select()
         .single();
 
-      if (fileError) throw fileError;
+      if (fileError) {
+        console.error('❌ file_storage insert error:', fileError);
+        throw fileError;
+      }
+      console.log('✅ file_storage record created:', fileData?.id);
 
-      // Now update vendors table with image_file_id
-      const { error } = await supabase
-        .from('vendors')  // Changed from user_profiles
+      // Step 3: Update vendors table with image_file_id
+      console.log('📤 Step 4: Updating vendors table');
+      const { error: vendorError } = await supabaseCore
+        .from('vendors')
         .update({
           first_name: values.firstName,
           last_name: values.lastName,
           email: values.email,
-          image_file_id: fileData.id,  // Changed from profile_photo_url
-          // Removed: is_profile_complete
+          image_file_id: fileData.id,
         })
         .eq('id', user?.id);
 
-      if (error) throw error;
+      if (vendorError) {
+        console.error('❌ vendors update error:', vendorError);
+        throw vendorError;
+      }
+      console.log('✅ vendors table updated');
 
+      // Step 4: Create vendor_verification_documents entry for profile photo
+      // First, we need to find or create a document type for profile photos
+      // You may need to query for an existing document type or create one
+      // For now, assuming there's a document type with type_code 'profile_photo'
+      const { data: docTypeData } = await supabaseCore
+        .from('document_types')
+        .select('id')
+        .eq('type_code', 'profile_photo')
+        .maybeSingle();
+
+      if (docTypeData) {
+        // Create verification document entry
+        const { error: verificationDocError } = await supabaseCms
+          .from('vendor_verification_documents')
+          .insert({
+            vendor_id: user?.id,
+            document_type_id: docTypeData.id,
+            file_id: fileData.id,
+            verification_status: 'pending',
+            uploaded_at: new Date().toISOString(),
+          });
+
+        // Don't throw error if this fails - it's optional tracking
+        if (verificationDocError) {
+          console.warn('Failed to create verification document entry:', verificationDocError);
+        }
+      }
+
+      console.log('📤 Step 5: Refreshing profile');
       await refreshProfile();
+      
+      // Small delay to ensure profile is refreshed
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      console.log('✅ All steps completed, navigating to business-registration');
       router.replace('/business-registration');
     } catch (error: any) {
-      Alert.alert('Error', error.message);
+      console.error('❌ Profile submission error:', error);
+      console.error('Error details:', {
+        message: error.message,
+        details: error.details,
+        code: error.code,
+        hint: error.hint,
+        fullError: error
+      });
+      Alert.alert(
+        'Error', 
+        error.message || error.details || error.hint || 'Failed to save profile. Please try again.'
+      );
     } finally {
+      console.log('🔄 Setting uploading to false');
       setUploading(false);
     }
   };
@@ -184,15 +295,20 @@ export default function CompleteProfileScreen() {
         {({
           handleChange,
           handleBlur,
-          handleSubmit,
+          handleSubmit: formikHandleSubmit,
           values,
           errors,
           touched,
+          isValid,
         }) => (
           <>
             <TouchableOpacity
               style={styles.photoContainer}
-              onPress={showImageOptions}
+              onPress={() => {
+                console.log('Photo container pressed');
+                showImageOptions();
+              }}
+              activeOpacity={0.7}
             >
               {photoUri ? (
                 <Image source={{ uri: photoUri }} style={styles.photo} />
@@ -203,6 +319,7 @@ export default function CompleteProfileScreen() {
                 </View>
               )}
             </TouchableOpacity>
+            
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>
@@ -214,6 +331,10 @@ export default function CompleteProfileScreen() {
                 value={values.firstName}
                 onChangeText={handleChange('firstName')}
                 onBlur={handleBlur('firstName')}
+                returnKeyType="next"
+                onSubmitEditing={() => {
+                  // Focus next field or submit if last field
+                }}
               />
               {touched.firstName && errors.firstName && (
                 <Text style={styles.errorText}>{errors.firstName}</Text>
@@ -230,6 +351,7 @@ export default function CompleteProfileScreen() {
                 value={values.lastName}
                 onChangeText={handleChange('lastName')}
                 onBlur={handleBlur('lastName')}
+                returnKeyType="next"
               />
               {touched.lastName && errors.lastName && (
                 <Text style={styles.errorText}>{errors.lastName}</Text>
@@ -248,6 +370,8 @@ export default function CompleteProfileScreen() {
                 value={values.email}
                 onChangeText={handleChange('email')}
                 onBlur={handleBlur('email')}
+                returnKeyType="done"
+                onSubmitEditing={() => formikHandleSubmit()}
               />
               {touched.email && errors.email && (
                 <Text style={styles.errorText}>{errors.email}</Text>
@@ -256,8 +380,22 @@ export default function CompleteProfileScreen() {
 
             <TouchableOpacity
               style={[styles.button, uploading && styles.buttonDisabled]}
-              onPress={() => handleSubmit()}
+              onPress={(e) => {
+                console.log('Continue button pressed', { 
+                  uploading, 
+                  values, 
+                  errors, 
+                  touched, 
+                  isValid,
+                  hasErrors: Object.keys(errors).length > 0
+                });
+                e?.preventDefault?.();
+                e?.stopPropagation?.();
+                // Trigger Formik validation and submit
+                formikHandleSubmit();
+              }}
               disabled={uploading}
+              activeOpacity={0.8}
             >
               {uploading ? (
                 <ActivityIndicator color="#fff" />
@@ -295,6 +433,8 @@ const styles = StyleSheet.create({
   photoContainer: {
     alignSelf: 'center',
     marginBottom: 32,
+    cursor: 'pointer',
+    zIndex: 1,
   },
   photo: {
     width: 120,
@@ -343,6 +483,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     marginTop: 12,
+    cursor: 'pointer',
+    zIndex: 1,
   },
   buttonDisabled: {
     opacity: 0.6,

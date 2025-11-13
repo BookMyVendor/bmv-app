@@ -14,7 +14,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Phone, Mail, Calendar, MapPin, Users, DollarSign, Building2, CreditCard as Edit, Trash2, Clock, Tag, FileText, MessageSquare, CircleCheck as CheckCircle, Circle as XCircle } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
+import { supabaseCore, supabaseCrm } from '@/lib/supabase';
 import { Lead, LeadActivity, STATUS_OPTIONS, PRIORITY_OPTIONS } from '@/types/leads';
 import { getTimeAgo, formatEventDate } from '@/lib/timeUtils';
 
@@ -43,10 +43,10 @@ export default function LeadDetailScreen() {
     try {
       setLoading(true);
 
-      const { data: businessData } = await supabase
-        .from('businesses')
-        .select('id')
-        .eq('user_id', user?.id);
+      const { data: businessData } = await supabaseCore
+        .from('vendor_businesses')
+        .select('id, business_name')
+        .eq('vendor_id', user?.id);
 
       if (!businessData || businessData.length === 0) {
         Alert.alert('Error', 'No businesses found');
@@ -55,33 +55,30 @@ export default function LeadDetailScreen() {
       }
 
       const businessIds = businessData.map((b) => b.id);
+      const businessMap = new Map(businessData.map((b) => [b.id, b.business_name]));
 
-      const { data, error } = await supabase
-        .from('leads')
-        .select(
-          `
-          *,
-          businesses (
-            business_name,
-            id
-          )
-        `
-        )
+      const { data, error } = await supabaseCrm
+        .from('customer_leads')
+        .select('*')
         .eq('id', id)
         .in('business_id', businessIds)
         .maybeSingle();
 
       if (error) throw error;
 
-      if (!data) {
+      if (data) {
+        // Add business_name to the lead data
+        const leadWithBusiness = {
+          ...data,
+          business_name: businessMap.get(data.business_id) || 'Unknown Business',
+        };
+        setLead(leadWithBusiness as Lead);
+      } else {
         Alert.alert('Error', 'Lead not found');
         router.back();
-        return;
       }
-
-      setLead(data);
     } catch (error) {
-      console.error('Error fetching lead:', error);
+      console.error('Error fetching lead details:', error);
       Alert.alert('Error', 'Failed to load lead details');
     } finally {
       setLoading(false);
@@ -90,7 +87,8 @@ export default function LeadDetailScreen() {
 
   const fetchActivities = async () => {
     try {
-      const { data, error } = await supabase
+      // Note: lead_activities table might be in crm schema - update if needed
+      const { data, error } = await supabaseCrm
         .from('lead_activities')
         .select('*')
         .eq('lead_id', id)
@@ -129,7 +127,8 @@ export default function LeadDetailScreen() {
 
   const logActivity = async (type: string, title: string, description: string) => {
     try {
-      await supabase.from('lead_activities').insert({
+      // Note: lead_activities table might be in crm schema - update if needed
+      await supabaseCrm.from('lead_activities').insert({
         lead_id: id,
         activity_type: type,
         title,
@@ -146,9 +145,9 @@ export default function LeadDetailScreen() {
     if (!lead) return;
 
     try {
-      const { error } = await supabase
-        .from('leads')
-        .update({ status: newStatus })
+      const { error } = await supabaseCrm
+        .from('customer_leads')
+        .update({ lead_status: newStatus })
         .eq('id', lead.id);
 
       if (error) throw error;
@@ -156,10 +155,10 @@ export default function LeadDetailScreen() {
       await logActivity(
         'status_change',
         'Status changed',
-        `Status changed from ${lead.status} to ${newStatus}`
+        `Status changed from ${lead.lead_status || lead.status} to ${newStatus}`
       );
 
-      setLead({ ...lead, status: newStatus as any });
+      setLead({ ...lead, lead_status: newStatus as any, status: newStatus as any });
       Alert.alert('Success', 'Status updated successfully');
     } catch (error) {
       console.error('Error updating status:', error);
@@ -173,7 +172,8 @@ export default function LeadDetailScreen() {
     try {
       setSavingNote(true);
 
-      await supabase.from('lead_notes').insert({
+      // Note: lead_notes table might be in crm schema - update if needed
+      await supabaseCrm.from('lead_notes').insert({
         lead_id: lead.id,
         content: newNote.trim(),
         created_by: user?.id,
@@ -203,7 +203,7 @@ export default function LeadDetailScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const { error } = await supabase.from('leads').delete().eq('id', id);
+              const { error } = await supabaseCrm.from('customer_leads').delete().eq('id', id);
 
               if (error) throw error;
 
@@ -228,9 +228,15 @@ export default function LeadDetailScreen() {
     if (!lead || !editingField) return;
 
     try {
-      const { error } = await supabase
-        .from('leads')
-        .update({ [editingField]: editValue })
+      const updateData: any = { [editingField]: editValue };
+      // Map status field to lead_status if needed
+      if (editingField === 'status') {
+        updateData.lead_status = editValue;
+      }
+      
+      const { error } = await supabaseCrm
+        .from('customer_leads')
+        .update(updateData)
         .eq('id', lead.id);
 
       if (error) throw error;
@@ -312,7 +318,7 @@ export default function LeadDetailScreen() {
         <View style={styles.heroHeader}>
           <View style={styles.heroLeft}>
             <Text style={styles.heroName}>{lead.customer_name}</Text>
-            <Text style={styles.heroBusiness}>{lead.businesses.business_name}</Text>
+            <Text style={styles.heroBusiness}>{lead.business_name}</Text>
           </View>
           <View style={styles.badges}>
             <View
