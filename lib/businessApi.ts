@@ -1,7 +1,9 @@
 import { supabaseCore, supabaseCms } from './supabase';
 import * as ImagePicker from 'expo-image-picker';
-import { File } from 'expo-file-system';
+import * as FileSystem from 'expo-file-system';
 import { compressAndConvertToBase64, validateImageUri } from './imageCompression';
+import { DocumentFile, getMimeType, isImageFile, isPdfFile, validateFileType } from './documentUpload';
+import { Platform } from 'react-native';
 
 export interface Offer {
   id: string;
@@ -85,14 +87,30 @@ export const uploadImageToStorage = async (
       throw new Error('Invalid file URI provided');
     }
 
-    const file = new File(uri);
-    const fileInfo = await file.info();
-
-    if (!fileInfo.exists) {
-      throw new Error('File does not exist at the provided URI');
+    let base64Data: string;
+    if (Platform.OS === 'web') {
+      // On web, fetch and convert to base64
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const reader = new FileReader();
+      const dataUri = await new Promise<string>((resolve, reject) => {
+        reader.onloadend = () => {
+          if (typeof reader.result === 'string') {
+            resolve(reader.result);
+          } else {
+            reject(new Error('Failed to convert blob to data URI'));
+          }
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      base64Data = dataUri.includes(',') ? dataUri.split(',')[1] : dataUri;
+    } else {
+      // On mobile, use FileSystem
+      base64Data = await FileSystem.readAsStringAsync(uri, {
+        encoding: 'base64' as any,
+      });
     }
-
-    const base64Data = await file.base64();
 
     if (!base64Data) {
       throw new Error('Failed to read file data');
@@ -721,6 +739,361 @@ export const pickMultipleImages = async (): Promise<{
     return { uris, error: null };
   } catch (error) {
     return { uris: [], error: error as Error };
+  }
+};
+
+// Verification Document Interfaces
+export interface VerificationDocument {
+  id: string;
+  business_id: string;
+  document_type_id: string;
+  document_type_code: string;
+  document_type_name: string;
+  file_id: string;
+  file_url: string | null;
+  file_name: string | null;
+  mime_type: string | null;
+  verification_status: 'pending' | 'verified' | 'rejected';
+  uploaded_at: string;
+}
+
+export interface UploadDocumentData {
+  documentTypeCode: string;
+  file: DocumentFile;
+}
+
+/**
+ * Uploads a verification document for a business
+ */
+export const uploadVerificationDocument = async (
+  businessId: string,
+  documentTypeCode: string,
+  file: DocumentFile
+): Promise<{ data: VerificationDocument | null; error: Error | null }> => {
+  try {
+    // Validate file type
+    const mimeType = file.type || getMimeType(file.uri, file.name);
+    if (!mimeType || !validateFileType(mimeType)) {
+      throw new Error('Invalid file type. Only images (jpg, png) and PDFs are allowed.');
+    }
+
+    // Validate file size
+    if (file.size && file.size > 10 * 1024 * 1024) {
+      throw new Error('File size exceeds 10MB limit');
+    }
+
+    // Get document type ID
+    const { data: docType, error: docTypeError } = await supabaseCore
+      .from('document_types')
+      .select('id, display_name')
+      .eq('type_code', documentTypeCode)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (docTypeError) throw docTypeError;
+    if (!docType) {
+      throw new Error(`Document type '${documentTypeCode}' not found`);
+    }
+
+    // Process file based on type
+    let fileData: Uint8Array;
+    let fileName: string;
+    let contentType: string;
+    let fileExtension: string;
+
+    if (isImageFile(mimeType)) {
+      // For images, compress and convert to base64
+      const { base64, error: compressionError } = await compressAndConvertToBase64(file.uri);
+      if (compressionError) throw compressionError;
+      if (!base64) throw new Error('Failed to process image');
+
+      const base64Data = base64.includes(',') ? base64.split(',')[1] : base64;
+      const byteCharacters = atob(base64Data);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      fileData = new Uint8Array(byteNumbers);
+
+      fileExtension = mimeType.includes('png') ? 'png' : 'jpg';
+      fileName = `verification-${businessId}-${documentTypeCode}-${Date.now()}.${fileExtension}`;
+      contentType = mimeType;
+    } else if (isPdfFile(mimeType)) {
+      // For PDFs, read as base64 and convert to Uint8Array
+      let base64Data: string;
+
+      if (file.uri.startsWith('data:')) {
+        base64Data = file.uri.includes(',') ? file.uri.split(',')[1] : file.uri;
+      } else {
+        // For file:// URIs or blob: URIs, read the file
+        if (Platform.OS === 'web') {
+          // On web, fetch the blob and convert to base64
+          try {
+            const response = await fetch(file.uri);
+            const blob = await response.blob();
+            const reader = new FileReader();
+            base64Data = await new Promise<string>((resolve, reject) => {
+              reader.onloadend = () => {
+                if (typeof reader.result === 'string') {
+                  const dataUri = reader.result;
+                  resolve(dataUri.includes(',') ? dataUri.split(',')[1] : dataUri);
+                } else {
+                  reject(new Error('Failed to convert blob to base64'));
+                }
+              };
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+          } catch (blobError) {
+            throw new Error('Failed to read PDF file');
+          }
+        } else {
+          // On mobile, use FileSystem
+          try {
+            const base64 = await FileSystem.readAsStringAsync(file.uri, {
+              encoding: 'base64' as any,
+            });
+            base64Data = base64;
+          } catch (fsError) {
+            throw new Error('Failed to read PDF file');
+          }
+        }
+      }
+
+      const byteCharacters = atob(base64Data);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      fileData = new Uint8Array(byteNumbers);
+
+      fileExtension = 'pdf';
+      fileName = `verification-${businessId}-${documentTypeCode}-${Date.now()}.${fileExtension}`;
+      contentType = 'application/pdf';
+    } else {
+      throw new Error('Unsupported file type');
+    }
+
+    // Upload to storage (using vendor-media bucket)
+    const { data: uploadData, error: uploadError } = await supabaseCore.storage
+      .from('vendor-media')
+      .upload(fileName, fileData, {
+        contentType,
+        upsert: false,
+      });
+
+    if (uploadError) throw uploadError;
+    if (!uploadData) throw new Error('Upload failed');
+
+    // Create file_storage record
+    const { data: fileStorageData, error: fileStorageError } = await supabaseCms
+      .from('file_storage')
+      .insert({
+        original_filename: file.name || fileName,
+        stored_filename: fileName,
+        file_path: uploadData.path,
+        file_size: fileData.length,
+        mime_type: contentType,
+        file_extension: fileExtension,
+        storage_provider: 'supabase',
+        storage_bucket: 'vendor-media',
+        upload_status: 'completed',
+        uploaded_by_type: 'vendor',
+        uploaded_by_id: businessId,
+      })
+      .select()
+      .single();
+
+    if (fileStorageError) throw fileStorageError;
+    if (!fileStorageData) throw new Error('Failed to create file storage record');
+
+    // Create verification document record
+    const { data: verificationDocData, error: verificationDocError } = await supabaseCms
+      .from('vendor_verification_documents')
+      .insert({
+        business_id: businessId,
+        document_type_id: docType.id,
+        file_id: fileStorageData.id,
+        verification_status: 'pending',
+        uploaded_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (verificationDocError) throw verificationDocError;
+    if (!verificationDocData) throw new Error('Failed to create verification document record');
+
+    // Get public URL
+    const { data: urlData } = supabaseCore.storage
+      .from('vendor-media')
+      .getPublicUrl(uploadData.path);
+
+    const result: VerificationDocument = {
+      id: verificationDocData.id,
+      business_id: businessId,
+      document_type_id: docType.id,
+      document_type_code: documentTypeCode,
+      document_type_name: docType.display_name,
+      file_id: fileStorageData.id,
+      file_url: urlData.publicUrl,
+      file_name: file.name || fileName,
+      mime_type: contentType,
+      verification_status: verificationDocData.verification_status as 'pending' | 'verified' | 'rejected',
+      uploaded_at: verificationDocData.uploaded_at,
+    };
+
+    return { data: result, error: null };
+  } catch (error) {
+    return {
+      data: null,
+      error: error instanceof Error ? error : new Error('Failed to upload verification document'),
+    };
+  }
+};
+
+/**
+ * Uploads multiple verification documents for a business
+ */
+export const uploadMultipleVerificationDocuments = async (
+  businessId: string,
+  documents: UploadDocumentData[]
+): Promise<{ data: VerificationDocument[]; errors: Error[] }> => {
+  const results: VerificationDocument[] = [];
+  const errors: Error[] = [];
+
+  for (const doc of documents) {
+    const { data, error } = await uploadVerificationDocument(
+      businessId,
+      doc.documentTypeCode,
+      doc.file
+    );
+
+    if (error) {
+      errors.push(error);
+    } else if (data) {
+      results.push(data);
+    }
+  }
+
+  return { data: results, errors };
+};
+
+/**
+ * Gets all verification documents for a business
+ */
+export const getBusinessVerificationDocuments = async (
+  businessId: string
+): Promise<{ data: VerificationDocument[] | null; error: Error | null }> => {
+  try {
+    const { data, error } = await supabaseCms
+      .from('vendor_verification_documents')
+      .select(`
+        id,
+        business_id,
+        document_type_id,
+        file_id,
+        verification_status,
+        uploaded_at,
+        document_types:document_type_id (
+          type_code,
+          display_name
+        ),
+        file_storage:file_id (
+          file_path,
+          storage_bucket,
+          original_filename,
+          mime_type
+        )
+      `)
+      .eq('business_id', businessId)
+      .order('uploaded_at', { ascending: false });
+
+    if (error) throw error;
+
+    const transformedData: VerificationDocument[] = (data || []).map((item: any) => {
+      const docType = item.document_types;
+      const fileStorage = item.file_storage;
+
+      let fileUrl: string | null = null;
+      if (fileStorage) {
+        const { data: urlData } = supabaseCore.storage
+          .from(fileStorage.storage_bucket || 'vendor-media')
+          .getPublicUrl(fileStorage.file_path);
+        fileUrl = urlData.publicUrl;
+      }
+
+      return {
+        id: item.id,
+        business_id: item.business_id,
+        document_type_id: item.document_type_id,
+        document_type_code: docType?.type_code || '',
+        document_type_name: docType?.display_name || '',
+        file_id: item.file_id,
+        file_url: fileUrl,
+        file_name: fileStorage?.original_filename || null,
+        mime_type: fileStorage?.mime_type || null,
+        verification_status: item.verification_status as 'pending' | 'verified' | 'rejected',
+        uploaded_at: item.uploaded_at,
+      };
+    });
+
+    return { data: transformedData, error: null };
+  } catch (error) {
+    return {
+      data: null,
+      error: error instanceof Error ? error : new Error('Failed to fetch verification documents'),
+    };
+  }
+};
+
+/**
+ * Deletes a verification document
+ */
+export const deleteVerificationDocument = async (
+  documentId: string
+): Promise<{ error: Error | null }> => {
+  try {
+    // First, get the document to find the file_id
+    const { data: doc, error: fetchError } = await supabaseCms
+      .from('vendor_verification_documents')
+      .select('file_id, file_storage:file_id(storage_bucket, file_path)')
+      .eq('id', documentId)
+      .single();
+
+    if (fetchError) throw fetchError;
+    if (!doc) throw new Error('Document not found');
+
+    // Delete the verification document record (this should cascade delete file_storage if configured)
+    const { error: deleteError } = await supabaseCms
+      .from('vendor_verification_documents')
+      .delete()
+      .eq('id', documentId);
+
+    if (deleteError) throw deleteError;
+
+    // Delete from storage if file_storage exists
+    if (doc.file_storage) {
+      const fileStorage = doc.file_storage as any;
+      const bucket = fileStorage.storage_bucket || 'vendor-media';
+      const filePath = fileStorage.file_path;
+
+      if (filePath) {
+        const { error: storageError } = await supabaseCore.storage
+          .from(bucket)
+          .remove([filePath]);
+
+        // Log storage error but don't fail if file doesn't exist
+        if (storageError) {
+          console.warn('Failed to delete file from storage:', storageError);
+        }
+      }
+    }
+
+    return { error: null };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error : new Error('Failed to delete verification document'),
+    };
   }
 };
 

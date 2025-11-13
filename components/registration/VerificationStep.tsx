@@ -1,33 +1,229 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   TextInput,
   StyleSheet,
   ScrollView,
+  TouchableOpacity,
+  Image,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
+import { Upload, X, FileText, Image as ImageIcon } from 'lucide-react-native';
+import { supabaseCore } from '@/lib/supabase';
+import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '@/lib/documentUpload';
 
 interface VerificationStepProps {
   data: any;
   onUpdate: (data: any) => void;
 }
 
+interface DocumentType {
+  id: string;
+  type_code: string;
+  display_name: string;
+}
+
+interface DocumentGroup {
+  typeCode: string;
+  typeName: string;
+  files: DocumentFile[];
+}
+
 export default function VerificationStep({
   data,
   onUpdate,
 }: VerificationStepProps) {
+  const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([]);
+  const [loadingTypes, setLoadingTypes] = useState(true);
+  const [uploading, setUploading] = useState<string | null>(null); // typeCode of document being uploaded
+
+  // Document types we need to support
+  const requiredDocumentTypeCodes = ['gst', 'aadhaar', 'bank_statement', 'general', 'business_license', 'pan'];
+
+  // Initialize document groups from data or create empty ones
+  const [documentGroups, setDocumentGroups] = useState<DocumentGroup[]>(() => {
+    return requiredDocumentTypeCodes.map((code) => ({
+      typeCode: code,
+      typeName: '',
+      files: data.verificationDocuments?.[code] || [],
+    }));
+  });
+
+  useEffect(() => {
+    loadDocumentTypes();
+  }, []);
+
+  const loadDocumentTypes = async () => {
+    try {
+      setLoadingTypes(true);
+      const { data: types, error } = await supabaseCore
+        .from('document_types')
+        .select('id, type_code, display_name')
+        .in('type_code', requiredDocumentTypeCodes)
+        .eq('is_active', true);
+
+      if (error) {
+        console.error('Error loading document types:', error);
+        return;
+      }
+
+      if (types) {
+        setDocumentTypes(types);
+        // Update document groups with display names
+        setDocumentGroups((prev) =>
+          prev.map((group) => {
+            const type = types.find((t) => t.type_code === group.typeCode);
+            return {
+              ...group,
+              typeName: type?.display_name || group.typeCode,
+            };
+          })
+        );
+      }
+    } catch (error) {
+      console.error('Error loading document types:', error);
+    } finally {
+      setLoadingTypes(false);
+    }
+  };
+
   const handleChange = (field: string, value: string) => {
     onUpdate({ [field]: value });
   };
+
+  const handlePickDocuments = async (typeCode: string) => {
+    try {
+      setUploading(typeCode);
+      const { files, error } = await pickDocuments(true);
+
+      if (error) {
+        Alert.alert('Error', error.message);
+        return;
+      }
+
+      if (files.length === 0) {
+        return;
+      }
+
+      // Add files to the appropriate document group
+      setDocumentGroups((prev) => {
+        const updated = prev.map((group) => {
+          if (group.typeCode === typeCode) {
+            return {
+              ...group,
+              files: [...group.files, ...files],
+            };
+          }
+          return group;
+        });
+
+        // Update parent data
+        const documentsMap: Record<string, DocumentFile[]> = {};
+        updated.forEach((group) => {
+          documentsMap[group.typeCode] = group.files;
+        });
+        onUpdate({ verificationDocuments: documentsMap });
+
+        return updated;
+      });
+    } catch (error) {
+      Alert.alert('Error', 'Failed to pick documents');
+      console.error('Error picking documents:', error);
+    } finally {
+      setUploading(null);
+    }
+  };
+
+  const handleRemoveDocument = (typeCode: string, index: number) => {
+    setDocumentGroups((prev) => {
+      const updated = prev.map((group) => {
+        if (group.typeCode === typeCode) {
+          const newFiles = [...group.files];
+          newFiles.splice(index, 1);
+          return {
+            ...group,
+            files: newFiles,
+          };
+        }
+        return group;
+      });
+
+      // Update parent data
+      const documentsMap: Record<string, DocumentFile[]> = {};
+      updated.forEach((group) => {
+        documentsMap[group.typeCode] = group.files;
+      });
+      onUpdate({ verificationDocuments: documentsMap });
+
+      return updated;
+    });
+  };
+
+  const renderDocumentPreview = (file: DocumentFile, typeCode: string, index: number) => {
+    const isImage = isImageFile(file.type || '');
+    const isPdf = isPdfFile(file.type || '');
+
+    return (
+      <View key={index} style={styles.documentPreview}>
+        {isImage && file.uri ? (
+          <Image source={{ uri: file.uri }} style={styles.documentImage} />
+        ) : (
+          <View style={styles.documentIcon}>
+            <FileText size={24} color="#666" />
+          </View>
+        )}
+        <View style={styles.documentInfo}>
+          <Text style={styles.documentName} numberOfLines={1}>
+            {file.name || (isPdf ? 'PDF Document' : 'Image')}
+          </Text>
+          {file.size && (
+            <Text style={styles.documentSize}>
+              {(file.size / 1024).toFixed(1)} KB
+            </Text>
+          )}
+        </View>
+        <TouchableOpacity
+          style={styles.removeButton}
+          onPress={() => handleRemoveDocument(typeCode, index)}
+        >
+          <X size={16} color="#fff" />
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  if (loadingTypes) {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Loading document types...</Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.infoBox}>
         <Text style={styles.infoTitle}>Business Verification</Text>
         <Text style={styles.infoText}>
-          Adding verification details helps build trust with customers. These
-          fields are optional but recommended.
+          Adding verification details helps build trust with customers. PAN is required, other documents are optional.
         </Text>
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.label}>PAN *</Text>
+        <Text style={styles.hint}>Required - Permanent Account Number</Text>
+        <TextInput
+          style={styles.input}
+          value={data.panNumber || ''}
+          onChangeText={(text) => handleChange('panNumber', text)}
+          placeholder="Enter PAN (e.g., ABCDE1234F)"
+          placeholderTextColor="#999"
+          autoCapitalize="characters"
+          maxLength={10}
+        />
       </View>
 
       <View style={styles.field}>
@@ -44,22 +240,45 @@ export default function VerificationStep({
         />
       </View>
 
-      <View style={styles.field}>
-        <Text style={styles.label}>Business Registration Number</Text>
-        <Text style={styles.hint}>
-          Optional - CIN, PAN, or other registration number
-        </Text>
-        <TextInput
-          style={styles.input}
-          value={data.businessRegistrationNumber || ''}
-          onChangeText={(text) =>
-            handleChange('businessRegistrationNumber', text)
-          }
-          placeholder="Enter business registration number"
-          placeholderTextColor="#999"
-          autoCapitalize="characters"
-        />
-      </View>
+      {/* Document Upload Sections */}
+      {documentGroups.map((group) => {
+        const typeName = group.typeName || group.typeCode;
+        const isUploading = uploading === group.typeCode;
+
+        return (
+          <View key={group.typeCode} style={styles.field}>
+            <Text style={styles.label}>{typeName}</Text>
+            <Text style={styles.hint}>
+              Optional - Upload images (jpg, png) or PDF files (max 10MB each)
+            </Text>
+
+            {/* Uploaded Documents */}
+            {group.files.length > 0 && (
+              <View style={styles.documentsList}>
+                {group.files.map((file, index) =>
+                  renderDocumentPreview(file, group.typeCode, index)
+                )}
+              </View>
+            )}
+
+            {/* Upload Button */}
+            <TouchableOpacity
+              style={[styles.uploadButton, isUploading && styles.uploadButtonDisabled]}
+              onPress={() => handlePickDocuments(group.typeCode)}
+              disabled={isUploading}
+            >
+              {isUploading ? (
+                <ActivityIndicator size="small" color="#007AFF" />
+              ) : (
+                <Upload size={20} color="#007AFF" />
+              )}
+              <Text style={styles.uploadButtonText}>
+                {isUploading ? 'Uploading...' : `Add ${typeName}`}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        );
+      })}
 
       <View style={styles.tipBox}>
         <Text style={styles.tipTitle}>💡 Why verify?</Text>
@@ -82,8 +301,17 @@ const styles = StyleSheet.create({
   content: {
     padding: 24,
   },
+  centerContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#666',
+  },
   field: {
-    marginBottom: 20,
+    marginBottom: 24,
   },
   label: {
     fontSize: 14,
@@ -105,6 +333,78 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     fontSize: 16,
     color: '#1a1a1a',
+  },
+  uploadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#f0f7ff',
+    borderWidth: 1,
+    borderColor: '#007AFF',
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginTop: 8,
+  },
+  uploadButtonDisabled: {
+    opacity: 0.6,
+  },
+  uploadButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  documentsList: {
+    marginTop: 8,
+    marginBottom: 8,
+    gap: 8,
+  },
+  documentPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8f8f8',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  documentImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 6,
+    backgroundColor: '#e0e0e0',
+  },
+  documentIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 6,
+    backgroundColor: '#e0e0e0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  documentInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  documentName: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#1a1a1a',
+    marginBottom: 2,
+  },
+  documentSize: {
+    fontSize: 12,
+    color: '#666',
+  },
+  removeButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#ff3b30',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   infoBox: {
     backgroundColor: '#f0f7ff',

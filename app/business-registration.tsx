@@ -16,7 +16,7 @@ import ServicesExperienceStep from '@/components/registration/ServicesExperience
 import LocationCoverageStep from '@/components/registration/LocationCoverageStep';
 import VerificationStep from '@/components/registration/VerificationStep';
 import PortfolioSocialStep from '@/components/registration/PortfolioSocialStep';
-import { pickMultipleImages, uploadMultipleBusinessImages } from '@/lib/businessApi';
+import { pickMultipleImages, uploadMultipleBusinessImages, uploadMultipleVerificationDocuments, UploadDocumentData } from '@/lib/businessApi';
 import { INDIAN_STATES } from '@/constants/indianStates';
 import { TextInput } from '@/components/TextInput';
 import { Dropdown } from '@/components/Dropdown';
@@ -27,8 +27,9 @@ interface BusinessData {
   contactPersonRole?: string; // Add this
   email: string;
   phoneNumber: string;
-  vendorServiceCategory: string;
-  eventTypes: string[];
+  selectedRootCategoryId?: string | null;
+  selectedCategoryIds?: string[];
+  selectedEventIds?: string[];
   businessDescription: string;
   yearsOfExperience: string;
   businessAddress: string;
@@ -38,7 +39,8 @@ interface BusinessData {
   serviceRadiusKm?: number; // Add this
   operatingLocations?: string[]; // Add this (for future use)
   gstNumber: string;
-  businessRegistrationNumber: string;
+  panNumber: string; // Changed from businessRegistrationNumber
+  verificationDocuments?: Record<string, any[]>; // Document files by type code
   websiteUrl: string;
   instagramUrl: string;
   facebookUrl: string;
@@ -73,6 +75,13 @@ export default function BusinessRegistrationScreen() {
   };
 
   const handleSubmit = async () => {
+    // Validate PAN is provided
+    if (!businessData.panNumber || !businessData.panNumber.trim()) {
+      Alert.alert('Validation Error', 'PAN is required. Please enter your PAN number.');
+      setSubmitting(false);
+      return;
+    }
+
     setSubmitting(true);
 
     try {
@@ -116,7 +125,7 @@ export default function BusinessRegistrationScreen() {
           contact_person_name: businessData.contactPersonName,
           contact_person_phone: businessData.phoneNumber, // Add this line
           contact_person_role: businessData.contactPersonRole || null,
-          business_registration_number: businessData.businessRegistrationNumber || null,
+          business_registration_number: businessData.panNumber || null, // PAN stored in business_registration_number field
           website_url: businessData.websiteUrl || null,
           instagram_url: businessData.instagramUrl || null,
           facebook_url: businessData.facebookUrl || null,
@@ -149,44 +158,68 @@ export default function BusinessRegistrationScreen() {
         }
       }
 
-      // Step 4: Look up and insert category mappings
+      // Step 3.5: Upload verification documents if provided
+      if (businessData.verificationDocuments) {
+        try {
+          const documentsToUpload: UploadDocumentData[] = [];
+          
+          // Flatten all documents by type into upload format
+          Object.entries(businessData.verificationDocuments).forEach(([typeCode, files]) => {
+            if (Array.isArray(files) && files.length > 0) {
+              files.forEach((file) => {
+                documentsToUpload.push({
+                  documentTypeCode: typeCode,
+                  file: file,
+                });
+              });
+            }
+          });
+
+          if (documentsToUpload.length > 0) {
+            const { data: uploadedDocs, errors } = await uploadMultipleVerificationDocuments(
+              createdBusiness.id,
+              documentsToUpload
+            );
+
+            if (errors.length > 0) {
+              console.error('Some documents failed to upload:', errors);
+              // Don't fail the entire registration if documents fail
+            } else {
+              console.log(`Successfully uploaded ${uploadedDocs.length} verification documents`);
+            }
+          }
+        } catch (docError) {
+          console.error('Error uploading verification documents:', docError);
+          // Don't fail the entire registration if documents fail
+        }
+      }
+
+      // Step 4: Insert category mappings
       const categoryMappings = [];
 
-      if (businessData.vendorServiceCategory) {
-        const { data: businessCategory } = await supabaseCore
-          .from('categories')
-          .select('id')
-          .eq('name', businessData.vendorServiceCategory)
-          .eq('category_type', 'business')
-          .maybeSingle();
-
-        if (businessCategory) {
+      // Add selected business category IDs
+      if (businessData.selectedCategoryIds && businessData.selectedCategoryIds.length > 0) {
+        businessData.selectedCategoryIds.forEach((categoryId) => {
           categoryMappings.push({
             vendor_id: user?.id,
             business_id: createdBusiness.id,
-            category_id: businessCategory.id,
+            category_id: categoryId,
           });
-        }
+        });
       }
 
-      if (businessData.eventTypes && businessData.eventTypes.length > 0) {
-        const { data: eventCategories } = await supabaseCore
-          .from('categories')
-          .select('id')
-          .in('name', businessData.eventTypes)
-          .eq('category_type', 'event');
-
-        if (eventCategories && eventCategories.length > 0) {
-          eventCategories.forEach((category) => {
-            categoryMappings.push({
-              vendor_id: user?.id,
-              business_id: createdBusiness.id,
-              category_id: category.id,
-            });
+      // Add event category IDs
+      if (businessData.selectedEventIds && businessData.selectedEventIds.length > 0) {
+        businessData.selectedEventIds.forEach((categoryId: string) => {
+          categoryMappings.push({
+            vendor_id: user?.id,
+            business_id: createdBusiness.id,
+            category_id: categoryId,
           });
-        }
+        });
       }
 
+      // Insert all category mappings in a single batch
       if (categoryMappings.length > 0) {
         const { error: mappingError } = await supabaseCore
           .from('vendor_business_category_mappings')

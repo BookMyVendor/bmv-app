@@ -13,6 +13,7 @@ import {
   FlatList,
   Image,
   Dimensions,
+  Pressable,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,8 +28,14 @@ import {
   X,
   Tag,
   ZoomIn,
+  Check,
+  ChevronRight,
+  ChevronDown,
+  Upload,
+  FileText,
 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabaseCore } from '@/lib/supabase';
 import {
   getBusinessDetails,
   getOffers,
@@ -44,9 +51,14 @@ import {
   pickMultipleImages,
   uploadMultipleBusinessImages,
   setCoverImage,
+  getBusinessVerificationDocuments,
+  uploadVerificationDocument,
+  deleteVerificationDocument,
+  VerificationDocument,
   Offer,
   PortfolioImage,
 } from '@/lib/businessApi';
+import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '@/lib/documentUpload';
 
 type SectionType = 'offers' | 'gallery' | 'edit';
 
@@ -80,6 +92,22 @@ export default function BusinessDetailsScreen() {
 
   const [editData, setEditData] = useState<any>({});
   const [savingDetails, setSavingDetails] = useState(false);
+  const [verificationDocuments, setVerificationDocuments] = useState<VerificationDocument[]>([]);
+  const [loadingDocuments, setLoadingDocuments] = useState(false);
+  const [uploadingDocument, setUploadingDocument] = useState<string | null>(null); // document type code
+
+  // Category selection state
+  const [allBusinessCategories, setAllBusinessCategories] = useState<any[]>([]);
+  const [eventCategories, setEventCategories] = useState<any[]>([]);
+  const [selectedRootCategoryId, setSelectedRootCategoryId] = useState<string | null>(null);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  const [selectedEventIds, setSelectedEventIds] = useState<string[]>([]);
+  const [expandedCategoryIds, setExpandedCategoryIds] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState('');
+  const [eventSearchQuery, setEventSearchQuery] = useState('');
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+  const [loadingCategories, setLoadingCategories] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -104,6 +132,28 @@ export default function BusinessDetailsScreen() {
       setOffers(offersRes.data || []);
       setImages(imagesRes.data || []);
       setEditData(businessRes.data || {});
+
+      // Load categories first, then mappings
+      await loadCategories();
+      // Load existing category mappings (this will set selectedCategoryIds)
+      const { businessIds } = await loadCategoryMappings();
+      
+      // After mappings are loaded, determine root category
+      if (businessIds.length > 0) {
+        const selectedCats = allBusinessCategories.filter((cat) =>
+          businessIds.includes(cat.id)
+        );
+        const rootCat = selectedCats.find(
+          (cat) => cat.category_level === 1 || cat.parent_category_id === null
+        );
+        if (rootCat) {
+          setSelectedRootCategoryId(rootCat.id);
+          setExpandedCategoryIds(new Set([rootCat.id]));
+        }
+      }
+
+      // Load verification documents
+      await loadVerificationDocuments();
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to load business details');
     } finally {
@@ -112,10 +162,502 @@ export default function BusinessDetailsScreen() {
     }
   };
 
+  const loadCategoryMappings = async (): Promise<{ businessIds: string[]; eventIds: string[] }> => {
+    try {
+      const { data: mappings, error } = await supabaseCore
+        .from('vendor_business_category_mappings')
+        .select('category_id')
+        .eq('business_id', id);
+
+      if (error) {
+        console.error('Error loading category mappings:', error);
+        return { businessIds: [], eventIds: [] };
+      }
+
+      if (mappings && mappings.length > 0) {
+        const allCategoryIds = mappings.map((m) => m.category_id);
+
+        // Fetch categories to determine their types
+        const { data: categories, error: catError } = await supabaseCore
+          .from('categories')
+          .select('id, category_type, category_level, parent_category_id')
+          .in('id', allCategoryIds);
+
+        if (catError) {
+          console.error('Error loading categories:', catError);
+          return { businessIds: [], eventIds: [] };
+        }
+
+        // Separate business and event categories
+        const businessCategoryIds: string[] = [];
+        const eventCategoryIds: string[] = [];
+
+        categories?.forEach((cat) => {
+          if (cat.category_type === 'business') {
+            businessCategoryIds.push(cat.id);
+          } else if (cat.category_type === 'event') {
+            eventCategoryIds.push(cat.id);
+          }
+        });
+
+        setSelectedCategoryIds(businessCategoryIds);
+        setSelectedEventIds(eventCategoryIds);
+        
+        return { businessIds: businessCategoryIds, eventIds: eventCategoryIds };
+      }
+      
+      return { businessIds: [], eventIds: [] };
+    } catch (error) {
+      console.error('Error loading category mappings:', error);
+      return { businessIds: [], eventIds: [] };
+    }
+  };
+
+  const loadCategories = async () => {
+    try {
+      setLoadingCategories(true);
+
+      // Fetch all business categories with hierarchy info
+      const { data: businessCats, error: businessError } = await supabaseCore
+        .from('categories')
+        .select('id, name, icon, parent_category_id, category_level, sort_order')
+        .eq('category_type', 'business')
+        .eq('visible', true)
+        .order('sort_order', { ascending: true });
+
+      if (businessError) {
+        console.error('Error fetching business categories:', businessError);
+      } else {
+        setAllBusinessCategories(businessCats || []);
+      }
+
+      // Fetch only root level event categories
+      const { data: eventCats, error: eventError } = await supabaseCore
+        .from('categories')
+        .select('id, name, icon, parent_category_id, category_level, sort_order')
+        .eq('category_type', 'event')
+        .eq('visible', true)
+        .or('parent_category_id.is.null,category_level.eq.1')
+        .order('sort_order', { ascending: true });
+
+      if (eventError) {
+        console.error('Error fetching event categories:', eventError);
+      } else {
+        setEventCategories(eventCats || []);
+      }
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+    } finally {
+      setLoadingCategories(false);
+    }
+  };
+
   const onRefresh = () => {
     setRefreshing(true);
     loadData();
   };
+
+  // Build hierarchical tree structure
+  const buildCategoryTree = (categories: any[]): any[] => {
+    const categoryMap = new Map<string, any>();
+    const rootCategories: any[] = [];
+
+    // First pass: create all nodes
+    categories.forEach((cat) => {
+      categoryMap.set(cat.id, {
+        ...cat,
+        children: [],
+      });
+    });
+
+    // Second pass: build tree structure
+    categories.forEach((cat) => {
+      const node = categoryMap.get(cat.id)!;
+      if (cat.parent_category_id) {
+        const parent = categoryMap.get(cat.parent_category_id);
+        if (parent) {
+          parent.children.push(node);
+        }
+      } else {
+        rootCategories.push(node);
+      }
+    });
+
+    // Sort children by sort_order
+    const sortChildren = (nodes: any[]) => {
+      nodes.forEach((node) => {
+        node.children.sort((a: any, b: any) => {
+          const aOrder = allBusinessCategories.find((c) => c.id === a.id)?.sort_order ?? 0;
+          const bOrder = allBusinessCategories.find((c) => c.id === b.id)?.sort_order ?? 0;
+          return aOrder - bOrder;
+        });
+        sortChildren(node.children);
+      });
+    };
+
+    sortChildren(rootCategories);
+    return rootCategories;
+  };
+
+  // Get full path for a category
+  const getCategoryPath = (categoryId: string, categories: any[]): string => {
+    const categoryMap = new Map<string, any>();
+    categories.forEach((cat) => categoryMap.set(cat.id, cat));
+
+    const path: string[] = [];
+    let currentId: string | null = categoryId;
+
+    while (currentId) {
+      const cat = categoryMap.get(currentId);
+      if (!cat) break;
+      path.unshift(cat.name);
+      currentId = cat.parent_category_id;
+    }
+
+    return path.join(' > ');
+  };
+
+  // Filter categories based on search query
+  const filterCategories = (nodes: any[], query: string): any[] => {
+    if (!query.trim()) return nodes;
+
+    const lowerQuery = query.toLowerCase();
+    const filtered: any[] = [];
+
+    const matchesQuery = (node: any): boolean => {
+      return node.name.toLowerCase().includes(lowerQuery);
+    };
+
+    const filterNode = (node: any): any | null => {
+      const filteredChildren = node.children
+        .map(filterNode)
+        .filter((n: any): n is any => n !== null);
+
+      if (matchesQuery(node) || filteredChildren.length > 0) {
+        return {
+          ...node,
+          children: filteredChildren,
+        };
+      }
+      return null;
+    };
+
+    nodes.forEach((node) => {
+      const filteredNode = filterNode(node);
+      if (filteredNode) {
+        filtered.push(filteredNode);
+      }
+    });
+
+    return filtered;
+  };
+
+  // Build category tree
+  const categoryTree = React.useMemo(() => {
+    return buildCategoryTree(allBusinessCategories);
+  }, [allBusinessCategories]);
+
+  // Filter tree based on search
+  const filteredTree = React.useMemo(() => {
+    return filterCategories(categoryTree, searchQuery);
+  }, [categoryTree, searchQuery]);
+
+  // Handle root category selection
+  const handleRootSelection = (categoryId: string) => {
+    setSelectedRootCategoryId(categoryId);
+    // Clear all previous selections when root changes
+    setSelectedCategoryIds([]);
+    // Expand the selected root to show children
+    setExpandedCategoryIds(new Set([categoryId]));
+  };
+
+  // Handle child category selection
+  const toggleCategorySelection = (categoryId: string) => {
+    setSelectedCategoryIds((prev) => {
+      if (prev.includes(categoryId)) {
+        return prev.filter((id) => id !== categoryId);
+      } else {
+        // Find the category and expand it if it has children
+        const category = allBusinessCategories.find((c) => c.id === categoryId);
+        if (category) {
+          const hasChildren = allBusinessCategories.some(
+            (c) => c.parent_category_id === categoryId
+          );
+          if (hasChildren) {
+            setExpandedCategoryIds((expanded) => new Set([...expanded, categoryId]));
+          }
+        }
+        return [...prev, categoryId];
+      }
+    });
+  };
+
+  // Toggle category expansion
+  const toggleExpansion = (categoryId: string) => {
+    setExpandedCategoryIds((expanded) => {
+      const newExpanded = new Set(expanded);
+      if (newExpanded.has(categoryId)) {
+        newExpanded.delete(categoryId);
+      } else {
+        newExpanded.add(categoryId);
+      }
+      return newExpanded;
+    });
+  };
+
+  // Auto-expand selected categories with children
+  React.useEffect(() => {
+    setExpandedCategoryIds((currentExpanded) => {
+      const newExpanded = new Set(currentExpanded);
+      let changed = false;
+      selectedCategoryIds.forEach((categoryId) => {
+        const hasChildren = allBusinessCategories.some(
+          (c) => c.parent_category_id === categoryId
+        );
+        if (hasChildren && !newExpanded.has(categoryId)) {
+          newExpanded.add(categoryId);
+          changed = true;
+        }
+      });
+      return changed ? newExpanded : currentExpanded;
+    });
+  }, [selectedCategoryIds, allBusinessCategories]);
+
+  // Render category tree recursively
+  const renderCategoryTree = (nodes: any[], level: number = 0): React.ReactNode => {
+    return nodes.map((node) => {
+      const isRoot = node.category_level === 1 || node.parent_category_id === null;
+      const isSelected = selectedCategoryIds.includes(node.id);
+      const isExpanded = expandedCategoryIds.has(node.id);
+      const hasChildren = node.children.length > 0;
+      const isRootSelected = selectedRootCategoryId === node.id;
+
+      return (
+        <View key={node.id} style={styles.categoryItem}>
+          <TouchableOpacity
+            style={[styles.categoryRow, { paddingLeft: level * 20 + 12 }]}
+            onPress={() => {
+              if (isRoot) {
+                handleRootSelection(node.id);
+              } else {
+                toggleCategorySelection(node.id);
+              }
+            }}
+            activeOpacity={0.7}
+          >
+            {hasChildren && (
+              <TouchableOpacity
+                style={styles.expandButton}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  toggleExpansion(node.id);
+                }}
+              >
+                {isExpanded ? (
+                  <ChevronDown size={16} color="#666" />
+                ) : (
+                  <ChevronRight size={16} color="#666" />
+                )}
+              </TouchableOpacity>
+            )}
+            {!hasChildren && <View style={styles.expandButton} />}
+
+            {isRoot ? (
+              <View style={styles.radioButton}>
+                {isRootSelected ? (
+                  <View style={styles.radioButtonSelected}>
+                    <View style={styles.radioButtonInner} />
+                  </View>
+                ) : (
+                  <View style={styles.radioButtonOuter} />
+                )}
+              </View>
+            ) : (
+              <View style={styles.checkbox}>
+                {isSelected ? (
+                  <View style={styles.checkboxSelected}>
+                    <Check size={14} color="#fff" strokeWidth={3} />
+                  </View>
+                ) : (
+                  <View style={styles.checkboxUnselected} />
+                )}
+              </View>
+            )}
+
+            {node.icon && <Text style={styles.categoryIcon}>{node.icon}</Text>}
+            <Text
+              style={[
+                styles.categoryName,
+                (isRootSelected || isSelected) && styles.categoryNameSelected,
+              ]}
+            >
+              {node.name}
+            </Text>
+          </TouchableOpacity>
+
+          {hasChildren && isExpanded && (
+            <View style={styles.childrenContainer}>
+              {renderCategoryTree(node.children, level + 1)}
+            </View>
+          )}
+        </View>
+      );
+    });
+  };
+
+  // Get selected categories with full paths
+  const selectedCategoriesWithPaths = React.useMemo(() => {
+    return selectedCategoryIds.map((id) => ({
+      id,
+      path: getCategoryPath(id, allBusinessCategories),
+    }));
+  }, [selectedCategoryIds, allBusinessCategories]);
+
+  // Get display text for dropdown
+  const getDropdownDisplayText = (): string => {
+    if (selectedCategoriesWithPaths.length === 0) {
+      return 'Select service category';
+    }
+    if (selectedCategoriesWithPaths.length === 1) {
+      return selectedCategoriesWithPaths[0].path;
+    }
+    return `${selectedCategoriesWithPaths.length} categories selected`;
+  };
+
+  // Filter event categories based on search
+  const filteredEventCategories = React.useMemo(() => {
+    if (!eventSearchQuery.trim()) return eventCategories;
+    const lowerQuery = eventSearchQuery.toLowerCase();
+    return eventCategories.filter((cat) =>
+      cat.name.toLowerCase().includes(lowerQuery)
+    );
+  }, [eventCategories, eventSearchQuery]);
+
+  // Get selected event names for display
+  const selectedEventNames = React.useMemo(() => {
+    return eventCategories
+      .filter((cat) => selectedEventIds.includes(cat.id))
+      .map((cat) => cat.name);
+  }, [selectedEventIds, eventCategories]);
+
+  // Get display text for event dropdown
+  const getEventDropdownDisplayText = (): string => {
+    if (selectedEventNames.length === 0) {
+      return 'Select event types';
+    }
+    if (selectedEventNames.length === 1) {
+      return selectedEventNames[0];
+    }
+    return `${selectedEventNames.length} events selected`;
+  };
+
+  // Toggle event selection
+  const toggleEventSelection = (eventId: string) => {
+    setSelectedEventIds((prev) => {
+      if (prev.includes(eventId)) {
+        return prev.filter((id) => id !== eventId);
+      } else {
+        return [...prev, eventId];
+      }
+    });
+  };
+
+  // Load verification documents
+  const loadVerificationDocuments = async () => {
+    if (!id) return;
+    try {
+      setLoadingDocuments(true);
+      const { data, error } = await getBusinessVerificationDocuments(id);
+      if (error) {
+        console.error('Error loading verification documents:', error);
+        return;
+      }
+      setVerificationDocuments(data || []);
+    } catch (error) {
+      console.error('Error loading verification documents:', error);
+    } finally {
+      setLoadingDocuments(false);
+    }
+  };
+
+  // Handle document upload
+  const handleUploadDocument = async (documentTypeCode: string) => {
+    try {
+      setUploadingDocument(documentTypeCode);
+      const { files, error } = await pickDocuments(true);
+
+      if (error) {
+        Alert.alert('Error', error.message);
+        return;
+      }
+
+      if (files.length === 0) {
+        return;
+      }
+
+      // Upload each file
+      for (const file of files) {
+        const { data, error: uploadError } = await uploadVerificationDocument(
+          id,
+          documentTypeCode,
+          file
+        );
+
+        if (uploadError) {
+          Alert.alert('Upload Error', `Failed to upload ${file.name || 'document'}: ${uploadError.message}`);
+        } else if (data) {
+          // Reload documents to show the new one
+          await loadVerificationDocuments();
+        }
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to upload document');
+      console.error('Error uploading document:', error);
+    } finally {
+      setUploadingDocument(null);
+    }
+  };
+
+  // Handle document deletion
+  const handleDeleteDocument = async (documentId: string) => {
+    Alert.alert(
+      'Delete Document',
+      'Are you sure you want to delete this document?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await deleteVerificationDocument(documentId);
+              if (error) {
+                Alert.alert('Error', error.message);
+                return;
+              }
+              // Reload documents
+              await loadVerificationDocuments();
+            } catch (error) {
+              Alert.alert('Error', 'Failed to delete document');
+              console.error('Error deleting document:', error);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Group documents by type
+  const documentsByType = React.useMemo(() => {
+    const grouped: Record<string, VerificationDocument[]> = {};
+    verificationDocuments.forEach((doc) => {
+      if (!grouped[doc.document_type_code]) {
+        grouped[doc.document_type_code] = [];
+      }
+      grouped[doc.document_type_code].push(doc);
+    });
+    return grouped;
+  }, [verificationDocuments]);
 
   const handlePickOfferBanner = async () => {
     const { uri, error } = await pickImage();
@@ -381,12 +923,71 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleSaveDetails = async () => {
+    // Validate PAN is provided
+    if (!editData.business_registration_number || !editData.business_registration_number.trim()) {
+      Alert.alert('Validation Error', 'PAN is required. Please enter your PAN number.');
+      setSavingDetails(false);
+      return;
+    }
+
     try {
       setSavingDetails(true);
+
+      // Update business details
       const { data, error } = await updateBusinessDetails(id, editData);
       if (error) throw error;
       setBusiness(data);
+
+      // Update category mappings
+      // First, delete existing mappings
+      const { error: deleteError } = await supabaseCore
+        .from('vendor_business_category_mappings')
+        .delete()
+        .eq('business_id', id);
+
+      if (deleteError) {
+        console.error('Error deleting category mappings:', deleteError);
+      }
+
+      // Then, insert new mappings
+      const categoryMappings: any[] = [];
+
+      // Add selected business category IDs
+      if (selectedCategoryIds.length > 0) {
+        selectedCategoryIds.forEach((categoryId) => {
+          categoryMappings.push({
+            vendor_id: user?.id,
+            business_id: id,
+            category_id: categoryId,
+          });
+        });
+      }
+
+      // Add event category IDs
+      if (selectedEventIds.length > 0) {
+        selectedEventIds.forEach((categoryId) => {
+          categoryMappings.push({
+            vendor_id: user?.id,
+            business_id: id,
+            category_id: categoryId,
+          });
+        });
+      }
+
+      // Insert all category mappings in a single batch
+      if (categoryMappings.length > 0) {
+        const { error: mappingError } = await supabaseCore
+          .from('vendor_business_category_mappings')
+          .insert(categoryMappings);
+
+        if (mappingError) {
+          console.error('Error inserting category mappings:', mappingError);
+        }
+      }
+
       Alert.alert('Success', 'Business details updated successfully');
+      await loadData(); // Reload to refresh the display
+      await loadVerificationDocuments(); // Reload documents
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to update business details');
     } finally {
@@ -780,14 +1381,229 @@ export default function BusinessDetailsScreen() {
               <Text style={styles.editSectionTitle}>Services & Experience</Text>
 
               <View style={styles.editField}>
-                <Text style={styles.editLabel}>Service Category</Text>
-                <TextInput
-                  style={styles.editInput}
-                  value={editData.vendor_service_category || ''}
-                  onChangeText={(text) => setEditData({ ...editData, vendor_service_category: text })}
-                  placeholder="e.g., Photography, Catering"
-                  placeholderTextColor="#999"
-                />
+                <Text style={styles.editLabel}>Service Category *</Text>
+                
+                {/* Dropdown Trigger */}
+                <TouchableOpacity
+                  style={styles.dropdownTrigger}
+                  onPress={() => setIsCategoryModalOpen(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.dropdownText, !selectedRootCategoryId && styles.placeholder]}>
+                    {getDropdownDisplayText()}
+                  </Text>
+                  <ChevronDown size={20} color="#666" />
+                </TouchableOpacity>
+
+                {/* Selected Categories Display */}
+                {selectedCategoriesWithPaths.length > 0 && (
+                  <View style={styles.selectedContainer}>
+                    <Text style={styles.selectedLabel}>
+                      Selected Categories ({selectedCategoriesWithPaths.length}):
+                    </Text>
+                    {selectedCategoriesWithPaths.map((item) => (
+                      <View key={item.id} style={styles.selectedChip}>
+                        <Text style={styles.selectedChipText}>{item.path}</Text>
+                        <TouchableOpacity
+                          onPress={() => toggleCategorySelection(item.id)}
+                          style={styles.removeButton}
+                        >
+                          <X size={16} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {/* Category Selection Modal */}
+                <Modal
+                  visible={isCategoryModalOpen}
+                  transparent
+                  animationType="fade"
+                  onRequestClose={() => setIsCategoryModalOpen(false)}
+                >
+                  <Pressable
+                    style={styles.modalOverlay}
+                    onPress={() => setIsCategoryModalOpen(false)}
+                  >
+                    <Pressable
+                      style={styles.modalContent}
+                      onPress={(e) => e.stopPropagation()}
+                    >
+                      <View style={styles.modalHeader}>
+                        <Text style={styles.modalTitle}>Select Service Category</Text>
+                        <TouchableOpacity
+                          onPress={() => setIsCategoryModalOpen(false)}
+                          style={styles.closeButton}
+                        >
+                          <X size={24} color="#666" />
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Search Input */}
+                      <TextInput
+                        style={styles.modalSearchInput}
+                        placeholder="Search vendor categories..."
+                        placeholderTextColor="#999"
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                      />
+
+                      {/* Category Tree */}
+                      <ScrollView 
+                        style={styles.modalCategoryTree}
+                        nestedScrollEnabled={true}
+                        showsVerticalScrollIndicator={true}
+                      >
+                        {filteredTree.length === 0 ? (
+                          <Text style={styles.emptyText}>No categories found</Text>
+                        ) : (
+                          renderCategoryTree(filteredTree)
+                        )}
+                      </ScrollView>
+
+                      <View style={styles.modalFooter}>
+                        <TouchableOpacity
+                          style={styles.modalButton}
+                          onPress={() => setIsCategoryModalOpen(false)}
+                        >
+                          <Text style={styles.modalButtonText}>Done</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </Pressable>
+                  </Pressable>
+                </Modal>
+              </View>
+
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>Event Types *</Text>
+                
+                {/* Event Dropdown Trigger */}
+                <TouchableOpacity
+                  style={styles.dropdownTrigger}
+                  onPress={() => setIsEventModalOpen(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.dropdownText, selectedEventNames.length === 0 && styles.placeholder]}>
+                    {getEventDropdownDisplayText()}
+                  </Text>
+                  <ChevronDown size={20} color="#666" />
+                </TouchableOpacity>
+
+                {/* Selected Events Display */}
+                {selectedEventNames.length > 0 && (
+                  <View style={styles.selectedContainer}>
+                    <Text style={styles.selectedLabel}>
+                      Selected Events ({selectedEventNames.length}):
+                    </Text>
+                    {eventCategories
+                      .filter((cat) => selectedEventIds.includes(cat.id))
+                      .map((eventCategory) => (
+                        <View key={eventCategory.id} style={styles.selectedChip}>
+                          <Text style={styles.selectedChipText}>
+                            {eventCategory.icon ? `${eventCategory.icon} ` : ''}
+                            {eventCategory.name}
+                          </Text>
+                          <TouchableOpacity
+                            onPress={() => toggleEventSelection(eventCategory.id)}
+                            style={styles.removeButton}
+                          >
+                            <X size={16} color="#fff" />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                  </View>
+                )}
+
+                {/* Event Selection Modal */}
+                <Modal
+                  visible={isEventModalOpen}
+                  transparent
+                  animationType="fade"
+                  onRequestClose={() => setIsEventModalOpen(false)}
+                >
+                  <Pressable
+                    style={styles.modalOverlay}
+                    onPress={() => setIsEventModalOpen(false)}
+                  >
+                    <Pressable
+                      style={styles.modalContent}
+                      onPress={(e) => e.stopPropagation()}
+                    >
+                      <View style={styles.modalHeader}>
+                        <Text style={styles.modalTitle}>Select Event Types</Text>
+                        <TouchableOpacity
+                          onPress={() => setIsEventModalOpen(false)}
+                          style={styles.closeButton}
+                        >
+                          <X size={24} color="#666" />
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Search Input */}
+                      <TextInput
+                        style={styles.modalSearchInput}
+                        placeholder="Search event types..."
+                        placeholderTextColor="#999"
+                        value={eventSearchQuery}
+                        onChangeText={setEventSearchQuery}
+                      />
+
+                      {/* Event List */}
+                      <ScrollView 
+                        style={styles.modalCategoryTree}
+                        nestedScrollEnabled={true}
+                        showsVerticalScrollIndicator={true}
+                      >
+                        {filteredEventCategories.length === 0 ? (
+                          <Text style={styles.emptyText}>No events found</Text>
+                        ) : (
+                          filteredEventCategories.map((eventCategory) => {
+                            const isSelected = selectedEventIds.includes(eventCategory.id);
+                            return (
+                              <TouchableOpacity
+                                key={eventCategory.id}
+                                style={styles.eventOption}
+                                onPress={() => toggleEventSelection(eventCategory.id)}
+                                activeOpacity={0.7}
+                              >
+                                <View style={styles.checkbox}>
+                                  {isSelected ? (
+                                    <View style={styles.checkboxSelected}>
+                                      <Check size={14} color="#fff" strokeWidth={3} />
+                                    </View>
+                                  ) : (
+                                    <View style={styles.checkboxUnselected} />
+                                  )}
+                                </View>
+                                {eventCategory.icon && (
+                                  <Text style={styles.categoryIcon}>{eventCategory.icon}</Text>
+                                )}
+                                <Text
+                                  style={[
+                                    styles.eventOptionText,
+                                    isSelected && styles.eventOptionTextSelected,
+                                  ]}
+                                >
+                                  {eventCategory.name}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })
+                        )}
+                      </ScrollView>
+
+                      <View style={styles.modalFooter}>
+                        <TouchableOpacity
+                          style={styles.modalButton}
+                          onPress={() => setIsEventModalOpen(false)}
+                        >
+                          <Text style={styles.modalButtonText}>Done</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </Pressable>
+                  </Pressable>
+                </Modal>
               </View>
 
               <View style={styles.editField}>
@@ -896,14 +1712,91 @@ export default function BusinessDetailsScreen() {
               </View>
 
               <View style={styles.editField}>
-                <Text style={styles.editLabel}>Business Registration Number</Text>
+                <Text style={styles.editLabel}>PAN *</Text>
+                <Text style={styles.editHint}>Required - Permanent Account Number</Text>
                 <TextInput
                   style={styles.editInput}
                   value={editData.business_registration_number || ''}
                   onChangeText={(text) => setEditData({ ...editData, business_registration_number: text })}
-                  placeholder="Enter registration number"
+                  placeholder="Enter PAN (e.g., ABCDE1234F)"
                   placeholderTextColor="#999"
+                  autoCapitalize="characters"
+                  maxLength={10}
                 />
+              </View>
+
+              {/* Verification Documents Section */}
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>Verification Documents</Text>
+                <Text style={styles.editHint}>
+                  Upload images (jpg, png) or PDF files (max 10MB each)
+                </Text>
+
+                {/* Document Types */}
+                {[
+                  { code: 'gst', name: 'GST Certificate' },
+                  { code: 'aadhaar', name: 'Aadhaar Card' },
+                  { code: 'bank_statement', name: 'Bank Statement' },
+                  { code: 'general', name: 'General Document' },
+                  { code: 'business_license', name: 'Business License' },
+                  { code: 'pan', name: 'PAN Card' },
+                ].map((docType) => {
+                  const docs = documentsByType[docType.code] || [];
+                  const isUploading = uploadingDocument === docType.code;
+
+                  return (
+                    <View key={docType.code} style={styles.documentTypeSection}>
+                      <View style={styles.documentTypeHeader}>
+                        <Text style={styles.documentTypeName}>{docType.name}</Text>
+                        <TouchableOpacity
+                          style={[styles.addDocumentButton, isUploading && styles.addDocumentButtonDisabled]}
+                          onPress={() => handleUploadDocument(docType.code)}
+                          disabled={isUploading}
+                        >
+                          {isUploading ? (
+                            <ActivityIndicator size="small" color="#007AFF" />
+                          ) : (
+                            <Upload size={16} color="#007AFF" />
+                          )}
+                          <Text style={styles.addDocumentButtonText}>
+                            {isUploading ? 'Uploading...' : 'Add'}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Display documents */}
+                      {docs.length > 0 && (
+                        <View style={styles.documentsList}>
+                          {docs.map((doc) => (
+                            <View key={doc.id} style={styles.documentItem}>
+                              {isImageFile(doc.mime_type || '') && doc.file_url ? (
+                                <Image source={{ uri: doc.file_url }} style={styles.documentThumbnail} />
+                              ) : (
+                                <View style={styles.documentIcon}>
+                                  <FileText size={20} color="#666" />
+                                </View>
+                              )}
+                              <View style={styles.documentInfo}>
+                                <Text style={styles.documentName} numberOfLines={1}>
+                                  {doc.file_name || 'Document'}
+                                </Text>
+                                <Text style={styles.documentStatus}>
+                                  Status: {doc.verification_status}
+                                </Text>
+                              </View>
+                              <TouchableOpacity
+                                style={styles.deleteDocumentButton}
+                                onPress={() => handleDeleteDocument(doc.id)}
+                              >
+                                <X size={16} color="#fff" />
+                              </TouchableOpacity>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
               </View>
             </View>
 
@@ -1617,5 +2510,300 @@ const styles = StyleSheet.create({
   previewImage: {
     width: Dimensions.get('window').width,
     height: Dimensions.get('window').height * 0.8,
+  },
+  dropdownTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f8f8f8',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 16,
+  },
+  dropdownText: {
+    fontSize: 16,
+    color: '#1a1a1a',
+    flex: 1,
+  },
+  placeholder: {
+    color: '#999',
+  },
+  selectedContainer: {
+    marginBottom: 16,
+    padding: 12,
+    backgroundColor: '#f0f7ff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#007AFF',
+  },
+  selectedLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 8,
+  },
+  selectedChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#007AFF',
+    minHeight: 36,
+  },
+  selectedChipText: {
+    fontSize: 14,
+    color: '#1a1a1a',
+    flex: 1,
+    marginRight: 8,
+  },
+  removeButton: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#ff3b30',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalSearchInput: {
+    backgroundColor: '#f8f8f8',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#1a1a1a',
+    margin: 20,
+    marginBottom: 12,
+  },
+  modalCategoryTree: {
+    maxHeight: 400,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+  },
+  modalButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  categoryItem: {
+    marginBottom: 4,
+  },
+  categoryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingRight: 12,
+  },
+  expandButton: {
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 4,
+  },
+  radioButton: {
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  radioButtonSelected: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  radioButtonInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#007AFF',
+  },
+  radioButtonOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#ccc',
+    backgroundColor: '#fff',
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    marginRight: 8,
+  },
+  checkboxSelected: {
+    width: 20,
+    height: 20,
+    backgroundColor: '#007AFF',
+    borderRadius: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxUnselected: {
+    width: 20,
+    height: 20,
+    borderWidth: 2,
+    borderColor: '#ccc',
+    borderRadius: 4,
+    backgroundColor: '#fff',
+  },
+  categoryIcon: {
+    fontSize: 18,
+    marginRight: 8,
+  },
+  categoryName: {
+    fontSize: 16,
+    color: '#1a1a1a',
+    flex: 1,
+  },
+  categoryNameSelected: {
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  childrenContainer: {
+    marginLeft: 20,
+  },
+  emptyText: {
+    padding: 20,
+    textAlign: 'center',
+    color: '#999',
+    fontSize: 14,
+  },
+  eventOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  eventOptionText: {
+    fontSize: 16,
+    color: '#1a1a1a',
+    flex: 1,
+  },
+  eventOptionTextSelected: {
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  editHint: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 8,
+  },
+  documentTypeSection: {
+    marginBottom: 16,
+    padding: 12,
+    backgroundColor: '#f8f8f8',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  documentTypeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  documentTypeName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  addDocumentButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#f0f7ff',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#007AFF',
+  },
+  addDocumentButtonDisabled: {
+    opacity: 0.6,
+  },
+  addDocumentButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  documentsList: {
+    gap: 8,
+  },
+  documentItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  documentThumbnail: {
+    width: 50,
+    height: 50,
+    borderRadius: 6,
+    backgroundColor: '#e0e0e0',
+  },
+  documentIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 6,
+    backgroundColor: '#e0e0e0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  documentInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  documentName: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#1a1a1a',
+    marginBottom: 2,
+  },
+  documentStatus: {
+    fontSize: 12,
+    color: '#666',
+    textTransform: 'capitalize',
+  },
+  deleteDocumentButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#ff3b30',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
   },
 });
