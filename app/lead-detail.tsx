@@ -15,7 +15,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Phone, Mail, Calendar, MapPin, Users, DollarSign, Building2, CreditCard as Edit, Trash2, Clock, Tag, FileText, MessageSquare, CircleCheck as CheckCircle, Circle as XCircle } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore, supabaseCrm } from '@/lib/supabase';
-import { Lead, LeadActivity, STATUS_OPTIONS, PRIORITY_OPTIONS } from '@/types/leads';
+import { Lead, LeadActivity, STATUS_OPTIONS } from '@/types/leads';
 import { getTimeAgo, formatEventDate } from '@/lib/timeUtils';
 
 export default function LeadDetailScreen() {
@@ -87,17 +87,46 @@ export default function LeadDetailScreen() {
 
   const fetchActivities = async () => {
     try {
-      // Note: lead_activities table might be in crm schema - update if needed
       const { data, error } = await supabaseCrm
-        .from('lead_activities')
+        .from('lead_communications')
         .select('*')
         .eq('lead_id', id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setActivities(data || []);
+      
+      // Map lead_communications to LeadActivity format
+      const mappedActivities = (data || []).map((comm) => ({
+        id: comm.id,
+        lead_id: comm.lead_id,
+        activity_type: comm.communication_type as any,
+        title: getActivityTitle(comm.communication_type),
+        description: comm.message,
+        performed_by: comm.vendor_id,
+        created_at: comm.created_at,
+        metadata: comm.attachment_file_id ? { attachment_file_id: comm.attachment_file_id } : null,
+      }));
+      
+      setActivities(mappedActivities);
     } catch (error) {
       console.error('Error fetching activities:', error);
+    }
+  };
+
+  const getActivityTitle = (communicationType: string): string => {
+    switch (communicationType) {
+      case 'call':
+        return 'Phone Call';
+      case 'email':
+        return 'Email Sent';
+      case 'message':
+        return 'Message';
+      case 'meeting':
+        return 'Meeting';
+      case 'quote_sent':
+        return 'Quote Sent';
+      default:
+        return 'Activity';
     }
   };
 
@@ -127,13 +156,12 @@ export default function LeadDetailScreen() {
 
   const logActivity = async (type: string, title: string, description: string) => {
     try {
-      // Note: lead_activities table might be in crm schema - update if needed
-      await supabaseCrm.from('lead_activities').insert({
+      await supabaseCrm.from('lead_communications').insert({
         lead_id: id,
-        activity_type: type,
-        title,
-        description,
-        performed_by: user?.id,
+        vendor_id: user?.id,
+        communication_type: type,
+        message: description,
+        is_from_vendor: true,
       });
       fetchActivities();
     } catch (error) {
@@ -153,7 +181,7 @@ export default function LeadDetailScreen() {
       if (error) throw error;
 
       await logActivity(
-        'status_change',
+        'message',
         'Status changed',
         `Status changed from ${lead.lead_status || lead.status} to ${newStatus}`
       );
@@ -172,14 +200,14 @@ export default function LeadDetailScreen() {
     try {
       setSavingNote(true);
 
-      // Note: lead_notes table might be in crm schema - update if needed
-      await supabaseCrm.from('lead_notes').insert({
+      // Use lead_communications with communication_type = 'message' for notes
+      await supabaseCrm.from('lead_communications').insert({
         lead_id: lead.id,
-        content: newNote.trim(),
-        created_by: user?.id,
+        vendor_id: user?.id,
+        communication_type: 'message',
+        message: newNote.trim(),
+        is_from_vendor: true,
       });
-
-      await logActivity('note', 'Note added', newNote.trim());
 
       setNewNote('');
       fetchActivities();
@@ -228,10 +256,28 @@ export default function LeadDetailScreen() {
     if (!lead || !editingField) return;
 
     try {
-      const updateData: any = { [editingField]: editValue };
-      // Map status field to lead_status if needed
-      if (editingField === 'status') {
-        updateData.lead_status = editValue;
+      // Map UI field names to database field names
+      const fieldMapping: Record<string, string> = {
+        status: 'lead_status',
+        event_type: 'category_id', // Note: This would need category lookup
+      };
+
+      const dbFieldName = fieldMapping[editingField] || editingField;
+      const updateData: any = { [dbFieldName]: editValue };
+
+      // Validate event_date is future if being updated
+      if (editingField === 'event_date' && editValue) {
+        const eventDate = new Date(editValue);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        if (isNaN(eventDate.getTime())) {
+          Alert.alert('Error', 'Please enter a valid date (YYYY-MM-DD)');
+          return;
+        } else if (eventDate < today) {
+          Alert.alert('Error', 'Event date must be in the future');
+          return;
+        }
       }
       
       const { error } = await supabaseCrm
@@ -241,7 +287,7 @@ export default function LeadDetailScreen() {
 
       if (error) throw error;
 
-      setLead({ ...lead, [editingField]: editValue });
+      setLead({ ...lead, [editingField]: editValue, [dbFieldName]: editValue } as any);
       setEditingField(null);
       Alert.alert('Success', 'Field updated successfully');
     } catch (error) {
@@ -259,9 +305,6 @@ export default function LeadDetailScreen() {
     return STATUS_OPTIONS.find((s) => s.value === status) || STATUS_OPTIONS[0];
   };
 
-  const getPriorityInfo = (priority: string) => {
-    return PRIORITY_OPTIONS.find((p) => p.value === priority) || PRIORITY_OPTIONS[0];
-  };
 
   const getActivityIcon = (type: string) => {
     switch (type) {
@@ -269,11 +312,11 @@ export default function LeadDetailScreen() {
         return <Phone size={16} color="#007AFF" />;
       case 'email':
         return <Mail size={16} color="#007AFF" />;
-      case 'note':
+      case 'message':
         return <FileText size={16} color="#007AFF" />;
       case 'meeting':
         return <Users size={16} color="#007AFF" />;
-      case 'status_change':
+      case 'quote_sent':
         return <CheckCircle size={16} color="#34C759" />;
       default:
         return <MessageSquare size={16} color="#007AFF" />;
@@ -299,8 +342,7 @@ export default function LeadDetailScreen() {
     );
   }
 
-  const statusInfo = getStatusInfo(lead.status);
-  const priorityInfo = getPriorityInfo(lead.priority || 'medium');
+  const statusInfo = getStatusInfo(lead.lead_status);
 
   return (
     <View style={styles.container}>
@@ -326,13 +368,6 @@ export default function LeadDetailScreen() {
             >
               <Text style={[styles.statusText, { color: statusInfo.color }]}>
                 {statusInfo.label}
-              </Text>
-            </View>
-            <View
-              style={[styles.priorityBadge, { backgroundColor: priorityInfo.color + '20' }]}
-            >
-              <Text style={[styles.priorityText, { color: priorityInfo.color }]}>
-                {priorityInfo.label}
               </Text>
             </View>
           </View>
@@ -445,22 +480,22 @@ export default function LeadDetailScreen() {
                 </View>
               )}
 
-              {lead.city && (
+              {lead.event_location && (
                 <View style={styles.infoRow}>
                   <MapPin size={20} color="#666" />
                   <View style={styles.infoContent}>
-                    <Text style={styles.infoLabel}>Location</Text>
-                    <Text style={styles.infoValue}>{lead.city}</Text>
+                    <Text style={styles.infoLabel}>Event Location</Text>
+                    <Text style={styles.infoValue}>{lead.event_location}</Text>
                   </View>
                 </View>
               )}
 
-              {lead.venue && (
+              {lead.event_duration_hours && (
                 <View style={styles.infoRow}>
-                  <Building2 size={20} color="#666" />
+                  <Clock size={20} color="#666" />
                   <View style={styles.infoContent}>
-                    <Text style={styles.infoLabel}>Venue</Text>
-                    <Text style={styles.infoValue}>{lead.venue}</Text>
+                    <Text style={styles.infoLabel}>Duration</Text>
+                    <Text style={styles.infoValue}>{lead.event_duration_hours} hours</Text>
                   </View>
                 </View>
               )}
@@ -486,13 +521,13 @@ export default function LeadDetailScreen() {
               )}
             </View>
 
-            {lead.message && (
+            {lead.requirements && (
               <>
                 <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>Customer Message</Text>
+                  <Text style={styles.sectionTitle}>Requirements</Text>
                 </View>
                 <View style={styles.messageCard}>
-                  <Text style={styles.messageText}>{lead.message}</Text>
+                  <Text style={styles.messageText}>{lead.requirements}</Text>
                 </View>
               </>
             )}
@@ -507,7 +542,7 @@ export default function LeadDetailScreen() {
                   key={status.value}
                   style={[
                     styles.statusOption,
-                    lead.status === status.value && styles.statusOptionActive,
+                    lead.lead_status === status.value && styles.statusOptionActive,
                     { borderColor: status.color },
                   ]}
                   onPress={() => handleStatusChange(status.value)}
@@ -515,7 +550,7 @@ export default function LeadDetailScreen() {
                   <Text
                     style={[
                       styles.statusOptionText,
-                      lead.status === status.value && { color: status.color },
+                      lead.lead_status === status.value && { color: status.color },
                     ]}
                   >
                     {status.label}
@@ -600,7 +635,7 @@ export default function LeadDetailScreen() {
               <Text style={styles.sectionTitle}>Notes History</Text>
             </View>
 
-            {activities.filter((a) => a.activity_type === 'note').length === 0 ? (
+            {activities.filter((a) => a.activity_type === 'message').length === 0 ? (
               <View style={styles.emptyState}>
                 <FileText size={48} color="#ddd" />
                 <Text style={styles.emptyStateText}>No notes yet</Text>
@@ -608,7 +643,7 @@ export default function LeadDetailScreen() {
             ) : (
               <View style={styles.notesList}>
                 {activities
-                  .filter((a) => a.activity_type === 'note')
+                  .filter((a) => a.activity_type === 'message')
                   .map((note) => (
                     <View key={note.id} style={styles.noteCard}>
                       <View style={styles.noteHeader}>
@@ -723,17 +758,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   statusText: {
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  priorityBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  priorityText: {
     fontSize: 12,
     fontWeight: '700',
     textTransform: 'uppercase',

@@ -15,10 +15,8 @@ import { ArrowLeft, Save } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore, supabaseCrm } from '@/lib/supabase';
 import {
-  EVENT_TYPES,
   BUDGET_RANGES,
   STATUS_OPTIONS,
-  PRIORITY_OPTIONS,
   Lead,
 } from '@/types/leads';
 import Dropdown from '@/components/Dropdown';
@@ -40,26 +38,46 @@ export default function LeadFormScreen() {
     customer_name: '',
     customer_email: '',
     customer_phone: '',
-    event_type: '',
+    category_id: '',
     event_date: '',
-    city: '',
-    venue: '',
+    event_location: '',
     guest_count: '',
+    event_duration_hours: '',
     budget_range: '',
-    message: '',
-    status: 'new',
-    priority: 'medium',
-    notes: '',
+    requirements: '',
+    lead_status: 'new',
+    lead_type: 'inquiry',
+    lead_source: 'website',
   });
+
+  const [eventCategories, setEventCategories] = useState<{ id: string; name: string }[]>([]);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetchBusinesses();
+    fetchEventCategories();
     if (isEditMode) {
       fetchLead();
     }
   }, []);
+
+  const fetchEventCategories = async () => {
+    try {
+      const { data, error } = await supabaseCore
+        .from('categories')
+        .select('id, name')
+        .eq('category_type', 'event')
+        .eq('category_level', 1)
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true });
+
+      if (error) throw error;
+      setEventCategories(data || []);
+    } catch (error) {
+      console.error('Error fetching event categories:', error);
+    }
+  };
 
   const fetchBusinesses = async () => {
     try {
@@ -97,16 +115,16 @@ export default function LeadFormScreen() {
           customer_name: data.customer_name || '',
           customer_email: data.customer_email || '',
           customer_phone: data.customer_phone || '',
-          event_type: data.event_type || '',
+          category_id: data.category_id || '',
           event_date: data.event_date || '',
-          city: data.city || '',
-          venue: data.venue || '',
+          event_location: data.event_location || '',
           guest_count: data.guest_count?.toString() || '',
+          event_duration_hours: data.event_duration_hours?.toString() || '',
           budget_range: data.budget_range || '',
-          message: data.message || '',
-          status: data.lead_status || 'new',
-          priority: data.priority || 'medium',
-          notes: data.notes || '',
+          requirements: data.requirements || '',
+          lead_status: data.lead_status || 'new',
+          lead_type: data.lead_type || 'inquiry',
+          lead_source: data.lead_source || 'website',
         });
       }
     } catch (error) {
@@ -134,8 +152,23 @@ export default function LeadFormScreen() {
       newErrors.customer_email = 'Please enter a valid email address';
     }
 
-    if (!formData.event_type) {
-      newErrors.event_type = 'Event type is required';
+    if (!formData.category_id) {
+      newErrors.category_id = 'Event type is required';
+    }
+
+    // Validate event_date is required and a future date
+    if (!formData.event_date.trim()) {
+      newErrors.event_date = 'Event date is required';
+    } else {
+      const eventDate = new Date(formData.event_date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      if (isNaN(eventDate.getTime())) {
+        newErrors.event_date = 'Please enter a valid date (YYYY-MM-DD)';
+      } else if (eventDate < today) {
+        newErrors.event_date = 'Event date must be in the future';
+      }
     }
 
     if (!formData.business_id) {
@@ -155,27 +188,31 @@ export default function LeadFormScreen() {
     try {
       setSaving(true);
 
-      const leadData = {
-        business_id: formData.business_id,
+      const leadData: any = {
+        vendor_id: user?.id,
+        business_id: formData.business_id || null,
         customer_name: formData.customer_name.trim(),
         customer_email: formData.customer_email.trim() || null,
-        customer_phone: formData.customer_phone.trim(),
-        event_type: formData.event_type,
+        customer_phone: formData.customer_phone.trim() || null,
+        category_id: formData.category_id || null,
         event_date: formData.event_date || null,
-        city: formData.city.trim() || null,
-        venue: formData.venue.trim() || null,
+        event_location: formData.event_location.trim() || null,
         guest_count: formData.guest_count ? parseInt(formData.guest_count) : null,
+        event_duration_hours: formData.event_duration_hours ? parseInt(formData.event_duration_hours) : null,
         budget_range: formData.budget_range || null,
-        message: formData.message.trim() || null,
-        lead_status: formData.status,
-        priority: formData.priority,
-        notes: formData.notes.trim() || null,
+        requirements: formData.requirements.trim() || null,
+        lead_status: formData.lead_status,
+        lead_type: formData.lead_type,
+        lead_source: formData.lead_source,
       };
 
       if (isEditMode) {
+        // Don't update vendor_id on edit - it should remain the same
+        const { vendor_id, ...updateData } = leadData;
+        
         const { error } = await supabaseCrm
           .from('customer_leads')
-          .update(leadData)
+          .update(updateData)
           .eq('id', id);
 
         if (error) throw error;
@@ -188,13 +225,13 @@ export default function LeadFormScreen() {
 
         if (error) throw error;
 
-        // Note: lead_activities table might be in crm schema - update if needed
-        await supabaseCrm.from('lead_activities').insert({
+        // Log lead creation activity using lead_communications
+        await supabaseCrm.from('lead_communications').insert({
           lead_id: data[0].id,
-          activity_type: 'note',
-          title: 'Lead created',
-          description: 'New lead added to the system',
-          performed_by: user?.id,
+          vendor_id: user?.id,
+          communication_type: 'message',
+          message: 'New lead added to the system',
+          is_from_vendor: true,
         });
 
         Alert.alert('Success', 'Lead created successfully', [
@@ -323,43 +360,37 @@ export default function LeadFormScreen() {
           <View style={styles.formGroup}>
             <Dropdown
               label="Event Type *"
-              value={formData.event_type}
-              options={EVENT_TYPES.map((type) => ({ label: type, value: type }))}
-              onChange={(value) => updateFormData('event_type', value)}
-              error={errors.event_type}
+              value={formData.category_id}
+              options={eventCategories.map((cat) => ({ label: cat.name, value: cat.id }))}
+              onChange={(value) => updateFormData('category_id', value)}
+              error={errors.category_id}
             />
           </View>
 
           <View style={styles.formGroup}>
-            <Text style={styles.label}>Event Date</Text>
+            <Text style={styles.label}>
+              Event Date <Text style={styles.required}>*</Text>
+            </Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, errors.event_date && styles.inputError]}
               placeholder="YYYY-MM-DD"
               placeholderTextColor="#999"
               value={formData.event_date}
               onChangeText={(text) => updateFormData('event_date', text)}
             />
+            {errors.event_date && (
+              <Text style={styles.errorText}>{errors.event_date}</Text>
+            )}
           </View>
 
           <View style={styles.formGroup}>
-            <Text style={styles.label}>City / Location</Text>
+            <Text style={styles.label}>Event Location</Text>
             <TextInput
               style={styles.input}
-              placeholder="Enter city or location"
+              placeholder="Enter event location (e.g., Hotel, Pune)"
               placeholderTextColor="#999"
-              value={formData.city}
-              onChangeText={(text) => updateFormData('city', text)}
-            />
-          </View>
-
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>Venue</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter venue name"
-              placeholderTextColor="#999"
-              value={formData.venue}
-              onChangeText={(text) => updateFormData('venue', text)}
+              value={formData.event_location}
+              onChangeText={(text) => updateFormData('event_location', text)}
             />
           </View>
 
@@ -371,6 +402,18 @@ export default function LeadFormScreen() {
               placeholderTextColor="#999"
               value={formData.guest_count}
               onChangeText={(text) => updateFormData('guest_count', text)}
+              keyboardType="number-pad"
+            />
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Event Duration (hours)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Duration in hours"
+              placeholderTextColor="#999"
+              value={formData.event_duration_hours}
+              onChangeText={(text) => updateFormData('event_duration_hours', text)}
               keyboardType="number-pad"
             />
           </View>
@@ -391,50 +434,51 @@ export default function LeadFormScreen() {
           <View style={styles.formGroup}>
             <Dropdown
               label="Status"
-              value={formData.status}
+              value={formData.lead_status}
               options={STATUS_OPTIONS.map((s) => ({ label: s.label, value: s.value }))}
-              onChange={(value) => updateFormData('status', value)}
+              onChange={(value) => updateFormData('lead_status', value)}
             />
           </View>
 
           <View style={styles.formGroup}>
             <Dropdown
-              label="Priority"
-              value={formData.priority}
-              options={PRIORITY_OPTIONS.map((p) => ({
-                label: p.label,
-                value: p.value,
-              }))}
-              onChange={(value) => updateFormData('priority', value)}
+              label="Lead Type"
+              value={formData.lead_type}
+              options={[
+                { label: 'Inquiry', value: 'inquiry' },
+                { label: 'Quote Request', value: 'quote_request' },
+                { label: 'Booking Interest', value: 'booking_interest' },
+              ]}
+              onChange={(value) => updateFormData('lead_type', value)}
+            />
+          </View>
+
+          <View style={styles.formGroup}>
+            <Dropdown
+              label="Lead Source"
+              value={formData.lead_source}
+              options={[
+                { label: 'Website', value: 'website' },
+                { label: 'Mobile App', value: 'mobile' },
+                { label: 'Referral', value: 'referral' },
+                { label: 'Direct', value: 'direct' },
+              ]}
+              onChange={(value) => updateFormData('lead_source', value)}
             />
           </View>
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Additional Information</Text>
+          <Text style={styles.sectionTitle}>Requirements</Text>
 
           <View style={styles.formGroup}>
-            <Text style={styles.label}>Customer Message</Text>
+            <Text style={styles.label}>Customer Requirements</Text>
             <TextInput
               style={[styles.input, styles.textArea]}
-              placeholder="Enter customer message or requirements"
+              placeholder="Enter customer requirements or message"
               placeholderTextColor="#999"
-              value={formData.message}
-              onChangeText={(text) => updateFormData('message', text)}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
-          </View>
-
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>Internal Notes</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Add internal notes (not visible to customer)"
-              placeholderTextColor="#999"
-              value={formData.notes}
-              onChangeText={(text) => updateFormData('notes', text)}
+              value={formData.requirements}
+              onChangeText={(text) => updateFormData('requirements', text)}
               multiline
               numberOfLines={4}
               textAlignVertical="top"

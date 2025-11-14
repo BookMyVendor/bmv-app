@@ -8,7 +8,7 @@ import {
   Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, X } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore } from '@/lib/supabase';
 import BasicInformationStep from '@/components/registration/BasicInformationStep';
@@ -67,6 +67,58 @@ export default function BusinessRegistrationScreen() {
   const handlePrevious = () => {
     if (currentPage > 0) {
       setCurrentPage(currentPage - 1);
+    }
+  };
+
+  const hasEnteredData = () => {
+    // Check if any significant data has been entered
+    return !!(
+      businessData.businessName ||
+      businessData.contactPersonName ||
+      businessData.email ||
+      businessData.phoneNumber ||
+      businessData.panNumber ||
+      businessData.businessDescription ||
+      businessData.businessAddress ||
+      businessData.city ||
+      businessData.state ||
+      (businessData.selectedCategoryIds && businessData.selectedCategoryIds.length > 0) ||
+      (businessData.selectedEventIds && businessData.selectedEventIds.length > 0) ||
+      (businessData.portfolioImages && businessData.portfolioImages.length > 0) ||
+      (businessData.verificationDocuments && Object.keys(businessData.verificationDocuments).length > 0)
+    );
+  };
+
+  const handleCancel = () => {
+    if (hasEnteredData()) {
+      Alert.alert(
+        'Cancel Registration?',
+        'You have entered some information. Are you sure you want to cancel? All entered data will be lost.',
+        [
+          {
+            text: 'Continue Registration',
+            style: 'cancel',
+          },
+          {
+            text: 'Cancel',
+            style: 'destructive',
+            onPress: () => {
+              if (router.canGoBack()) {
+                router.back();
+              } else {
+                router.replace('/(tabs)');
+              }
+            },
+          },
+        ]
+      );
+    } else {
+      // No data entered, just navigate away
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/(tabs)');
+      }
     }
   };
 
@@ -292,8 +344,19 @@ export default function BusinessRegistrationScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>{steps[currentPage].title}</Text>
-        <Text style={styles.subtitle}>{steps[currentPage].subtitle}</Text>
+        <View style={styles.headerTop}>
+          <View style={styles.headerTextContainer}>
+            <Text style={styles.title}>{steps[currentPage].title}</Text>
+            <Text style={styles.subtitle}>{steps[currentPage].subtitle}</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.cancelButton}
+            onPress={handleCancel}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <X size={24} color="#666" />
+          </TouchableOpacity>
+        </View>
         <View style={styles.progressContainer}>
           {Array.from({ length: totalSteps }).map((_, index) => (
             <View
@@ -359,16 +422,29 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
+  headerTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  headerTextContainer: {
+    flex: 1,
+    marginRight: 16,
+  },
   title: {
     fontSize: 24,
     fontWeight: '700',
     color: '#1a1a1a',
     marginBottom: 4,
   },
+  cancelButton: {
+    padding: 4,
+    marginTop: -4,
+  },
   subtitle: {
     fontSize: 14,
     color: '#666',
-    marginBottom: 16,
   },
   progressContainer: {
     flexDirection: 'row',

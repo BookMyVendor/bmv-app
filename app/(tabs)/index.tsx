@@ -44,10 +44,8 @@ export default function DashboardScreen() {
     byStatus: {
       new: 0,
       contacted: 0,
-      qualified: 0,
-      proposal: 0,
-      negotiation: 0,
-      won: 0,
+      quoted: 0,
+      converted: 0,
       lost: 0,
     },
   });
@@ -94,24 +92,21 @@ export default function DashboardScreen() {
           byStatus: {
             new: 0,
             contacted: 0,
-            qualified: 0,
-            proposal: 0,
-            negotiation: 0,
-            won: 0,
+            quoted: 0,
+            converted: 0,
             lost: 0,
           },
         });
         return;
       }
 
-      const businessIds = businessData.map((b) => b.id);
-
       const statusFilter = selectedStatuses.length > 0 ? selectedStatuses : undefined;
 
+      // Use vendor_id for RLS policy compliance
       let totalQuery = supabaseCrm
         .from('customer_leads')
         .select('*', { count: 'exact', head: true })
-        .in('business_id', businessIds);
+        .eq('vendor_id', user?.id);
 
       if (statusFilter) {
         totalQuery = totalQuery.in('lead_status', statusFilter);
@@ -126,7 +121,7 @@ export default function DashboardScreen() {
       let monthlyQuery = supabaseCrm
         .from('customer_leads')
         .select('*', { count: 'exact', head: true })
-        .in('business_id', businessIds)
+        .eq('vendor_id', user?.id)
         .gte('created_at', startOfMonth.toISOString());
 
       if (statusFilter) {
@@ -141,7 +136,7 @@ export default function DashboardScreen() {
       let todayQuery = supabaseCrm
         .from('customer_leads')
         .select('*', { count: 'exact', head: true })
-        .in('business_id', businessIds)
+        .eq('vendor_id', user?.id)
         .gte('created_at', startOfDay.toISOString());
 
       if (statusFilter) {
@@ -153,15 +148,13 @@ export default function DashboardScreen() {
       const { data: allLeads } = await supabaseCrm
         .from('customer_leads')
         .select('lead_status')
-        .in('business_id', businessIds);
+        .eq('vendor_id', user?.id);
 
       const statusCounts: Record<LeadStatus, number> = {
         new: 0,
         contacted: 0,
-        qualified: 0,
-        proposal: 0,
-        negotiation: 0,
-        won: 0,
+        quoted: 0,
+        converted: 0,
         lost: 0,
       };
 

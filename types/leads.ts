@@ -1,29 +1,29 @@
 export interface Lead {
   id: string;
-  business_id: string;
+  customer_id: string | null;
+  business_id: string | null;
+  vendor_id: string | null;
+  category_id: string | null;
   customer_name: string;
   customer_email: string | null;
-  customer_phone: string;
-  event_type: string;
+  customer_phone: string | null;
+  event_type?: string; // Computed from category_id
   event_date: string | null;
-  city: string | null;
-  message: string | null;
-  status: LeadStatus;
-  priority: LeadPriority;
+  event_location: string | null;
+  city?: string | null; // Computed from business_id
+  lead_status: LeadStatus;
+  lead_type: 'inquiry' | 'quote_request' | 'booking_interest';
+  lead_source: 'website' | 'mobile' | 'referral' | 'direct';
   budget_range: string | null;
   guest_count: number | null;
-  venue: string | null;
-  notes: string | null;
-  tags: string[];
+  event_duration_hours: number | null;
+  requirements: string | null;
+  business_name?: string; // Computed from business_id
   created_at: string;
   updated_at: string;
-  businesses: {
-    business_name: string;
-    id: string;
-  };
 }
 
-export type LeadStatus = 'new' | 'contacted' | 'qualified' | 'proposal' | 'negotiation' | 'won' | 'lost';
+export type LeadStatus = 'new' | 'contacted' | 'quoted' | 'converted' | 'lost';
 
 export type LeadPriority = 'low' | 'medium' | 'high' | 'urgent';
 
@@ -87,12 +87,9 @@ export interface DateRange {
 
 export interface LeadStats {
   total: number;
-  new: number;
-  contacted: number;
-  qualified: number;
-  won: number;
-  lost: number;
-  conversionRate: number;
+  monthly: number;
+  today: number;
+  byStatus: Record<LeadStatus, number>;
 }
 
 export const EVENT_TYPES = [
@@ -113,10 +110,8 @@ export const EVENT_TYPES = [
 export const STATUS_OPTIONS: { value: LeadStatus; label: string; color: string }[] = [
   { value: 'new', label: 'New', color: '#FF9500' },
   { value: 'contacted', label: 'Contacted', color: '#007AFF' },
-  { value: 'qualified', label: 'Qualified', color: '#5856D6' },
-  { value: 'proposal', label: 'Proposal Sent', color: '#AF52DE' },
-  { value: 'negotiation', label: 'Negotiation', color: '#FF2D55' },
-  { value: 'won', label: 'Won', color: '#34C759' },
+  { value: 'quoted', label: 'Quoted', color: '#5856D6' },
+  { value: 'converted', label: 'Converted', color: '#34C759' },
   { value: 'lost', label: 'Lost', color: '#999' },
 ];
 

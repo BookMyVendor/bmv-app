@@ -54,7 +54,6 @@ export default function LeadsScreen() {
   const [selectedEventTypes, setSelectedEventTypes] = useState<string[]>([]);
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
-  const [selectedPriorities, setSelectedPriorities] = useState<string[]>([]);
   const [sortOption, setSortOption] = useState<SortOption>('recent');
   const [bulkSelectMode, setBulkSelectMode] = useState(false);
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
@@ -63,7 +62,6 @@ export default function LeadsScreen() {
   const [showEventTypeModal, setShowEventTypeModal] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [showCityModal, setShowCityModal] = useState(false);
-  const [showPriorityModal, setShowPriorityModal] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
   const [showBulkActionsModal, setShowBulkActionsModal] = useState(false);
 
@@ -78,8 +76,10 @@ export default function LeadsScreen() {
   }, [params]);
 
   useEffect(() => {
-    fetchLeads();
-  }, []);
+    if (user?.id) {
+      fetchLeads();
+    }
+  }, [user?.id]);
 
   const fetchLeads = async () => {
     try {
@@ -87,7 +87,7 @@ export default function LeadsScreen() {
 
       const { data: businessData } = await supabaseCore
         .from('vendor_businesses')
-        .select('id, business_name')
+        .select('id, business_name, city')
         .eq('vendor_id', user?.id);
 
       if (!businessData || businessData.length === 0) {
@@ -97,34 +97,76 @@ export default function LeadsScreen() {
       }
 
       const businessIds = businessData.map((b) => b.id);
-      const businessMap = new Map(businessData.map((b) => [b.id, b.business_name]));
+      const businessMap = new Map(
+        businessData.map((b) => [b.id, { name: b.business_name, city: b.city }])
+      );
 
-      // Fetch leads without join
-      const { data, error } = await supabaseCrm
+      // Fetch leads
+      const { data: leadsData, error } = await supabaseCrm
         .from('customer_leads')
         .select('*')
-        .in('business_id', businessIds)
+        .eq('vendor_id', user.id)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Error from Supabase:', error);
+        throw error;
+      }
 
-      // Map business names to leads
-      const leadsWithBusiness = (data || []).map((lead) => ({
-        ...lead,
-        business_name: businessMap.get(lead.business_id) || 'Unknown Business',
-      }));
+      console.log(`📋 Raw leads from DB: ${leadsData?.length || 0}`);
+      console.log('Lead IDs:', leadsData?.map(l => l.id) || []);
 
-      setLeads(leadsWithBusiness);
+      // Get unique category IDs
+      const categoryIds = [
+        ...new Set((leadsData || []).map((lead) => lead.category_id).filter(Boolean)),
+      ];
+
+      // Fetch category names
+      const categoryMap = new Map<string, string>();
+      if (categoryIds.length > 0) {
+        const { data: categories } = await supabaseCore
+          .from('categories')
+          .select('id, name')
+          .in('id', categoryIds);
+
+        categories?.forEach((cat) => {
+          categoryMap.set(cat.id, cat.name);
+        });
+      }
+
+      // Map business names, cities, and event types to leads
+      const leadsWithDetails = (leadsData || []).map((lead) => {
+        const business = lead.business_id ? businessMap.get(lead.business_id) : null;
+        const eventType = lead.category_id ? categoryMap.get(lead.category_id) : null;
+
+        return {
+          ...lead,
+          business_name: business?.name || 'Unknown Business',
+          city: business?.city || null,
+          event_type: eventType || 'Unknown Event',
+          status: lead.lead_status, // Map lead_status to status for compatibility
+        } as Lead;
+      });
+
+      console.log(`✅ Fetched ${leadsWithDetails.length} leads`);
+      console.log('Sample lead IDs:', leadsWithDetails.slice(0, 3).map(l => l.id));
+      setLeads(leadsWithDetails);
     } catch (error) {
-      console.error('Error fetching leads:', error);
+      console.error('❌ Error fetching leads:', error);
+      Alert.alert('Error', 'Failed to load leads. Please try again.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  const onRefresh = () => {
+  const onRefresh = async () => {
     setRefreshing(true);
-    fetchLeads();
+    try {
+      await fetchLeads();
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const availableCities = useMemo(() => {
@@ -156,11 +198,12 @@ export default function LeadsScreen() {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
         (lead) =>
-          lead.customer_name.toLowerCase().includes(query) ||
+          lead.customer_name?.toLowerCase().includes(query) ||
           lead.customer_email?.toLowerCase().includes(query) ||
-          lead.customer_phone.includes(query) ||
-          lead.event_type.toLowerCase().includes(query) ||
-          lead.city?.toLowerCase().includes(query)
+          lead.customer_phone?.toLowerCase().includes(query) ||
+          lead.event_type?.toLowerCase().includes(query) ||
+          lead.city?.toLowerCase().includes(query) ||
+          lead.event_location?.toLowerCase().includes(query)
       );
     }
 
@@ -172,7 +215,7 @@ export default function LeadsScreen() {
 
     if (selectedStatuses.length > 0) {
       filtered = filtered.filter((lead) =>
-        selectedStatuses.includes(lead.status)
+        selectedStatuses.includes(lead.lead_status)
       );
     }
 
@@ -182,11 +225,12 @@ export default function LeadsScreen() {
       );
     }
 
-    if (selectedPriorities.length > 0) {
-      filtered = filtered.filter((lead) =>
-        selectedPriorities.includes(lead.priority || 'medium')
-      );
-    }
+    // Priority filter removed - priority field doesn't exist in crm.customer_leads
+    // if (selectedPriorities.length > 0) {
+    //   filtered = filtered.filter((lead) =>
+    //     selectedPriorities.includes(lead.priority || 'medium')
+    //   );
+    // }
 
     filtered.sort((a, b) => {
       switch (sortOption) {
@@ -209,7 +253,7 @@ export default function LeadsScreen() {
     });
 
     return filtered;
-  }, [leads, searchQuery, selectedEventTypes, selectedStatuses, selectedCities, selectedPriorities, sortOption, timeFilter]);
+  }, [leads, searchQuery, selectedEventTypes, selectedStatuses, selectedCities, sortOption, timeFilter]);
 
   const getStatusColor = (status: string) => {
     const statusInfo = STATUS_OPTIONS.find((s) => s.value === status);
@@ -219,11 +263,6 @@ export default function LeadsScreen() {
   const getStatusLabel = (status: string) => {
     const statusInfo = STATUS_OPTIONS.find((s) => s.value === status);
     return statusInfo?.label || status;
-  };
-
-  const getPriorityColor = (priority: string) => {
-    const priorityInfo = PRIORITY_OPTIONS.find((p) => p.value === priority);
-    return priorityInfo?.color || '#8E8E93';
   };
 
   const toggleLeadSelection = (leadId: string) => {
@@ -296,11 +335,10 @@ export default function LeadsScreen() {
   };
 
   const activeFilterCount =
-    selectedEventTypes.length + selectedStatuses.length + selectedCities.length + selectedPriorities.length;
+    selectedEventTypes.length + selectedStatuses.length + selectedCities.length;
 
   const renderLead = ({ item }: { item: Lead }) => {
     const isSelected = selectedLeads.includes(item.id);
-    const priorityColor = getPriorityColor(item.priority || 'medium');
 
     return (
       <TouchableOpacity
@@ -334,20 +372,14 @@ export default function LeadsScreen() {
               <View style={styles.badges}>
                 <View
                   style={[
-                    styles.priorityIndicator,
-                    { backgroundColor: priorityColor },
-                  ]}
-                />
-                <View
-                  style={[
                     styles.statusBadge,
-                    { backgroundColor: getStatusColor(item.status) + '20' },
+                    { backgroundColor: getStatusColor(item.lead_status) + '20' },
                   ]}
                 >
                   <Text
-                    style={[styles.statusText, { color: getStatusColor(item.status) }]}
+                    style={[styles.statusText, { color: getStatusColor(item.lead_status) }]}
                   >
-                    {getStatusLabel(item.status)}
+                    {getStatusLabel(item.lead_status)}
                   </Text>
                 </View>
               </View>
@@ -363,6 +395,7 @@ export default function LeadsScreen() {
               <Text style={styles.infoText}>
                 {item.event_type}
                 {item.event_date && ` • ${formatEventDate(item.event_date)}`}
+                {item.event_location && ` • ${item.event_location}`}
               </Text>
             </View>
 
@@ -516,17 +549,6 @@ export default function LeadsScreen() {
               onClear={() => setSelectedCities([])}
             />
           )}
-          <FilterChip
-            label={
-              selectedPriorities.length > 0
-                ? `Priority (${selectedPriorities.length})`
-                : 'Priority'
-            }
-            active={selectedPriorities.length > 0}
-            onPress={() => setShowPriorityModal(true)}
-            showClear={selectedPriorities.length > 0}
-            onClear={() => setSelectedPriorities([])}
-          />
           {activeFilterCount > 0 && (
             <TouchableOpacity
               style={styles.clearAllButton}
@@ -535,7 +557,6 @@ export default function LeadsScreen() {
                 setSelectedEventTypes([]);
                 setSelectedStatuses([]);
                 setSelectedCities([]);
-                setSelectedPriorities([]);
               }}
             >
               <Text style={styles.clearAllText}>Clear All</Text>
@@ -567,7 +588,6 @@ export default function LeadsScreen() {
                 setSelectedEventTypes([]);
                 setSelectedStatuses([]);
                 setSelectedCities([]);
-                setSelectedPriorities([]);
               }}
             >
               <Text style={styles.clearFiltersButtonText}>Clear Filters</Text>
@@ -617,15 +637,6 @@ export default function LeadsScreen() {
         multiSelect
       />
 
-      <FilterModal
-        visible={showPriorityModal}
-        onClose={() => setShowPriorityModal(false)}
-        title="Priority"
-        options={PRIORITY_OPTIONS.map((p) => p.value)}
-        selectedOptions={selectedPriorities}
-        onSelectOptions={setSelectedPriorities}
-        multiSelect
-      />
 
       <FilterModal
         visible={showBulkActionsModal}
@@ -896,11 +907,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-  },
-  priorityIndicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
   },
   statusBadge: {
     paddingHorizontal: 10,
