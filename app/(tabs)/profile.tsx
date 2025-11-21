@@ -10,6 +10,8 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { Platform } from 'react-native';
+
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -231,20 +233,33 @@ export default function ProfileScreen() {
   };
 
   const handleSignOut = async () => {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign Out',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await signOut();
-          } catch (error: any) {
-            Alert.alert('Error', 'Failed to sign out. Please try again.');
-          }
+    if (Platform.OS === 'web') {
+      // Web version
+      const confirmed = window.confirm('Are you sure you want to sign out?');
+      if (confirmed) {
+        try {
+          await signOut();
+        } catch (error: any) {
+          window.alert('Failed to sign out. Please try again.');
+        }
+      }
+    } else {
+      // Mobile version
+      Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await signOut();
+            } catch (error: any) {
+              Alert.alert('Error', 'Failed to sign out. Please try again.');
+            }
+          },
         },
-      },
-    ]);
+      ]);
+    }
   };
 
   return (
@@ -256,7 +271,13 @@ export default function ProfileScreen() {
         style={[styles.header, { paddingTop: insets.top + 20 }]}
       >
         <Text style={styles.headerTitle}>Profile</Text>
-        <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
+        <TouchableOpacity 
+            style={styles.signOutButton} 
+            onPress={() => handleSignOut()}
+            activeOpacity={0.7} // This will help you see if press is registering
+          disabled={false} 
+        >
+          
           <LogOut size={20} color={Colors.neutral.white} strokeWidth={2} />
         </TouchableOpacity>
       </LinearGradient>

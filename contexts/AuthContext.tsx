@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
-import { supabaseCore } from '@/lib/supabase';
+import { supabaseCore, supabaseUrl } from '@/lib/supabase';
 
 interface UserProfile {
   id: string;
@@ -340,18 +340,50 @@ const verifyOTP = async (phone: string, token: string) => {
 
   const signOut = async () => {
     try {
+      // Get current session to ensure we have access token for API call
+      const { data: { session: currentSession } } = await supabaseCore.auth.getSession();
+      
+      if (currentSession?.access_token) {
+        // Explicitly make API call to logout endpoint
+        try {
+          const response = await fetch(`${supabaseUrl}/auth/v1/logout`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${currentSession.access_token}`,
+              'apikey': process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
+              'Content-Type': 'application/json',
+            },
+          });
+
+          if (!response.ok) {
+            console.warn('Logout API call failed, but continuing with local signout');
+          }
+        } catch (fetchError) {
+          console.warn('Logout API call error:', fetchError);
+          // Continue with local signout even if API call fails
+        }
+      }
+
+      // Clear state immediately for immediate UI feedback
       setSession(null);
       setUser(null);
       setProfile(null);
+      setLoading(false);
 
-      const { error } = await supabaseCore.auth.signOut();
+      // Call Supabase signOut to clear local storage and trigger onAuthStateChange
+      // This should trigger the onAuthStateChange listener which will also set session to null
+      const { error } = await supabaseCore.auth.signOut({ scope: 'global' });
       if (error) {
         console.error('Error signing out:', error);
-        throw error;
+        // Don't throw - we've already cleared local state
       }
     } catch (error) {
       console.error('Sign out failed:', error);
-      throw error;
+      // Even on error, clear local state
+      setSession(null);
+      setUser(null);
+      setProfile(null);
+      setLoading(false);
     }
   };
 
