@@ -95,7 +95,8 @@ const fetchProfile = async (userId: string) => {
 
   const signInWithOTP = async (phone: string) => {
   try {
-    const formattedPhone = phone.startsWith('+') ? phone : `+1${phone}`;
+    // Use phone as-is (no country code prepending)
+    const formattedPhone = phone;
     
     // In development, just return success since we'll use hardcoded OTP
     if (process.env.EXPO_PUBLIC_NODE_ENV === 'development') {
@@ -120,92 +121,49 @@ const fetchProfile = async (userId: string) => {
 
 const verifyOTP = async (phone: string, token: string) => {
   try {
-    const formattedPhone = phone.startsWith('+') ? phone : `+1${phone}`;
-    const isDevelopment = process.env.EXPO_PUBLIC_NODE_ENV === 'development';
+    // Use the edge function for session creation to avoid duplicate vendor creation
+    const edgeFunctionUrl = `${supabaseUrl}/functions/v1/create-dev-session`;
+    
+    const response = await fetch(edgeFunctionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({ phone, otp: token }),
+    });
 
-    if (isDevelopment) {
-      if (token !== '123456') {
-        return { error: new Error('Invalid OTP') };
-      }
+    const data = await response.json();
 
-      // Format email properly (can't start with number)
-      const phoneDigits = formattedPhone.replace(/\D/g, ''); // Remove all non-digits
-      const userEmail = `umesh.bihani@bnt-soft.com`;
-
-      // First check if vendor exists with this phone number
-      const { data: existingVendor, error: vendorCheckError } = await supabaseCore
-        .from('vendors')
-        .select('*')
-        .eq('phone', phoneDigits)
-        .maybeSingle();
-
-      if (!vendorCheckError && existingVendor) {
-        // Vendor exists, use existing vendor's auth credentials
-        const { data: authData, error: signInError } = await supabaseCore.auth.signInWithPassword({
-          email: userEmail,
-          password: 'dev-password-123'
-        });
-
-        if (signInError) throw signInError;
-
-        if (authData.session && authData.user) {
-          setSession(authData.session);
-          setUser(authData.user);
-          setProfile(existingVendor);
-          return { error: null };
-        }
-      } else {
-        // No existing vendor, create new auth user and vendor
-        const { data: newAuthData, error: createError } = await supabaseCore.auth.signUp({
-          email: userEmail,
-          password: 'dev-password-123',
-          phone: formattedPhone,
-          options: {
-            data: {
-              phone: formattedPhone
-            }
-          }
-        });
-
-        if (createError && !createError.message.includes('User already registered')) {
-          throw createError;
-        }
-
-        // Sign in with new credentials
-        const { data: authData, error: signInError } = await supabaseCore.auth.signInWithPassword({
-          email: userEmail,
-          password: 'dev-password-123'
-        });
-
-        if (signInError) throw signInError;
-
-        if (authData.session && authData.user) {
-          setSession(authData.session);
-          setUser(authData.user);
-
-          // Create new vendor profile
-          const { error: vendorError } = await supabaseCore
-            .from('vendors')
-            .insert({
-              id: authData.user.id,
-              phone: phoneDigits,
-              first_name: '',
-              last_name: '',
-              email: userEmail
-            });
-
-          if (vendorError) {
-            console.error('Vendor creation error:', vendorError);
-            throw vendorError;
-          }
-
-          await fetchProfile(authData.user.id);
-          return { error: null };
-        }
-      }
+    if (!response.ok) {
+      // Handle error response from edge function
+      const errorMessage = data.error || data.details || `HTTP ${response.status}: Failed to create session`;
+      return { error: new Error(errorMessage) };
     }
 
-    return { error: new Error('Failed to create session') };
+    if (data.success && data.session) {
+      // Set the session in Supabase client first (this triggers onAuthStateChange)
+      const { error: sessionError } = await supabaseCore.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
+
+      if (sessionError) {
+        console.error('Error setting session:', sessionError);
+        return { error: sessionError };
+      }
+
+      // The onAuthStateChange listener will update session/user/profile automatically
+      // But we can also set it directly for immediate UI update
+      setSession(data.session);
+      if (data.session.user) {
+        setUser(data.session.user);
+        await fetchProfile(data.session.user.id);
+      }
+      return { error: null };
+    }
+
+    return { error: new Error(data.error || data.details || 'Failed to create session') };
   } catch (error) {
     console.error('Verification error:', error);
     return { error: error as Error };
