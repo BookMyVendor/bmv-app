@@ -20,6 +20,7 @@ import { pickMultipleImages, uploadMultipleBusinessImages, uploadMultipleVerific
 import { INDIAN_STATES } from '@/constants/indianStates';
 import { TextInput } from '@/components/TextInput';
 import { Dropdown } from '@/components/Dropdown';
+import Logo from '@/components/Logo';
 
 interface BusinessData {
   businessName: string;
@@ -345,6 +346,7 @@ export default function BusinessRegistrationScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <View style={styles.headerTop}>
+          <Logo size={48} style={styles.headerLogo} />
           <View style={styles.headerTextContainer}>
             <Text style={styles.title}>{steps[currentPage].title}</Text>
             <Text style={styles.subtitle}>{steps[currentPage].subtitle}</Text>
@@ -427,6 +429,10 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     marginBottom: 16,
+  },
+  headerLogo: {
+    marginRight: 12,
+    marginVertical: 0,
   },
   headerTextContainer: {
     flex: 1,

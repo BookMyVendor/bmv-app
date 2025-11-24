@@ -24,6 +24,7 @@ import SortModal, { SortOption } from '@/components/SortModal';
 import FilterModal from '@/components/FilterModal';
 import { Lead, STATUS_OPTIONS, PRIORITY_OPTIONS } from '@/types/leads';
 import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
+import Logo from '@/components/Logo';
 
 
 const EVENT_TYPES = [
@@ -434,6 +435,7 @@ export default function LeadsScreen() {
         style={[styles.header, { paddingTop: insets.top + 20 }]}
       >
         <View style={styles.headerTitleContainer}>
+          <Logo size={48} style={styles.headerLogo} />
           <Text style={styles.headerTitle}>Leads</Text>
           {timeFilter !== 'all' && (
             <View style={styles.timeFilterBadge}>
@@ -715,6 +717,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.md,
+  },
+  headerLogo: {
+    marginRight: Spacing.sm,
+    marginVertical: 0,
   },
   headerTitle: {
     fontSize: 32,

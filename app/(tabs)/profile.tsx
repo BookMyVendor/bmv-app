@@ -23,6 +23,7 @@ import * as Yup from 'yup';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore, supabaseCms } from '@/lib/supabase';
 import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
+import Logo from '@/components/Logo';
 
 const profileSchema = Yup.object().shape({
   firstName: Yup.string().required('First name is required'),
@@ -270,7 +271,10 @@ export default function ProfileScreen() {
         end={{ x: 1, y: 0 }}
         style={[styles.header, { paddingTop: insets.top + 20 }]}
       >
-        <Text style={styles.headerTitle}>Profile</Text>
+        <View style={styles.headerContent}>
+          <Logo size={48} style={styles.headerLogo} />
+          <Text style={styles.headerTitle}>Profile</Text>
+        </View>
         <TouchableOpacity 
             style={styles.signOutButton} 
             onPress={() => handleSignOut()}
@@ -419,6 +423,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  headerLogo: {
+    marginRight: Spacing.sm,
+    marginVertical: 0,
   },
   headerTitle: {
     fontSize: 32,

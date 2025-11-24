@@ -17,6 +17,7 @@ import { supabaseCore, supabaseCrm } from '@/lib/supabase';
 import { STATUS_OPTIONS, LeadStatus } from '@/types/leads';
 import FilterChip from '@/components/FilterChip';
 import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
+import Logo from '@/components/Logo';
 
 interface Business {
   id: string;
@@ -191,7 +192,10 @@ export default function DashboardScreen() {
         end={{ x: 1, y: 0 }}
         style={[styles.header, { paddingTop: insets.top + 20 }]}
       >
-        <Text style={styles.headerTitle}>Dashboard</Text>
+        <View style={styles.headerContent}>
+          <Logo size={48} style={styles.headerLogo} />
+          <Text style={styles.headerTitle}>Dashboard</Text>
+        </View>
       </LinearGradient>
 
       <ScrollView contentContainerStyle={styles.content}>
@@ -409,6 +413,15 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: Spacing.xxxl,
     paddingBottom: Spacing.xl,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  headerLogo: {
+    marginRight: Spacing.sm,
+    marginVertical: 0,
   },
   headerTitle: {
     fontSize: 32,

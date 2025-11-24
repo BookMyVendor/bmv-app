@@ -59,6 +59,8 @@ import {
   PortfolioImage,
 } from '@/lib/businessApi';
 import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '@/lib/documentUpload';
+import Logo from '@/components/Logo';
+import { Colors } from '@/constants/theme';
 
 type SectionType = 'offers' | 'gallery' | 'edit';
 
@@ -1141,7 +1143,7 @@ export default function BusinessDetailsScreen() {
   return (
     <View style={styles.container}>
       <LinearGradient
-        colors={['#2563EB', '#06B6D4']}
+        colors={[Colors.secondary.main, Colors.secondary.light]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={[styles.header, { paddingTop: insets.top + 16 }]}
@@ -1159,6 +1161,7 @@ export default function BusinessDetailsScreen() {
           >
             <ChevronLeft size={24} color="#fff" />
           </TouchableOpacity>
+          <Logo size={38} style={styles.headerLogo} />
           <View style={styles.headerTitleContainer}>
             <Text style={styles.headerTitle} numberOfLines={1}>
               {business.business_name}
@@ -2078,6 +2081,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 20,
+    gap: 12,
+  },
+  headerLogo: {
+    marginLeft: 4,
+    marginVertical: 0,
   },
   backButton: {
     width: 40,
