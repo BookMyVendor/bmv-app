@@ -131,13 +131,20 @@ const loggingFetch: typeof fetch = async (input, init) => {
   }
 };
 
+// Use a single shared storage key for all clients to ensure they share the same auth session
+// This reduces the "Multiple GoTrueClient instances" warning
+const SHARED_STORAGE_KEY = 'supabase.auth.token';
+
+const sharedAuthConfig = {
+  storage: AsyncStorage,
+  storageKey: SHARED_STORAGE_KEY,
+  autoRefreshToken: true,
+  persistSession: true,
+  detectSessionInUrl: false,
+};
+
 const clientConfig = {
-  auth: {
-    storage: AsyncStorage,
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: false,
-  },
+  auth: sharedAuthConfig,
   global: {
     headers: {
       'x-client-info': 'bmv-app',
