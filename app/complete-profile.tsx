@@ -137,86 +137,92 @@ export default function CompleteProfileScreen() {
       hasUser: !!user?.id
     });
     
-    if (!photoUri) {
-      console.log('❌ No photo URI - returning early');
-      Alert.alert('Photo Required', 'Please upload a profile photo');
-      return;
-    }
-
     if (!user?.id) {
       console.log('❌ No user ID - returning early');
       Alert.alert('Error', 'User not found. Please try logging in again.');
       return;
     }
 
-    console.log('✅ Starting upload process');
+    console.log('✅ Starting submission process');
     setUploading(true);
 
     try {
-      // Step 1: Upload image to storage bucket
-      console.log('📤 Step 1: Fetching image from URI:', photoUri);
-      const response = await fetch(photoUri);
-      if (!response.ok) {
-        console.error('❌ Failed to fetch image:', response.status, response.statusText);
-        throw new Error('Failed to load image');
+      let fileDataId: string | null = null;
+
+      // Step 1: Upload image to storage bucket (if photo provided)
+      if (photoUri) {
+        console.log('📤 Step 1: Fetching image from URI:', photoUri);
+        const response = await fetch(photoUri);
+        if (!response.ok) {
+          console.error('❌ Failed to fetch image:', response.status, response.statusText);
+          throw new Error('Failed to load image');
+        }
+        console.log('✅ Image fetched successfully');
+        
+        const blob = await response.blob();
+        console.log('✅ Blob created, size:', blob.size);
+        
+        const fileExt = photoUri.split('.').pop() || 'jpg';
+        const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+        const filePath = `profile-photos/${fileName}`;
+        console.log('📤 Step 2: Uploading to storage:', filePath);
+
+        // Upload to storage bucket
+        const { error: uploadError } = await supabaseCore.storage
+          .from('profile_image')
+          .upload(filePath, blob);
+
+        if (uploadError) {
+          console.error('❌ Storage upload error:', uploadError);
+          throw uploadError;
+        }
+        console.log('✅ Image uploaded to storage');
+
+        // Step 2: Create file_storage record
+        console.log('📤 Step 3: Creating file_storage record');
+        const { data: fileData, error: fileError } = await supabaseCms
+          .from('file_storage')
+          .insert({
+            original_filename: fileName,
+            stored_filename: fileName,
+            file_path: filePath,
+            file_size: blob.size,
+            mime_type: blob.type || `image/${fileExt}`,
+            file_extension: fileExt,
+            storage_provider: 'supabase',
+            storage_bucket: 'profile_image',
+            upload_status: 'completed',
+            uploaded_by_type: 'vendor',
+            uploaded_by_id: user?.id,
+          })
+          .select()
+          .single();
+
+        if (fileError) {
+          console.error('❌ file_storage insert error:', fileError);
+          throw fileError;
+        }
+        console.log('✅ file_storage record created:', fileData?.id);
+        fileDataId = fileData.id;
+      } else {
+        console.log('ℹ️ No photo provided, skipping image upload');
       }
-      console.log('✅ Image fetched successfully');
-      
-      const blob = await response.blob();
-      console.log('✅ Blob created, size:', blob.size);
-      
-      const fileExt = photoUri.split('.').pop() || 'jpg';
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-      const filePath = `profile-photos/${fileName}`;
-      console.log('📤 Step 2: Uploading to storage:', filePath);
 
-      // Upload to storage bucket
-      const { error: uploadError } = await supabase.storage
-        .from('profile_image')
-        .upload(filePath, blob);
-
-      if (uploadError) {
-        console.error('❌ Storage upload error:', uploadError);
-        throw uploadError;
-      }
-      console.log('✅ Image uploaded to storage');
-
-      // Step 2: Create file_storage record
-      console.log('📤 Step 3: Creating file_storage record');
-      const { data: fileData, error: fileError } = await supabaseCms
-        .from('file_storage')
-        .insert({
-          original_filename: fileName,
-          stored_filename: fileName,
-          file_path: filePath,
-          file_size: blob.size,
-          mime_type: blob.type || `image/${fileExt}`,
-          file_extension: fileExt,
-          storage_provider: 'supabase',
-          storage_bucket: 'profile_image',
-          upload_status: 'completed',
-          uploaded_by_type: 'vendor',
-          uploaded_by_id: user?.id,
-        })
-        .select()
-        .single();
-
-      if (fileError) {
-        console.error('❌ file_storage insert error:', fileError);
-        throw fileError;
-      }
-      console.log('✅ file_storage record created:', fileData?.id);
-
-      // Step 3: Update vendors table with image_file_id
+      // Step 3: Update vendors table
       console.log('📤 Step 4: Updating vendors table');
+      const updateData: any = {
+        first_name: values.firstName,
+        last_name: values.lastName,
+        email: values.email,
+      };
+      
+      if (fileDataId) {
+        updateData.image_file_id = fileDataId;
+      }
+
       const { error: vendorError } = await supabaseCore
         .from('vendors')
-        .update({
-          first_name: values.firstName,
-          last_name: values.lastName,
-          email: values.email,
-          image_file_id: fileData.id,
-        })
+        .update(updateData)
         .eq('id', user?.id);
 
       if (vendorError) {
@@ -225,42 +231,42 @@ export default function CompleteProfileScreen() {
       }
       console.log('✅ vendors table updated');
 
-      // Step 4: Create vendor_verification_documents entry for profile photo
-      // First, we need to find or create a document type for profile photos
-      // You may need to query for an existing document type or create one
-      // For now, assuming there's a document type with type_code 'profile_photo'
-      const { data: docTypeData } = await supabaseCore
-        .from('document_types')
-        .select('id')
-        .eq('type_code', 'profile_photo')
-        .maybeSingle();
+      // Step 4: Create vendor_verification_documents entry for profile photo (if photo uploaded)
+      if (fileDataId) {
+        const { data: docTypeData } = await supabaseCore
+          .from('document_types')
+          .select('id')
+          .eq('type_code', 'profile_photo')
+          .maybeSingle();
 
-      if (docTypeData) {
-        // Create verification document entry
-        const { error: verificationDocError } = await supabaseCms
-          .from('vendor_verification_documents')
-          .insert({
-            vendor_id: user?.id,
-            document_type_id: docTypeData.id,
-            file_id: fileData.id,
-            verification_status: 'pending',
-            uploaded_at: new Date().toISOString(),
-          });
+        if (docTypeData) {
+          // Create verification document entry
+          const { error: verificationDocError } = await supabaseCms
+            .from('vendor_verification_documents')
+            .insert({
+              vendor_id: user?.id,
+              document_type_id: docTypeData.id,
+              file_id: fileDataId,
+              verification_status: 'pending',
+              uploaded_at: new Date().toISOString(),
+            });
 
-        // Don't throw error if this fails - it's optional tracking
-        if (verificationDocError) {
-          console.warn('Failed to create verification document entry:', verificationDocError);
+          // Don't throw error if this fails - it's optional tracking
+          if (verificationDocError) {
+            console.warn('Failed to create verification document entry:', verificationDocError);
+          }
         }
       }
 
       console.log('📤 Step 5: Refreshing profile');
       await refreshProfile();
       
-      // Small delay to ensure profile is refreshed
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Wait longer to ensure profile state is updated in AuthContext
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       console.log('✅ All steps completed, navigating to business-registration');
-      router.replace('/business-registration');
+      // Use push instead of replace to avoid navigation conflicts
+      router.push('/business-registration');
     } catch (error: any) {
       console.error('❌ Profile submission error:', error);
       console.error('Error details:', {

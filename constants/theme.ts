@@ -1,21 +1,27 @@
 export const Colors = {
   primary: {
-    main: '#FF6B35',
-    light: '#FF8C61',
-    dark: '#E5522A',
-    gradient: ['#FF6B35', '#FF8C61'],
+    main: '#ffb543',
+    light: '#FFC766',
+    dark: '#E5A02F',
+    gradient: ['#ffb543', '#FFC766'],
   },
   secondary: {
-    main: '#4ECDC4',
-    light: '#7FE0D9',
-    dark: '#3BB8AF',
-    gradient: ['#4ECDC4', '#7FE0D9'],
+    main: '#6aa3ce',
+    light: '#8BB5D9',
+    dark: '#5A8FB8',
+    gradient: ['#6aa3ce', '#8BB5D9'],
   },
   accent: {
-    main: '#FFD93D',
-    light: '#FFE57F',
-    dark: '#F4C430',
-    gradient: ['#FFD93D', '#FFE57F'],
+    main: '#88a94b',
+    light: '#A0C063',
+    dark: '#76923F',
+    gradient: ['#88a94b', '#A0C063'],
+  },
+  purple: {
+    main: '#cd74c2',
+    light: '#D98FD0',
+    dark: '#B563A8',
+    gradient: ['#cd74c2', '#D98FD0'],
   },
   success: {
     main: '#6BCF7F',
@@ -34,9 +40,9 @@ export const Colors = {
     dark: '#E63939',
   },
   info: {
-    main: '#5C9EFF',
-    light: '#85B5FF',
-    dark: '#4285F4',
+    main: '#6aa3ce',
+    light: '#8BB5D9',
+    dark: '#5A8FB8',
   },
   neutral: {
     white: '#FFFFFF',
@@ -92,37 +98,42 @@ export const Colors = {
 
 export const Gradients = {
   primary: {
-    colors: ['#FF6B35', '#FF8C61'],
+    colors: ['#ffb543', '#FFC766'],
     start: { x: 0, y: 0 },
     end: { x: 1, y: 1 },
   },
   secondary: {
-    colors: ['#4ECDC4', '#7FE0D9'],
+    colors: ['#6aa3ce', '#8BB5D9'],
     start: { x: 0, y: 0 },
     end: { x: 1, y: 1 },
   },
   warm: {
-    colors: ['#FF6B35', '#FFD93D'],
+    colors: ['#ffb543', '#88a94b'],
     start: { x: 0, y: 0 },
     end: { x: 1, y: 1 },
   },
   cool: {
-    colors: ['#4ECDC4', '#5C9EFF'],
+    colors: ['#6aa3ce', '#cd74c2'],
     start: { x: 0, y: 0 },
     end: { x: 1, y: 1 },
   },
   sunset: {
-    colors: ['#FF6B35', '#FF8C61', '#FFD93D'],
+    colors: ['#ffb543', '#88a94b', '#cd74c2'],
     start: { x: 0, y: 0 },
     end: { x: 1, y: 1 },
   },
   success: {
-    colors: ['#6BCF7F', '#8EE09E'],
+    colors: ['#88a94b', '#A0C063'],
     start: { x: 0, y: 0 },
     end: { x: 1, y: 1 },
   },
   info: {
-    colors: ['#5C9EFF', '#85B5FF'],
+    colors: ['#6aa3ce', '#8BB5D9'],
+    start: { x: 0, y: 0 },
+    end: { x: 1, y: 1 },
+  },
+  purple: {
+    colors: ['#cd74c2', '#D98FD0'],
     start: { x: 0, y: 0 },
     end: { x: 1, y: 1 },
   },
@@ -151,7 +162,7 @@ export const Shadows = {
     elevation: 8,
   },
   colored: {
-    shadowColor: '#FF6B35',
+    shadowColor: '#ffb543',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
