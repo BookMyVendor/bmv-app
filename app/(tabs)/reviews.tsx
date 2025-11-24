@@ -27,6 +27,7 @@ import FilterModal from '@/components/FilterModal';
 import SortModal from '@/components/SortModal';
 import ReplyModal from '@/components/ReplyModal';
 import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
+import Logo from '@/components/Logo';
 
 interface Review {
   id: string;
@@ -477,7 +478,10 @@ export default function ReviewsScreen() {
         end={{ x: 1, y: 0 }}
         style={[styles.header, { paddingTop: insets.top + 20 }]}
       >
-        <Text style={styles.headerTitle}>Reviews</Text>
+        <View style={styles.headerContent}>
+          <Logo size={48} style={styles.headerLogo} />
+          <Text style={styles.headerTitle}>Reviews</Text>
+        </View>
       </LinearGradient>
 
       {loading ? (
@@ -578,6 +582,15 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: Spacing.xxxl,
     paddingBottom: Spacing.xl,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  headerLogo: {
+    marginRight: Spacing.sm,
+    marginVertical: 0,
   },
   headerTitle: {
     fontSize: 32,

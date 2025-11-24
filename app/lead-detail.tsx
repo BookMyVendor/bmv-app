@@ -15,6 +15,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Phone, Mail, Calendar, MapPin, Users, DollarSign, Building2, CreditCard as Edit, Trash2, Clock, Tag, FileText, MessageSquare, CircleCheck as CheckCircle, Circle as XCircle } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore, supabaseCrm } from '@/lib/supabase';
+import Logo from '@/components/Logo';
 import { Lead, LeadActivity, STATUS_OPTIONS } from '@/types/leads';
 import { getTimeAgo, formatEventDate } from '@/lib/timeUtils';
 
@@ -350,6 +351,7 @@ export default function LeadDetailScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <ArrowLeft size={24} color="#007AFF" strokeWidth={2} />
         </TouchableOpacity>
+        <Logo size={38} style={styles.headerLogo} />
         <Text style={styles.headerTitle}>Lead Details</Text>
         <TouchableOpacity onPress={handleDeleteLead} style={styles.deleteBtn}>
           <Trash2 size={20} color="#FF3B30" strokeWidth={2} />
@@ -711,10 +713,16 @@ const styles = StyleSheet.create({
   backBtn: {
     padding: 4,
   },
+  headerLogo: {
+    marginLeft: 8,
+    marginRight: 8,
+    marginVertical: 0,
+  },
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: '#1a1a1a',
+    flex: 1,
   },
   deleteBtn: {
     padding: 4,

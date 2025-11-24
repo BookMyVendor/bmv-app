@@ -20,6 +20,7 @@ import {
   Lead,
 } from '@/types/leads';
 import Dropdown from '@/components/Dropdown';
+import Logo from '@/components/Logo';
 
 export default function LeadFormScreen() {
   const router = useRouter();
@@ -271,6 +272,7 @@ export default function LeadFormScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <ArrowLeft size={24} color="#007AFF" strokeWidth={2} />
         </TouchableOpacity>
+        <Logo size={38} style={styles.headerLogo} />
         <Text style={styles.headerTitle}>
           {isEditMode ? 'Edit Lead' : 'Add New Lead'}
         </Text>
@@ -539,10 +541,16 @@ const styles = StyleSheet.create({
   backBtn: {
     padding: 4,
   },
+  headerLogo: {
+    marginLeft: 8,
+    marginRight: 8,
+    marginVertical: 0,
+  },
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: '#1a1a1a',
+    flex: 1,
   },
   saveBtn: {
     padding: 4,

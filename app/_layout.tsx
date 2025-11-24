@@ -26,7 +26,8 @@ function RootLayoutNav() {
     const inBusinessReg = segments[0] === 'business-registration';
 
     // If no session, redirect to login (this handles logout case)
-    if (!session) {
+    // Check both session and user to ensure we're truly logged out
+    if (!session && !loading) {
       if (!inAuthGroup) {
         router.replace('/(auth)/login');
       }

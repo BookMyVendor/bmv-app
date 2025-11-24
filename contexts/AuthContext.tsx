@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabaseCore, supabaseUrl } from '@/lib/supabase';
 
@@ -31,9 +31,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const userRef = useRef<User | null>(null);
+  const isLoggingOutRef = useRef<boolean>(false);
 
 const fetchProfile = async (userId: string) => {
   try {
+    // Don't fetch if userId is not provided or if we're logging out
+    if (!userId || isLoggingOutRef.current) {
+      setProfile(null);
+      return;
+    }
+
     const { data, error } = await supabaseCore
       .from('vendors')
       .select('*')
@@ -49,19 +57,46 @@ const fetchProfile = async (userId: string) => {
 
   useEffect(() => {
     supabaseCore.auth.getSession().then(async ({ data: { session } }) => {
+      // Don't process session if we're in the middle of logging out
+      if (isLoggingOutRef.current) {
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+        setLoading(false);
+        return;
+      }
+
       setSession(session);
       setUser(session?.user ?? null);
-      if (session?.user) {
+      if (session?.user?.id) {
         await fetchProfile(session.user.id);
+      } else {
+        setProfile(null);
       }
       setLoading(false);
     });
 
-    const { data: { subscription } } = supabaseCore.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabaseCore.auth.onAuthStateChange((event, session) => {
       (async () => {
+        // On SIGNED_OUT event, ensure all state is cleared
+        if (event === 'SIGNED_OUT' || !session) {
+          isLoggingOutRef.current = false; // Reset logout flag
+          setSession(null);
+          setUser(null);
+          userRef.current = null; // Clear ref as well
+          setProfile(null);
+          setLoading(false);
+          return;
+        }
+        
+        // Don't process session if we're logging out
+        if (isLoggingOutRef.current) {
+          return;
+        }
+        
         setSession(session);
         setUser(session?.user ?? null);
-        if (session?.user) {
+        if (session?.user?.id) {
           await fetchProfile(session.user.id);
         } else {
           setProfile(null);
@@ -75,6 +110,11 @@ const fetchProfile = async (userId: string) => {
     };
   }, []);
 
+  // Update ref whenever user changes
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
   // Separate effect for polling - only runs when user.id changes
   useEffect(() => {
     if (!user?.id) {
@@ -83,9 +123,13 @@ const fetchProfile = async (userId: string) => {
 
     // Poll profile every 30 minutes (30 * 60 * 1000 ms)
     const pollInterval = setInterval(() => {
-      fetchProfile(user.id).catch((error) => {
-        console.error('Error polling profile:', error);
-      });
+      // Use ref to get current user state (avoids closure issue)
+      const currentUser = userRef.current;
+      if (currentUser?.id) {
+        fetchProfile(currentUser.id).catch((error) => {
+          console.error('Error polling profile:', error);
+        });
+      }
     }, 30 * 60 * 1000);
 
     return () => {
@@ -122,26 +166,38 @@ const fetchProfile = async (userId: string) => {
 const verifyOTP = async (phone: string, token: string) => {
   try {
     // Use the edge function for session creation to avoid duplicate vendor creation
+    // Use manual fetch() instead of functions.invoke() for better CORS handling in React Native/Expo
     const edgeFunctionUrl = `${supabaseUrl}/functions/v1/create-dev-session`;
+    const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+    
+    console.log(`[LOG] Calling Edge Function: ${edgeFunctionUrl}`);
     
     const response = await fetch(edgeFunctionUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY}`,
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+        'apikey': supabaseAnonKey,
       },
       body: JSON.stringify({ phone, otp: token }),
     });
 
-    const data = await response.json();
-
     if (!response.ok) {
-      // Handle error response from edge function
-      const errorMessage = data.error || data.details || `HTTP ${response.status}: Failed to create session`;
-      return { error: new Error(errorMessage) };
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
+      }
+      console.error(`[LOG] Edge Function error (${response.status}):`, errorData);
+      return { 
+        error: new Error(errorData.error || errorData.details || `HTTP ${response.status}: Failed to create session`) 
+      };
     }
 
-    if (data.success && data.session) {
+    const data = await response.json();
+
+    if (data && data.success && data.session) {
       // Set the session in Supabase client first (this triggers onAuthStateChange)
       const { error: sessionError } = await supabaseCore.auth.setSession({
         access_token: data.session.access_token,
@@ -163,9 +219,9 @@ const verifyOTP = async (phone: string, token: string) => {
       return { error: null };
     }
 
-    return { error: new Error(data.error || data.details || 'Failed to create session') };
+    return { error: new Error(data?.error || data?.details || 'Failed to create session') };
   } catch (error) {
-    console.error('Verification error:', error);
+    console.error('[LOG] Verification error:', error);
     return { error: error as Error };
   }
 };
@@ -298,50 +354,38 @@ const verifyOTP = async (phone: string, token: string) => {
 
   const signOut = async () => {
     try {
-      // Get current session to ensure we have access token for API call
-      const { data: { session: currentSession } } = await supabaseCore.auth.getSession();
+      // Set logout flag to prevent any profile fetches
+      isLoggingOutRef.current = true;
       
-      if (currentSession?.access_token) {
-        // Explicitly make API call to logout endpoint
-        try {
-          const response = await fetch(`${supabaseUrl}/auth/v1/logout`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${currentSession.access_token}`,
-              'apikey': process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
-              'Content-Type': 'application/json',
-            },
-          });
-
-          if (!response.ok) {
-            console.warn('Logout API call failed, but continuing with local signout');
-          }
-        } catch (fetchError) {
-          console.warn('Logout API call error:', fetchError);
-          // Continue with local signout even if API call fails
-        }
-      }
-
-      // Clear state immediately for immediate UI feedback
+      // First, clear local state immediately for immediate UI feedback
       setSession(null);
       setUser(null);
+      userRef.current = null; // Clear ref to prevent polling
       setProfile(null);
       setLoading(false);
 
-      // Call Supabase signOut to clear local storage and trigger onAuthStateChange
-      // This should trigger the onAuthStateChange listener which will also set session to null
-      const { error } = await supabaseCore.auth.signOut({ scope: 'global' });
+      // Then call Supabase signOut to clear local storage
+      // Use 'local' scope instead of 'global' to avoid API call that might fail
+      // 'local' scope clears the session from local storage without making API call
+      const { error } = await supabaseCore.auth.signOut({ scope: 'local' });
       if (error) {
-        console.error('Error signing out:', error);
+        console.warn('Error signing out from Supabase (continuing anyway):', error);
         // Don't throw - we've already cleared local state
       }
+      
+      // Reset logout flag after a short delay to allow any pending operations to complete
+      setTimeout(() => {
+        isLoggingOutRef.current = false;
+      }, 1000);
     } catch (error) {
       console.error('Sign out failed:', error);
-      // Even on error, clear local state
+      // Even on error, ensure local state is cleared
       setSession(null);
       setUser(null);
+      userRef.current = null; // Clear ref as well
       setProfile(null);
       setLoading(false);
+      isLoggingOutRef.current = false; // Reset flag
     }
   };
 
