@@ -57,16 +57,22 @@ export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
-    fetchBusinesses();
-    fetchLeadStats();
-  }, [selectedStatuses]);
+    if (user?.id) {
+      fetchBusinesses();
+      fetchLeadStats();
+    }
+  }, [user?.id, selectedStatuses]);
 
   const fetchBusinesses = async () => {
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
     try {
       const { data, error } = await supabaseCore
         .from('vendor_businesses')
         .select('*')
-        .eq('vendor_id', user?.id)
+        .eq('vendor_id', user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -79,11 +85,14 @@ export default function DashboardScreen() {
   };
 
   const fetchLeadStats = async () => {
+    if (!user?.id) {
+      return;
+    }
     try {
       const { data: businessData } = await supabaseCore
         .from('vendor_businesses')
         .select('id')
-        .eq('vendor_id', user?.id);
+        .eq('vendor_id', user.id);
 
       if (!businessData || businessData.length === 0) {
         setLeadStats({
@@ -107,7 +116,7 @@ export default function DashboardScreen() {
       let totalQuery = supabaseCrm
         .from('customer_leads')
         .select('*', { count: 'exact', head: true })
-        .eq('vendor_id', user?.id);
+        .eq('vendor_id', user.id);
 
       if (statusFilter) {
         totalQuery = totalQuery.in('lead_status', statusFilter);
@@ -122,7 +131,7 @@ export default function DashboardScreen() {
       let monthlyQuery = supabaseCrm
         .from('customer_leads')
         .select('*', { count: 'exact', head: true })
-        .eq('vendor_id', user?.id)
+        .eq('vendor_id', user.id)
         .gte('created_at', startOfMonth.toISOString());
 
       if (statusFilter) {
@@ -137,7 +146,7 @@ export default function DashboardScreen() {
       let todayQuery = supabaseCrm
         .from('customer_leads')
         .select('*', { count: 'exact', head: true })
-        .eq('vendor_id', user?.id)
+        .eq('vendor_id', user.id)
         .gte('created_at', startOfDay.toISOString());
 
       if (statusFilter) {
@@ -149,7 +158,7 @@ export default function DashboardScreen() {
       const { data: allLeads } = await supabaseCrm
         .from('customer_leads')
         .select('lead_status')
-        .eq('vendor_id', user?.id);
+        .eq('vendor_id', user.id);
 
       const statusCounts: Record<LeadStatus, number> = {
         new: 0,
