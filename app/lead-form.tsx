@@ -56,12 +56,14 @@ export default function LeadFormScreen() {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    fetchBusinesses();
-    fetchEventCategories();
-    if (isEditMode) {
-      fetchLead();
+    if (user?.id) {
+      fetchBusinesses();
+      fetchEventCategories();
+      if (isEditMode) {
+        fetchLead();
+      }
     }
-  }, []);
+  }, [user?.id, isEditMode]);
 
   const fetchEventCategories = async () => {
     try {
@@ -81,11 +83,14 @@ export default function LeadFormScreen() {
   };
 
   const fetchBusinesses = async () => {
+    if (!user?.id) {
+      return;
+    }
     try {
       const { data, error } = await supabaseCore
         .from('vendor_businesses')
         .select('id, business_name')
-        .eq('vendor_id', user?.id)
+        .eq('vendor_id', user.id)
         .order('business_name');
 
       if (error) throw error;
