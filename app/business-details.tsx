@@ -59,6 +59,8 @@ import {
   PortfolioImage,
 } from '@/lib/businessApi';
 import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '@/lib/documentUpload';
+import Logo from '@/components/Logo';
+import { Colors } from '@/constants/theme';
 
 type SectionType = 'offers' | 'gallery' | 'edit';
 
@@ -71,7 +73,7 @@ export default function BusinessDetailsScreen() {
   const [business, setBusiness] = useState<any>(null);
   const [offers, setOffers] = useState<Offer[]>([]);
   const [images, setImages] = useState<PortfolioImage[]>([]);
-  const [activeSection, setActiveSection] = useState<SectionType>('offers');
+  const [activeSection, setActiveSection] = useState<SectionType>('gallery');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -130,7 +132,34 @@ export default function BusinessDetailsScreen() {
 
       setBusiness(businessRes.data);
       setOffers(offersRes.data || []);
-      setImages(imagesRes.data || []);
+      
+      // Combine images from vendor_business_media with cover_photo_url from business
+      let allImages = imagesRes.data || [];
+      
+      // If business has cover_photo_url and it's not already in images, add it
+      if (businessRes.data?.cover_photo_url) {
+        const coverExists = allImages.some(
+          (img) => img.image_url === businessRes.data.cover_photo_url || img.image_type === 'cover'
+        );
+        
+        if (!coverExists) {
+          // Add cover photo as the first image
+          allImages = [
+            {
+              id: `cover-${id}`, // Temporary ID for cover photo
+              business_id: id,
+              image_url: businessRes.data.cover_photo_url,
+              image_base64: null,
+              display_order: 0,
+              created_at: businessRes.data.created_at || new Date().toISOString(),
+              image_type: 'cover',
+            },
+            ...allImages,
+          ];
+        }
+      }
+      
+      setImages(allImages);
       setEditData(businessRes.data || {});
 
       // Load categories first, then mappings
@@ -1114,7 +1143,7 @@ export default function BusinessDetailsScreen() {
   return (
     <View style={styles.container}>
       <LinearGradient
-        colors={['#2563EB', '#06B6D4']}
+        colors={[Colors.secondary.main, Colors.secondary.light]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={[styles.header, { paddingTop: insets.top + 16 }]}
@@ -1132,6 +1161,7 @@ export default function BusinessDetailsScreen() {
           >
             <ChevronLeft size={24} color="#fff" />
           </TouchableOpacity>
+          <Logo size={38} style={styles.headerLogo} />
           <View style={styles.headerTitleContainer}>
             <Text style={styles.headerTitle} numberOfLines={1}>
               {business.business_name}
@@ -1143,6 +1173,7 @@ export default function BusinessDetailsScreen() {
         </View>
 
         <View style={styles.tabContainer}>
+          {/*
           <TouchableOpacity
             style={[
               styles.tab,
@@ -1160,6 +1191,8 @@ export default function BusinessDetailsScreen() {
               Offers
             </Text>
           </TouchableOpacity>
+          */}
+          
           <TouchableOpacity
             style={[
               styles.tab,
@@ -1203,7 +1236,8 @@ export default function BusinessDetailsScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {activeSection === 'offers' && (
+  
+        {/*activeSection === 'offers' && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Offers & Promotions</Text>
@@ -1230,7 +1264,8 @@ export default function BusinessDetailsScreen() {
               </View>
             )}
           </View>
-        )}
+        )*/}
+      
 
         {activeSection === 'gallery' && (
           <View style={styles.section}>
@@ -2046,6 +2081,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 20,
+    gap: 12,
+  },
+  headerLogo: {
+    marginLeft: 4,
+    marginVertical: 0,
   },
   backButton: {
     width: 40,

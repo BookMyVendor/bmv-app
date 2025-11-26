@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { Session, User } from '@supabase/supabase-js';
-import { supabaseCore } from '@/lib/supabase';
+import { supabaseCore, supabaseUrl } from '@/lib/supabase';
 
 interface UserProfile {
   id: string;
@@ -31,9 +31,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const userRef = useRef<User | null>(null);
+  const isLoggingOutRef = useRef<boolean>(false);
 
 const fetchProfile = async (userId: string) => {
   try {
+    // Don't fetch if userId is not provided or if we're logging out
+    if (!userId || isLoggingOutRef.current) {
+      setProfile(null);
+      return;
+    }
+
     const { data, error } = await supabaseCore
       .from('vendors')
       .select('*')
@@ -49,19 +57,46 @@ const fetchProfile = async (userId: string) => {
 
   useEffect(() => {
     supabaseCore.auth.getSession().then(async ({ data: { session } }) => {
+      // Don't process session if we're in the middle of logging out
+      if (isLoggingOutRef.current) {
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+        setLoading(false);
+        return;
+      }
+
       setSession(session);
       setUser(session?.user ?? null);
-      if (session?.user) {
+      if (session?.user?.id) {
         await fetchProfile(session.user.id);
+      } else {
+        setProfile(null);
       }
       setLoading(false);
     });
 
-    const { data: { subscription } } = supabaseCore.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabaseCore.auth.onAuthStateChange((event, session) => {
       (async () => {
+        // On SIGNED_OUT event, ensure all state is cleared
+        if (event === 'SIGNED_OUT' || !session) {
+          isLoggingOutRef.current = false; // Reset logout flag
+          setSession(null);
+          setUser(null);
+          userRef.current = null; // Clear ref as well
+          setProfile(null);
+          setLoading(false);
+          return;
+        }
+        
+        // Don't process session if we're logging out
+        if (isLoggingOutRef.current) {
+          return;
+        }
+        
         setSession(session);
         setUser(session?.user ?? null);
-        if (session?.user) {
+        if (session?.user?.id) {
           await fetchProfile(session.user.id);
         } else {
           setProfile(null);
@@ -75,6 +110,11 @@ const fetchProfile = async (userId: string) => {
     };
   }, []);
 
+  // Update ref whenever user changes
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
   // Separate effect for polling - only runs when user.id changes
   useEffect(() => {
     if (!user?.id) {
@@ -83,9 +123,13 @@ const fetchProfile = async (userId: string) => {
 
     // Poll profile every 30 minutes (30 * 60 * 1000 ms)
     const pollInterval = setInterval(() => {
-      fetchProfile(user.id).catch((error) => {
-        console.error('Error polling profile:', error);
-      });
+      // Use ref to get current user state (avoids closure issue)
+      const currentUser = userRef.current;
+      if (currentUser?.id) {
+        fetchProfile(currentUser.id).catch((error) => {
+          console.error('Error polling profile:', error);
+        });
+      }
     }, 30 * 60 * 1000);
 
     return () => {
@@ -95,7 +139,8 @@ const fetchProfile = async (userId: string) => {
 
   const signInWithOTP = async (phone: string) => {
   try {
-    const formattedPhone = phone.startsWith('+') ? phone : `+1${phone}`;
+    // Use phone as-is (no country code prepending)
+    const formattedPhone = phone;
     
     // In development, just return success since we'll use hardcoded OTP
     if (process.env.EXPO_PUBLIC_NODE_ENV === 'development') {
@@ -120,94 +165,63 @@ const fetchProfile = async (userId: string) => {
 
 const verifyOTP = async (phone: string, token: string) => {
   try {
-    const formattedPhone = phone.startsWith('+') ? phone : `+1${phone}`;
-    const isDevelopment = process.env.EXPO_PUBLIC_NODE_ENV === 'development';
+    // Use the edge function for session creation to avoid duplicate vendor creation
+    // Use manual fetch() instead of functions.invoke() for better CORS handling in React Native/Expo
+    const edgeFunctionUrl = `${supabaseUrl}/functions/v1/create-dev-session`;
+    const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+    
+    console.log(`[LOG] Calling Edge Function: ${edgeFunctionUrl}`);
+    
+    const response = await fetch(edgeFunctionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+        'apikey': supabaseAnonKey,
+      },
+      body: JSON.stringify({ phone, otp: token }),
+    });
 
-    if (isDevelopment) {
-      if (token !== '123456') {
-        return { error: new Error('Invalid OTP') };
+    if (!response.ok) {
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
       }
-
-      // Format email properly (can't start with number)
-      const phoneDigits = formattedPhone.replace(/\D/g, ''); // Remove all non-digits
-      const userEmail = `umesh.bihani@bnt-soft.com`;
-
-      // First check if vendor exists with this phone number
-      const { data: existingVendor, error: vendorCheckError } = await supabaseCore
-        .from('vendors')
-        .select('*')
-        .eq('phone', phoneDigits)
-        .maybeSingle();
-
-      if (!vendorCheckError && existingVendor) {
-        // Vendor exists, use existing vendor's auth credentials
-        const { data: authData, error: signInError } = await supabaseCore.auth.signInWithPassword({
-          email: userEmail,
-          password: 'dev-password-123'
-        });
-
-        if (signInError) throw signInError;
-
-        if (authData.session && authData.user) {
-          setSession(authData.session);
-          setUser(authData.user);
-          setProfile(existingVendor);
-          return { error: null };
-        }
-      } else {
-        // No existing vendor, create new auth user and vendor
-        const { data: newAuthData, error: createError } = await supabaseCore.auth.signUp({
-          email: userEmail,
-          password: 'dev-password-123',
-          phone: formattedPhone,
-          options: {
-            data: {
-              phone: formattedPhone
-            }
-          }
-        });
-
-        if (createError && !createError.message.includes('User already registered')) {
-          throw createError;
-        }
-
-        // Sign in with new credentials
-        const { data: authData, error: signInError } = await supabaseCore.auth.signInWithPassword({
-          email: userEmail,
-          password: 'dev-password-123'
-        });
-
-        if (signInError) throw signInError;
-
-        if (authData.session && authData.user) {
-          setSession(authData.session);
-          setUser(authData.user);
-
-          // Create new vendor profile
-          const { error: vendorError } = await supabaseCore
-            .from('vendors')
-            .insert({
-              id: authData.user.id,
-              phone: phoneDigits,
-              first_name: '',
-              last_name: '',
-              email: userEmail
-            });
-
-          if (vendorError) {
-            console.error('Vendor creation error:', vendorError);
-            throw vendorError;
-          }
-
-          await fetchProfile(authData.user.id);
-          return { error: null };
-        }
-      }
+      console.error(`[LOG] Edge Function error (${response.status}):`, errorData);
+      return { 
+        error: new Error(errorData.error || errorData.details || `HTTP ${response.status}: Failed to create session`) 
+      };
     }
 
-    return { error: new Error('Failed to create session') };
+    const data = await response.json();
+
+    if (data && data.success && data.session) {
+      // Set the session in Supabase client first (this triggers onAuthStateChange)
+      const { error: sessionError } = await supabaseCore.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
+
+      if (sessionError) {
+        console.error('Error setting session:', sessionError);
+        return { error: sessionError };
+      }
+
+      // The onAuthStateChange listener will update session/user/profile automatically
+      // But we can also set it directly for immediate UI update
+      setSession(data.session);
+      if (data.session.user) {
+        setUser(data.session.user);
+        await fetchProfile(data.session.user.id);
+      }
+      return { error: null };
+    }
+
+    return { error: new Error(data?.error || data?.details || 'Failed to create session') };
   } catch (error) {
-    console.error('Verification error:', error);
+    console.error('[LOG] Verification error:', error);
     return { error: error as Error };
   }
 };
@@ -340,18 +354,38 @@ const verifyOTP = async (phone: string, token: string) => {
 
   const signOut = async () => {
     try {
+      // Set logout flag to prevent any profile fetches
+      isLoggingOutRef.current = true;
+      
+      // First, clear local state immediately for immediate UI feedback
       setSession(null);
       setUser(null);
+      userRef.current = null; // Clear ref to prevent polling
       setProfile(null);
+      setLoading(false);
 
-      const { error } = await supabaseCore.auth.signOut();
+      // Then call Supabase signOut to clear local storage
+      // Use 'local' scope instead of 'global' to avoid API call that might fail
+      // 'local' scope clears the session from local storage without making API call
+      const { error } = await supabaseCore.auth.signOut({ scope: 'local' });
       if (error) {
-        console.error('Error signing out:', error);
-        throw error;
+        console.warn('Error signing out from Supabase (continuing anyway):', error);
+        // Don't throw - we've already cleared local state
       }
+      
+      // Reset logout flag after a short delay to allow any pending operations to complete
+      setTimeout(() => {
+        isLoggingOutRef.current = false;
+      }, 1000);
     } catch (error) {
       console.error('Sign out failed:', error);
-      throw error;
+      // Even on error, ensure local state is cleared
+      setSession(null);
+      setUser(null);
+      userRef.current = null; // Clear ref as well
+      setProfile(null);
+      setLoading(false);
+      isLoggingOutRef.current = false; // Reset flag
     }
   };
 

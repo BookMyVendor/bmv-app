@@ -14,6 +14,7 @@ import { Smartphone, Shield } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
+import Logo from '@/components/Logo';
 
 const DEV_MODE = true;
 const DEV_OTP = '123456';
@@ -89,7 +90,7 @@ export default function LoginScreen() {
 
   return (
     <LinearGradient
-      colors={['#FFE5E0', '#FFF8F5', '#FFFFFF']}
+      colors={[Colors.background.gradient[0], Colors.background.gradient[1], '#FFFFFF']}
       style={styles.container}
     >
       <KeyboardAvoidingView
@@ -98,14 +99,7 @@ export default function LoginScreen() {
       >
         <View style={styles.content}>
           <View style={styles.headerContainer}>
-            <LinearGradient
-              colors={[Colors.primary.main, Colors.primary.light]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.iconCircle}
-            >
-              <Smartphone size={40} color={Colors.neutral.white} strokeWidth={2} />
-            </LinearGradient>
+            <Logo size={130} style={styles.logo} />
             <Text style={styles.title}>Welcome to VendorHub</Text>
             <Text style={styles.subtitle}>
               {step === 'phone'

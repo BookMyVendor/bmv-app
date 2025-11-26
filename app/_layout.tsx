@@ -13,6 +13,7 @@ function RootLayoutNav() {
   const [initialLoad, setInitialLoad] = useState(true);
 
   useEffect(() => {
+    // Don't navigate during initial load
     if (loading && initialLoad) return;
 
     if (initialLoad) {
@@ -24,15 +25,22 @@ function RootLayoutNav() {
     const inCompleteProfile = segments[0] === 'complete-profile';
     const inBusinessReg = segments[0] === 'business-registration';
 
-    if (!session) {
+    // If no session, redirect to login (this handles logout case)
+    // Check both session and user to ensure we're truly logged out
+    if (!session && !loading) {
       if (!inAuthGroup) {
         router.replace('/(auth)/login');
       }
-    } else if (session && profile) {
-      // Remove is_profile_complete check (if it exists)
-      // Since vendors table doesn't have this field, you may need to:
-      // 1. Remove the check entirely, OR
-      // 2. Use a different field (like checking if first_name exists)
+      return;
+    }
+
+    // If we have a session but no profile yet, wait for profile to load
+    if (session && !profile && loading) {
+      return;
+    }
+
+    // If we have session and profile, handle navigation
+    if (session && profile) {
       if (!profile?.first_name && !inCompleteProfile) {
         router.replace('/complete-profile');
       } else if (profile?.first_name && (inAuthGroup || inCompleteProfile)) {

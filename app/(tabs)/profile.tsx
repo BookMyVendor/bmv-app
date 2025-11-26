@@ -10,6 +10,8 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { Platform } from 'react-native';
+
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +23,7 @@ import * as Yup from 'yup';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore, supabaseCms } from '@/lib/supabase';
 import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
+import Logo from '@/components/Logo';
 
 const profileSchema = Yup.object().shape({
   firstName: Yup.string().required('First name is required'),
@@ -231,20 +234,33 @@ export default function ProfileScreen() {
   };
 
   const handleSignOut = async () => {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign Out',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await signOut();
-          } catch (error: any) {
-            Alert.alert('Error', 'Failed to sign out. Please try again.');
-          }
+    if (Platform.OS === 'web') {
+      // Web version
+      const confirmed = window.confirm('Are you sure you want to sign out?');
+      if (confirmed) {
+        try {
+          await signOut();
+        } catch (error: any) {
+          window.alert('Failed to sign out. Please try again.');
+        }
+      }
+    } else {
+      // Mobile version
+      Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await signOut();
+            } catch (error: any) {
+              Alert.alert('Error', 'Failed to sign out. Please try again.');
+            }
+          },
         },
-      },
-    ]);
+      ]);
+    }
   };
 
   return (
@@ -255,8 +271,17 @@ export default function ProfileScreen() {
         end={{ x: 1, y: 0 }}
         style={[styles.header, { paddingTop: insets.top + 20 }]}
       >
-        <Text style={styles.headerTitle}>Profile</Text>
-        <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
+        <View style={styles.headerContent}>
+          <Logo size={48} style={styles.headerLogo} />
+          <Text style={styles.headerTitle}>Profile</Text>
+        </View>
+        <TouchableOpacity 
+            style={styles.signOutButton} 
+            onPress={() => handleSignOut()}
+            activeOpacity={0.7} // This will help you see if press is registering
+          disabled={false} 
+        >
+          
           <LogOut size={20} color={Colors.neutral.white} strokeWidth={2} />
         </TouchableOpacity>
       </LinearGradient>
@@ -398,6 +423,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  headerLogo: {
+    marginRight: Spacing.sm,
+    marginVertical: 0,
   },
   headerTitle: {
     fontSize: 32,
