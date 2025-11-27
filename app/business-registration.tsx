@@ -6,6 +6,9 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Keyboard,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react-native';
@@ -91,6 +94,9 @@ export default function BusinessRegistrationScreen() {
   };
 
   const handleCancel = () => {
+    // Dismiss keyboard first to ensure proper navigation
+    Keyboard.dismiss();
+    
     if (hasEnteredData()) {
       Alert.alert(
         'Cancel Registration?',
@@ -104,22 +110,14 @@ export default function BusinessRegistrationScreen() {
             text: 'Cancel',
             style: 'destructive',
             onPress: () => {
-              if (router.canGoBack()) {
-                router.back();
-              } else {
-                router.replace('/(tabs)');
-              }
+              router.replace('/(tabs)');
             },
           },
         ]
       );
     } else {
       // No data entered, just navigate away
-      if (router.canGoBack()) {
-        router.back();
-      } else {
-        router.replace('/(tabs)');
-      }
+      router.replace('/(tabs)');
     }
   };
 
@@ -128,9 +126,17 @@ export default function BusinessRegistrationScreen() {
   };
 
   const handleSubmit = async () => {
-    // Validate PAN is provided
+    // Validate PAN number is provided
     if (!businessData.panNumber || !businessData.panNumber.trim()) {
       Alert.alert('Validation Error', 'PAN is required. Please enter your PAN number.');
+      setSubmitting(false);
+      return;
+    }
+
+    // Validate PAN document is uploaded
+    const panDocuments = businessData.verificationDocuments?.['pan'];
+    if (!panDocuments || panDocuments.length === 0) {
+      Alert.alert('Validation Error', 'PAN card document is required. Please upload your PAN card in the Verification step.');
       setSubmitting(false);
       return;
     }
@@ -343,7 +349,11 @@ export default function BusinessRegistrationScreen() {
   ];
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+    >
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <Logo size={48} style={styles.headerLogo} />
@@ -354,7 +364,8 @@ export default function BusinessRegistrationScreen() {
           <TouchableOpacity
             style={styles.cancelButton}
             onPress={handleCancel}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            activeOpacity={0.6}
+            hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
           >
             <X size={24} color="#666" />
           </TouchableOpacity>
@@ -408,7 +419,7 @@ export default function BusinessRegistrationScreen() {
           </TouchableOpacity>
         )}
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -445,8 +456,9 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   cancelButton: {
-    padding: 4,
+    padding: 8,
     marginTop: -4,
+    zIndex: 10,
   },
   subtitle: {
     fontSize: 14,

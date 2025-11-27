@@ -39,8 +39,9 @@ export default function VerificationStep({
   const [loadingTypes, setLoadingTypes] = useState(true);
   const [uploading, setUploading] = useState<string | null>(null); // typeCode of document being uploaded
 
-  // Document types we need to support
-  const requiredDocumentTypeCodes = ['gst', 'aadhaar', 'bank_statement', 'general', 'business_license', 'pan'];
+  // Document types we need to support (PAN is first and mandatory)
+  const requiredDocumentTypeCodes = ['pan', 'gst', 'aadhaar', 'bank_statement', 'general', 'business_license'];
+  const mandatoryDocumentTypes = ['pan'];
 
   // Initialize document groups from data or create empty ones
   const [documentGroups, setDocumentGroups] = useState<DocumentGroup[]>(() => {
@@ -208,7 +209,7 @@ export default function VerificationStep({
       <View style={styles.infoBox}>
         <Text style={styles.infoTitle}>Business Verification</Text>
         <Text style={styles.infoText}>
-          Adding verification details helps build trust with customers. PAN is required, other documents are optional.
+          Adding verification details helps build trust with customers. PAN number and PAN card document upload are required. Other documents are optional.
         </Text>
       </View>
 
@@ -244,12 +245,15 @@ export default function VerificationStep({
       {documentGroups.map((group) => {
         const typeName = group.typeName || group.typeCode;
         const isUploading = uploading === group.typeCode;
+        const isMandatory = mandatoryDocumentTypes.includes(group.typeCode);
 
         return (
           <View key={group.typeCode} style={styles.field}>
-            <Text style={styles.label}>{typeName}</Text>
-            <Text style={styles.hint}>
-              Optional - Upload images (jpg, png) or PDF files (max 10MB each)
+            <Text style={styles.label}>{typeName} {isMandatory ? '*' : ''}</Text>
+            <Text style={[styles.hint, isMandatory && styles.mandatoryHint]}>
+              {isMandatory 
+                ? 'Required - Upload PAN card image (jpg, png) or PDF (max 10MB)'
+                : 'Optional - Upload images (jpg, png) or PDF files (max 10MB each)'}
             </Text>
 
             {/* Uploaded Documents */}
@@ -323,6 +327,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     marginBottom: 8,
+  },
+  mandatoryHint: {
+    color: '#cc6600',
+    fontWeight: '500',
   },
   input: {
     backgroundColor: '#f8f8f8',

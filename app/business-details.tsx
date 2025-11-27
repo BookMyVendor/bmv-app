@@ -33,6 +33,7 @@ import {
   ChevronDown,
   Upload,
   FileText,
+  AlertCircle,
 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore } from '@/lib/supabase';
@@ -59,6 +60,7 @@ import {
   PortfolioImage,
 } from '@/lib/businessApi';
 import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '@/lib/documentUpload';
+import { validatePincode } from '@/lib/pincodeValidation';
 import Logo from '@/components/Logo';
 import { Colors } from '@/constants/theme';
 
@@ -110,6 +112,12 @@ export default function BusinessDetailsScreen() {
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [loadingCategories, setLoadingCategories] = useState(false);
+
+  // Pincode validation state
+  const [validatingPincode, setValidatingPincode] = useState(false);
+  const [pincodeStatus, setPincodeStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
+  const [pincodeError, setPincodeError] = useState<string | null>(null);
+  const [cityOptions, setCityOptions] = useState<string[]>([]);
 
   useEffect(() => {
     if (id) {
@@ -952,9 +960,17 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleSaveDetails = async () => {
-    // Validate PAN is provided
+    // Validate PAN number is provided
     if (!editData.business_registration_number || !editData.business_registration_number.trim()) {
       Alert.alert('Validation Error', 'PAN is required. Please enter your PAN number.');
+      setSavingDetails(false);
+      return;
+    }
+
+    // Validate PAN document is uploaded
+    const panDocs = documentsByType['pan'] || [];
+    if (panDocs.length === 0) {
+      Alert.alert('Validation Error', 'PAN card document is required. Please upload your PAN card.');
       setSavingDetails(false);
       return;
     }
@@ -1682,14 +1698,145 @@ export default function BusinessDetailsScreen() {
               </View>
 
               <View style={styles.editField}>
-                <Text style={styles.editLabel}>City</Text>
+                <Text style={styles.editLabel}>Pincode *</Text>
+                <View style={styles.inputWithStatus}>
+                  <TextInput
+                    style={[
+                      styles.editInput,
+                      styles.pincodeInput,
+                      pincodeStatus === 'valid' && styles.inputValid,
+                      pincodeStatus === 'invalid' && styles.inputInvalid,
+                    ]}
+                    value={editData.pincode || ''}
+                    onChangeText={(text) => {
+                      const cleanText = text.replace(/\D/g, '');
+                      setEditData({ ...editData, pincode: cleanText });
+                      if (pincodeStatus !== 'idle') {
+                        setPincodeStatus('idle');
+                        setPincodeError(null);
+                        setCityOptions([]);
+                      }
+                    }}
+                    onBlur={async () => {
+                      const pincode = editData.pincode;
+                      if (!pincode || pincode.length !== 6) {
+                        if (pincode && pincode.length > 0 && pincode.length < 6) {
+                          setPincodeStatus('invalid');
+                          setPincodeError('Pincode must be 6 digits');
+                        }
+                        return;
+                      }
+                      setValidatingPincode(true);
+                      setPincodeError(null);
+                      try {
+                        const result = await validatePincode(pincode);
+                        if (result.valid) {
+                          setPincodeStatus('valid');
+                          // Set city options for dropdown
+                          if (result.cityOptions && result.cityOptions.length > 0) {
+                            setCityOptions(result.cityOptions);
+                          }
+                          // Auto-fill: city = Name, locality = District
+                          if (result.city) {
+                            setEditData((prev: any) => ({ ...prev, city: result.city }));
+                          }
+                          if (result.locality) {
+                            setEditData((prev: any) => ({ ...prev, locality: result.locality }));
+                          }
+                          if (result.state) {
+                            setEditData((prev: any) => ({ ...prev, state: result.state }));
+                          }
+                        } else {
+                          setPincodeStatus('invalid');
+                          setPincodeError(result.error || 'Invalid pincode');
+                          setCityOptions([]);
+                        }
+                      } catch (error) {
+                        setPincodeStatus('invalid');
+                        setPincodeError('Failed to validate pincode');
+                        setCityOptions([]);
+                      } finally {
+                        setValidatingPincode(false);
+                      }
+                    }}
+                    placeholder="Enter 6-digit pincode"
+                    placeholderTextColor="#999"
+                    keyboardType="numeric"
+                    maxLength={6}
+                  />
+                  <View style={styles.statusIcon}>
+                    {validatingPincode && (
+                      <ActivityIndicator size="small" color="#007AFF" />
+                    )}
+                    {!validatingPincode && pincodeStatus === 'valid' && (
+                      <Check size={20} color="#34C759" />
+                    )}
+                    {!validatingPincode && pincodeStatus === 'invalid' && (
+                      <AlertCircle size={20} color="#FF3B30" />
+                    )}
+                  </View>
+                </View>
+                {pincodeError && (
+                  <Text style={styles.pincodeErrorText}>{pincodeError}</Text>
+                )}
+                {pincodeStatus === 'valid' && (
+                  <Text style={styles.pincodeSuccessText}>
+                    Pincode verified - Location details auto-filled
+                  </Text>
+                )}
+              </View>
+
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>City/Town</Text>
+                {cityOptions.length > 1 ? (
+                  <View style={styles.cityDropdown}>
+                    {cityOptions.map((city) => (
+                      <Pressable
+                        key={city}
+                        style={[
+                          styles.cityOption,
+                          editData.city === city && styles.cityOptionSelected,
+                        ]}
+                        onPress={() => setEditData({ ...editData, city })}
+                      >
+                        <Text
+                          style={[
+                            styles.cityOptionText,
+                            editData.city === city && styles.cityOptionTextSelected,
+                          ]}
+                        >
+                          {city}
+                        </Text>
+                        {editData.city === city && (
+                          <Check size={16} color="#007AFF" />
+                        )}
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : (
+                  <TextInput
+                    style={styles.editInput}
+                    value={editData.city || ''}
+                    onChangeText={(text) => setEditData({ ...editData, city: text })}
+                    placeholder="Enter city/town"
+                    placeholderTextColor="#999"
+                  />
+                )}
+                {cityOptions.length > 1 && (
+                  <Text style={styles.editHint}>Select from available options for this pincode</Text>
+                )}
+              </View>
+
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>Locality/District</Text>
                 <TextInput
                   style={styles.editInput}
-                  value={editData.city || ''}
-                  onChangeText={(text) => setEditData({ ...editData, city: text })}
-                  placeholder="Enter city"
+                  value={editData.locality || ''}
+                  onChangeText={(text) => setEditData({ ...editData, locality: text })}
+                  placeholder="Enter locality/district"
                   placeholderTextColor="#999"
                 />
+                <Text style={styles.editHint}>Auto-filled from pincode (editable)</Text>
               </View>
 
               <View style={styles.editField}>
@@ -1701,19 +1848,7 @@ export default function BusinessDetailsScreen() {
                   placeholder="Enter state"
                   placeholderTextColor="#999"
                 />
-              </View>
-
-              <View style={styles.field}>
-                <Text style={styles.label}>Pincode</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editData.pincode || ''}
-                  onChangeText={(text) => setEditData({ ...editData, pincode: text })}
-                  placeholder="Enter pincode"
-                  placeholderTextColor="#999"
-                  keyboardType="numeric"
-                  maxLength={6}
-                />
+                <Text style={styles.editHint}>Auto-filled from pincode (editable)</Text>
               </View>
 
               <View style={styles.field}>
@@ -1733,7 +1868,7 @@ export default function BusinessDetailsScreen() {
             </View>
 
             <View style={styles.editSection}>
-              <Text style={styles.editSectionTitle}>Verification (Optional)</Text>
+              <Text style={styles.editSectionTitle}>Verification</Text>
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>GST Number</Text>
@@ -1764,25 +1899,30 @@ export default function BusinessDetailsScreen() {
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Verification Documents</Text>
                 <Text style={styles.editHint}>
-                  Upload images (jpg, png) or PDF files (max 10MB each)
+                  PAN card document is required. Upload images (jpg, png) or PDF files (max 10MB each)
                 </Text>
 
-                {/* Document Types */}
+                {/* Document Types - PAN Card first and mandatory */}
                 {[
-                  { code: 'gst', name: 'GST Certificate' },
-                  { code: 'aadhaar', name: 'Aadhaar Card' },
-                  { code: 'bank_statement', name: 'Bank Statement' },
-                  { code: 'general', name: 'General Document' },
-                  { code: 'business_license', name: 'Business License' },
-                  { code: 'pan', name: 'PAN Card' },
+                  { code: 'pan', name: 'PAN Card', mandatory: true },
+                  { code: 'gst', name: 'GST Certificate', mandatory: false },
+                  { code: 'aadhaar', name: 'Aadhaar Card', mandatory: false },
+                  { code: 'bank_statement', name: 'Bank Statement', mandatory: false },
+                  { code: 'general', name: 'General Document', mandatory: false },
+                  { code: 'business_license', name: 'Business License', mandatory: false },
                 ].map((docType) => {
                   const docs = documentsByType[docType.code] || [];
                   const isUploading = uploadingDocument === docType.code;
 
                   return (
-                    <View key={docType.code} style={styles.documentTypeSection}>
+                    <View key={docType.code} style={[styles.documentTypeSection, docType.mandatory && styles.mandatoryDocumentSection]}>
                       <View style={styles.documentTypeHeader}>
-                        <Text style={styles.documentTypeName}>{docType.name}</Text>
+                        <View style={styles.documentTypeLabelContainer}>
+                          <Text style={styles.documentTypeName}>{docType.name} {docType.mandatory ? '*' : ''}</Text>
+                          {docType.mandatory && (
+                            <Text style={styles.mandatoryDocumentHint}>Required</Text>
+                          )}
+                        </View>
                         <TouchableOpacity
                           style={[styles.addDocumentButton, isUploading && styles.addDocumentButtonDisabled]}
                           onPress={() => handleUploadDocument(docType.code)}
@@ -2758,6 +2898,66 @@ const styles = StyleSheet.create({
     color: '#666',
     marginBottom: 8,
   },
+  inputWithStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  pincodeInput: {
+    flex: 1,
+    paddingRight: 44,
+  },
+  inputValid: {
+    borderColor: '#34C759',
+    backgroundColor: '#f0fff4',
+  },
+  inputInvalid: {
+    borderColor: '#FF3B30',
+    backgroundColor: '#fff5f5',
+  },
+  statusIcon: {
+    position: 'absolute',
+    right: 12,
+    height: '100%',
+    justifyContent: 'center',
+  },
+  pincodeErrorText: {
+    fontSize: 12,
+    color: '#FF3B30',
+    marginTop: 4,
+  },
+  pincodeSuccessText: {
+    fontSize: 12,
+    color: '#34C759',
+    marginTop: 4,
+  },
+  cityDropdown: {
+    backgroundColor: '#f8f8f8',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  cityOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  cityOptionSelected: {
+    backgroundColor: '#f0f7ff',
+  },
+  cityOptionText: {
+    fontSize: 16,
+    color: '#1a1a1a',
+  },
+  cityOptionTextSelected: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
   documentTypeSection: {
     marginBottom: 16,
     padding: 12,
@@ -2766,16 +2966,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e0e0e0',
   },
+  mandatoryDocumentSection: {
+    backgroundColor: '#fff9e6',
+    borderColor: '#cc6600',
+  },
   documentTypeHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
   },
+  documentTypeLabelContainer: {
+    flex: 1,
+  },
   documentTypeName: {
     fontSize: 14,
     fontWeight: '600',
     color: '#1a1a1a',
+  },
+  mandatoryDocumentHint: {
+    fontSize: 12,
+    color: '#cc6600',
+    fontWeight: '500',
+    marginTop: 2,
   },
   addDocumentButton: {
     flexDirection: 'row',
