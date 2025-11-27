@@ -62,7 +62,37 @@ import {
 import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '@/lib/documentUpload';
 import { validatePincode } from '@/lib/pincodeValidation';
 import Logo from '@/components/Logo';
+import Dropdown from '@/components/Dropdown';
 import { Colors } from '@/constants/theme';
+
+const EXPERIENCE_OPTIONS = [
+  'Less than 1 year',
+  '1-3 years',
+  '3-5 years',
+  '5-10 years',
+  'More than 10 years',
+];
+
+// Helper to convert numeric years to display string
+const getExperienceDisplayValue = (years: number | null | undefined): string => {
+  if (years === null || years === undefined) return '';
+  if (years < 1) return 'Less than 1 year';
+  if (years >= 1 && years < 3) return '1-3 years';
+  if (years >= 3 && years < 5) return '3-5 years';
+  if (years >= 5 && years < 10) return '5-10 years';
+  return 'More than 10 years';
+};
+
+// Helper to convert display string to numeric years
+const parseExperienceToNumber = (experienceStr: string): number => {
+  if (!experienceStr) return 0;
+  if (experienceStr === 'Less than 1 year') return 0;
+  if (experienceStr === '1-3 years') return 1;
+  if (experienceStr === '3-5 years') return 3;
+  if (experienceStr === '5-10 years') return 5;
+  if (experienceStr === 'More than 10 years') return 10;
+  return 0;
+};
 
 type SectionType = 'offers' | 'gallery' | 'edit';
 
@@ -1478,11 +1508,11 @@ export default function BusinessDetailsScreen() {
                     onPress={() => setIsCategoryModalOpen(false)}
                   >
                     <Pressable
-                      style={styles.modalContent}
+                      style={styles.categoryModalContent}
                       onPress={(e) => e.stopPropagation()}
                     >
-                      <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle}>Select Service Category</Text>
+                      <View style={styles.categoryModalHeader}>
+                        <Text style={styles.categoryModalTitle}>Select Service Category</Text>
                         <TouchableOpacity
                           onPress={() => setIsCategoryModalOpen(false)}
                           style={styles.closeButton}
@@ -1513,9 +1543,9 @@ export default function BusinessDetailsScreen() {
                         )}
                       </ScrollView>
 
-                      <View style={styles.modalFooter}>
+                      <View style={styles.categoryModalFooter}>
                         <TouchableOpacity
-                          style={styles.modalButton}
+                          style={styles.categoryModalButton}
                           onPress={() => setIsCategoryModalOpen(false)}
                         >
                           <Text style={styles.modalButtonText}>Done</Text>
@@ -1578,11 +1608,11 @@ export default function BusinessDetailsScreen() {
                     onPress={() => setIsEventModalOpen(false)}
                   >
                     <Pressable
-                      style={styles.modalContent}
+                      style={styles.categoryModalContent}
                       onPress={(e) => e.stopPropagation()}
                     >
-                      <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle}>Select Event Types</Text>
+                      <View style={styles.categoryModalHeader}>
+                        <Text style={styles.categoryModalTitle}>Select Event Types</Text>
                         <TouchableOpacity
                           onPress={() => setIsEventModalOpen(false)}
                           style={styles.closeButton}
@@ -1644,9 +1674,9 @@ export default function BusinessDetailsScreen() {
                         )}
                       </ScrollView>
 
-                      <View style={styles.modalFooter}>
+                      <View style={styles.categoryModalFooter}>
                         <TouchableOpacity
-                          style={styles.modalButton}
+                          style={styles.categoryModalButton}
                           onPress={() => setIsEventModalOpen(false)}
                         >
                           <Text style={styles.modalButtonText}>Done</Text>
@@ -1671,14 +1701,15 @@ export default function BusinessDetailsScreen() {
               </View>
 
               <View style={styles.editField}>
-                <Text style={styles.editLabel}>Years of Experience</Text>
-                <TextInput
-                  style={styles.editInput}
-                  value={editData.years_experience?.toString() || ''}
-                  onChangeText={(text) => setEditData({ ...editData, years_experience: text ? parseInt(text, 10) : null })}
-                  placeholder="e.g., 5"
-                  placeholderTextColor="#999"
-                  keyboardType="numeric"
+                <Text style={styles.editLabel}>Years of Experience *</Text>
+                <Dropdown
+                  options={EXPERIENCE_OPTIONS.map((exp) => ({
+                    label: exp,
+                    value: exp,
+                  }))}
+                  value={getExperienceDisplayValue(editData.years_experience)}
+                  placeholder="Select experience"
+                  onChange={(value: string) => setEditData({ ...editData, years_experience: parseExperienceToNumber(value) })}
                 />
               </View>
             </View>
@@ -2581,6 +2612,33 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 20,
   },
+  categoryModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    width: '100%',
+    maxWidth: 400,
+    maxHeight: '80%',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  categoryModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  categoryModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1a1a1a',
+  },
   field: {
     marginBottom: 20,
   },
@@ -2758,6 +2816,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
   },
   closeButton: {
     width: 32,
@@ -2774,11 +2833,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 16,
     color: '#1a1a1a',
-    margin: 20,
+    marginHorizontal: 20,
+    marginTop: 16,
     marginBottom: 12,
   },
   modalCategoryTree: {
-    maxHeight: 400,
+    maxHeight: 350,
     paddingHorizontal: 20,
     paddingVertical: 8,
   },
@@ -2786,6 +2846,17 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  categoryModalFooter: {
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  categoryModalButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
   },
   categoryItem: {
     marginBottom: 4,
