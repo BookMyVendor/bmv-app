@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,12 @@ export default function PortfolioSocialStep({
 }: PortfolioSocialStepProps) {
   const [portfolioImages, setPortfolioImages] = useState<string[]>(data.portfolioImages || []);
   const [uploading, setUploading] = useState(false);
+
+  // Refs for keyboard navigation
+  const websiteUrlRef = useRef<TextInput>(null);
+  const instagramUrlRef = useRef<TextInput>(null);
+  const facebookUrlRef = useRef<TextInput>(null);
+  const youtubeUrlRef = useRef<TextInput>(null);
 
   const handleChange = (field: string, value: string) => {
     onUpdate({ [field]: value });
@@ -83,6 +89,7 @@ export default function PortfolioSocialStep({
           <Text style={styles.label}>Website URL</Text>
         </View>
         <TextInput
+          ref={websiteUrlRef}
           style={styles.input}
           value={data.websiteUrl || ''}
           onChangeText={(text) => handleChange('websiteUrl', text)}
@@ -90,6 +97,8 @@ export default function PortfolioSocialStep({
           placeholderTextColor="#999"
           autoCapitalize="none"
           keyboardType="url"
+          returnKeyType="next"
+          onSubmitEditing={() => instagramUrlRef.current?.focus()}
         />
       </View>
 
@@ -99,6 +108,7 @@ export default function PortfolioSocialStep({
           <Text style={styles.label}>Instagram URL</Text>
         </View>
         <TextInput
+          ref={instagramUrlRef}
           style={styles.input}
           value={data.instagramUrl || ''}
           onChangeText={(text) => handleChange('instagramUrl', text)}
@@ -106,6 +116,8 @@ export default function PortfolioSocialStep({
           placeholderTextColor="#999"
           autoCapitalize="none"
           keyboardType="url"
+          returnKeyType="next"
+          onSubmitEditing={() => facebookUrlRef.current?.focus()}
         />
       </View>
 
@@ -115,6 +127,7 @@ export default function PortfolioSocialStep({
           <Text style={styles.label}>Facebook URL</Text>
         </View>
         <TextInput
+          ref={facebookUrlRef}
           style={styles.input}
           value={data.facebookUrl || ''}
           onChangeText={(text) => handleChange('facebookUrl', text)}
@@ -122,6 +135,8 @@ export default function PortfolioSocialStep({
           placeholderTextColor="#999"
           autoCapitalize="none"
           keyboardType="url"
+          returnKeyType="next"
+          onSubmitEditing={() => youtubeUrlRef.current?.focus()}
         />
       </View>
 
@@ -131,6 +146,7 @@ export default function PortfolioSocialStep({
           <Text style={styles.label}>YouTube URL</Text>
         </View>
         <TextInput
+          ref={youtubeUrlRef}
           style={styles.input}
           value={data.youtubeUrl || ''}
           onChangeText={(text) => handleChange('youtubeUrl', text)}
@@ -138,6 +154,7 @@ export default function PortfolioSocialStep({
           placeholderTextColor="#999"
           autoCapitalize="none"
           keyboardType="url"
+          returnKeyType="done"
         />
       </View>
 
