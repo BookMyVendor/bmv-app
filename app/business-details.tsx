@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -33,6 +33,7 @@ import {
   ChevronDown,
   Upload,
   FileText,
+  AlertCircle,
 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore } from '@/lib/supabase';
@@ -59,8 +60,39 @@ import {
   PortfolioImage,
 } from '@/lib/businessApi';
 import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '@/lib/documentUpload';
+import { validatePincode } from '@/lib/pincodeValidation';
 import Logo from '@/components/Logo';
+import Dropdown from '@/components/Dropdown';
 import { Colors } from '@/constants/theme';
+
+const EXPERIENCE_OPTIONS = [
+  'Less than 1 year',
+  '1-3 years',
+  '3-5 years',
+  '5-10 years',
+  'More than 10 years',
+];
+
+// Helper to convert numeric years to display string
+const getExperienceDisplayValue = (years: number | null | undefined): string => {
+  if (years === null || years === undefined) return '';
+  if (years < 1) return 'Less than 1 year';
+  if (years >= 1 && years < 3) return '1-3 years';
+  if (years >= 3 && years < 5) return '3-5 years';
+  if (years >= 5 && years < 10) return '5-10 years';
+  return 'More than 10 years';
+};
+
+// Helper to convert display string to numeric years
+const parseExperienceToNumber = (experienceStr: string): number => {
+  if (!experienceStr) return 0;
+  if (experienceStr === 'Less than 1 year') return 0;
+  if (experienceStr === '1-3 years') return 1;
+  if (experienceStr === '3-5 years') return 3;
+  if (experienceStr === '5-10 years') return 5;
+  if (experienceStr === 'More than 10 years') return 10;
+  return 0;
+};
 
 type SectionType = 'offers' | 'gallery' | 'edit';
 
@@ -110,6 +142,31 @@ export default function BusinessDetailsScreen() {
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [loadingCategories, setLoadingCategories] = useState(false);
+
+  // Pincode validation state
+  const [validatingPincode, setValidatingPincode] = useState(false);
+  const [pincodeStatus, setPincodeStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
+  const [pincodeError, setPincodeError] = useState<string | null>(null);
+  const [cityOptions, setCityOptions] = useState<string[]>([]);
+
+  // Refs for keyboard navigation in edit form
+  const contactPersonNameRef = useRef<TextInput>(null);
+  const contactPersonRoleRef = useRef<TextInput>(null);
+  const businessEmailRef = useRef<TextInput>(null);
+  const contactPersonPhoneRef = useRef<TextInput>(null);
+  const businessDescriptionRef = useRef<TextInput>(null);
+  const addressRef = useRef<TextInput>(null);
+  const pincodeRef = useRef<TextInput>(null);
+  const cityRef = useRef<TextInput>(null);
+  const localityRef = useRef<TextInput>(null);
+  const stateRef = useRef<TextInput>(null);
+  const serviceRadiusRef = useRef<TextInput>(null);
+  const gstNumberRef = useRef<TextInput>(null);
+  const panRef = useRef<TextInput>(null);
+  const websiteUrlRef = useRef<TextInput>(null);
+  const instagramUrlRef = useRef<TextInput>(null);
+  const facebookUrlRef = useRef<TextInput>(null);
+  const youtubeUrlRef = useRef<TextInput>(null);
 
   useEffect(() => {
     if (id) {
@@ -952,9 +1009,17 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleSaveDetails = async () => {
-    // Validate PAN is provided
+    // Validate PAN number is provided
     if (!editData.business_registration_number || !editData.business_registration_number.trim()) {
       Alert.alert('Validation Error', 'PAN is required. Please enter your PAN number.');
+      setSavingDetails(false);
+      return;
+    }
+
+    // Validate PAN document is uploaded
+    const panDocs = documentsByType['pan'] || [];
+    if (panDocs.length === 0) {
+      Alert.alert('Validation Error', 'PAN card document is required. Please upload your PAN card.');
       setSavingDetails(false);
       return;
     }
@@ -1361,34 +1426,43 @@ export default function BusinessDetailsScreen() {
                   onChangeText={(text) => setEditData({ ...editData, business_name: text })}
                   placeholder="Enter business name"
                   placeholderTextColor="#999"
+                  returnKeyType="next"
+                  onSubmitEditing={() => contactPersonNameRef.current?.focus()}
                 />
               </View>
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Contact Person Name</Text>
                 <TextInput
+                  ref={contactPersonNameRef}
                   style={styles.editInput}
                   value={editData.contact_person_name || ''}
                   onChangeText={(text) => setEditData({ ...editData, contact_person_name: text })}
                   placeholder="Enter contact person name"
                   placeholderTextColor="#999"
+                  returnKeyType="next"
+                  onSubmitEditing={() => contactPersonRoleRef.current?.focus()}
                 />
               </View>
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Contact Person Role</Text>
                 <TextInput
+                  ref={contactPersonRoleRef}
                   style={styles.editInput}
                   value={editData.contact_person_role || ''}
                   onChangeText={(text) => setEditData({ ...editData, contact_person_role: text })}
                   placeholder="e.g., Owner, Manager, Director"
                   placeholderTextColor="#999"
+                  returnKeyType="next"
+                  onSubmitEditing={() => businessEmailRef.current?.focus()}
                 />
               </View>
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Email</Text>
                 <TextInput
+                  ref={businessEmailRef}
                   style={styles.editInput}
                   value={editData.business_email || ''}
                   onChangeText={(text) => setEditData({ ...editData, business_email: text })}
@@ -1396,18 +1470,23 @@ export default function BusinessDetailsScreen() {
                   placeholderTextColor="#999"
                   keyboardType="email-address"
                   autoCapitalize="none"
+                  returnKeyType="next"
+                  onSubmitEditing={() => contactPersonPhoneRef.current?.focus()}
                 />
               </View>
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Phone Number</Text>
                 <TextInput
+                  ref={contactPersonPhoneRef}
                   style={styles.editInput}
                   value={editData.contact_person_phone || ''}
                   onChangeText={(text) => setEditData({ ...editData, contact_person_phone: text })}
                   placeholder="Enter phone number"
                   placeholderTextColor="#999"
                   keyboardType="phone-pad"
+                  returnKeyType="next"
+                  onSubmitEditing={() => businessDescriptionRef.current?.focus()}
                 />
               </View>
             </View>
@@ -1462,11 +1541,11 @@ export default function BusinessDetailsScreen() {
                     onPress={() => setIsCategoryModalOpen(false)}
                   >
                     <Pressable
-                      style={styles.modalContent}
+                      style={styles.categoryModalContent}
                       onPress={(e) => e.stopPropagation()}
                     >
-                      <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle}>Select Service Category</Text>
+                      <View style={styles.categoryModalHeader}>
+                        <Text style={styles.categoryModalTitle}>Select Service Category</Text>
                         <TouchableOpacity
                           onPress={() => setIsCategoryModalOpen(false)}
                           style={styles.closeButton}
@@ -1497,9 +1576,9 @@ export default function BusinessDetailsScreen() {
                         )}
                       </ScrollView>
 
-                      <View style={styles.modalFooter}>
+                      <View style={styles.categoryModalFooter}>
                         <TouchableOpacity
-                          style={styles.modalButton}
+                          style={styles.categoryModalButton}
                           onPress={() => setIsCategoryModalOpen(false)}
                         >
                           <Text style={styles.modalButtonText}>Done</Text>
@@ -1562,11 +1641,11 @@ export default function BusinessDetailsScreen() {
                     onPress={() => setIsEventModalOpen(false)}
                   >
                     <Pressable
-                      style={styles.modalContent}
+                      style={styles.categoryModalContent}
                       onPress={(e) => e.stopPropagation()}
                     >
-                      <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle}>Select Event Types</Text>
+                      <View style={styles.categoryModalHeader}>
+                        <Text style={styles.categoryModalTitle}>Select Event Types</Text>
                         <TouchableOpacity
                           onPress={() => setIsEventModalOpen(false)}
                           style={styles.closeButton}
@@ -1628,9 +1707,9 @@ export default function BusinessDetailsScreen() {
                         )}
                       </ScrollView>
 
-                      <View style={styles.modalFooter}>
+                      <View style={styles.categoryModalFooter}>
                         <TouchableOpacity
-                          style={styles.modalButton}
+                          style={styles.categoryModalButton}
                           onPress={() => setIsEventModalOpen(false)}
                         >
                           <Text style={styles.modalButtonText}>Done</Text>
@@ -1644,6 +1723,7 @@ export default function BusinessDetailsScreen() {
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Business Description</Text>
                 <TextInput
+                  ref={businessDescriptionRef}
                   style={[styles.editInput, styles.textArea]}
                   value={editData.description || ''}
                   onChangeText={(text) => setEditData({ ...editData, description: text })}
@@ -1651,18 +1731,21 @@ export default function BusinessDetailsScreen() {
                   placeholderTextColor="#999"
                   multiline
                   numberOfLines={4}
+                  returnKeyType="next"
+                  onSubmitEditing={() => addressRef.current?.focus()}
                 />
               </View>
 
               <View style={styles.editField}>
-                <Text style={styles.editLabel}>Years of Experience</Text>
-                <TextInput
-                  style={styles.editInput}
-                  value={editData.years_experience?.toString() || ''}
-                  onChangeText={(text) => setEditData({ ...editData, years_experience: text ? parseInt(text, 10) : null })}
-                  placeholder="e.g., 5"
-                  placeholderTextColor="#999"
-                  keyboardType="numeric"
+                <Text style={styles.editLabel}>Years of Experience *</Text>
+                <Dropdown
+                  options={EXPERIENCE_OPTIONS.map((exp) => ({
+                    label: exp,
+                    value: exp,
+                  }))}
+                  value={getExperienceDisplayValue(editData.years_experience)}
+                  placeholder="Select experience"
+                  onChange={(value: string) => setEditData({ ...editData, years_experience: parseExperienceToNumber(value) })}
                 />
               </View>
             </View>
@@ -1673,52 +1756,193 @@ export default function BusinessDetailsScreen() {
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Business Address</Text>
                 <TextInput
+                  ref={addressRef}
                   style={styles.editInput}
                   value={editData.address || ''}
                   onChangeText={(text) => setEditData({ ...editData, address: text })}
                   placeholder="Enter business address"
                   placeholderTextColor="#999"
+                  returnKeyType="next"
+                  onSubmitEditing={() => pincodeRef.current?.focus()}
                 />
               </View>
 
               <View style={styles.editField}>
-                <Text style={styles.editLabel}>City</Text>
+                <Text style={styles.editLabel}>Pincode *</Text>
+                <View style={styles.inputWithStatus}>
+                  <TextInput
+                    ref={pincodeRef}
+                    style={[
+                      styles.editInput,
+                      styles.pincodeInput,
+                      pincodeStatus === 'valid' && styles.inputValid,
+                      pincodeStatus === 'invalid' && styles.inputInvalid,
+                    ]}
+                    value={editData.pincode || ''}
+                    onChangeText={(text) => {
+                      const cleanText = text.replace(/\D/g, '');
+                      setEditData({ ...editData, pincode: cleanText });
+                      if (pincodeStatus !== 'idle') {
+                        setPincodeStatus('idle');
+                        setPincodeError(null);
+                        setCityOptions([]);
+                      }
+                    }}
+                    returnKeyType="next"
+                    onSubmitEditing={() => {
+                      if (cityOptions.length === 0 || cityOptions.length === 1) {
+                        cityRef.current?.focus();
+                      } else {
+                        localityRef.current?.focus();
+                      }
+                    }}
+                    onBlur={async () => {
+                      const pincode = editData.pincode;
+                      if (!pincode || pincode.length !== 6) {
+                        if (pincode && pincode.length > 0 && pincode.length < 6) {
+                          setPincodeStatus('invalid');
+                          setPincodeError('Pincode must be 6 digits');
+                        }
+                        return;
+                      }
+                      setValidatingPincode(true);
+                      setPincodeError(null);
+                      try {
+                        const result = await validatePincode(pincode);
+                        if (result.valid) {
+                          setPincodeStatus('valid');
+                          // Set city options for dropdown
+                          if (result.cityOptions && result.cityOptions.length > 0) {
+                            setCityOptions(result.cityOptions);
+                          }
+                          // Auto-fill: city = Name, locality = District
+                          if (result.city) {
+                            setEditData((prev: any) => ({ ...prev, city: result.city }));
+                          }
+                          if (result.locality) {
+                            setEditData((prev: any) => ({ ...prev, locality: result.locality }));
+                          }
+                          if (result.state) {
+                            setEditData((prev: any) => ({ ...prev, state: result.state }));
+                          }
+                        } else {
+                          setPincodeStatus('invalid');
+                          setPincodeError(result.error || 'Invalid pincode');
+                          setCityOptions([]);
+                        }
+                      } catch (error) {
+                        setPincodeStatus('invalid');
+                        setPincodeError('Failed to validate pincode');
+                        setCityOptions([]);
+                      } finally {
+                        setValidatingPincode(false);
+                      }
+                    }}
+                    placeholder="Enter 6-digit pincode"
+                    placeholderTextColor="#999"
+                    keyboardType="numeric"
+                    maxLength={6}
+                  />
+                  <View style={styles.statusIcon}>
+                    {validatingPincode && (
+                      <ActivityIndicator size="small" color="#007AFF" />
+                    )}
+                    {!validatingPincode && pincodeStatus === 'valid' && (
+                      <Check size={20} color="#34C759" />
+                    )}
+                    {!validatingPincode && pincodeStatus === 'invalid' && (
+                      <AlertCircle size={20} color="#FF3B30" />
+                    )}
+                  </View>
+                </View>
+                {pincodeError && (
+                  <Text style={styles.pincodeErrorText}>{pincodeError}</Text>
+                )}
+                {pincodeStatus === 'valid' && (
+                  <Text style={styles.pincodeSuccessText}>
+                    Pincode verified - Location details auto-filled
+                  </Text>
+                )}
+              </View>
+
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>City/Town</Text>
+                {cityOptions.length > 1 ? (
+                  <View style={styles.cityDropdown}>
+                    {cityOptions.map((city) => (
+                      <Pressable
+                        key={city}
+                        style={[
+                          styles.cityOption,
+                          editData.city === city && styles.cityOptionSelected,
+                        ]}
+                        onPress={() => setEditData({ ...editData, city })}
+                      >
+                        <Text
+                          style={[
+                            styles.cityOptionText,
+                            editData.city === city && styles.cityOptionTextSelected,
+                          ]}
+                        >
+                          {city}
+                        </Text>
+                        {editData.city === city && (
+                          <Check size={16} color="#007AFF" />
+                        )}
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : (
+                  <TextInput
+                    ref={cityRef}
+                    style={styles.editInput}
+                    value={editData.city || ''}
+                    onChangeText={(text) => setEditData({ ...editData, city: text })}
+                    placeholder="Enter city/town"
+                    placeholderTextColor="#999"
+                    returnKeyType="next"
+                    onSubmitEditing={() => localityRef.current?.focus()}
+                  />
+                )}
+                {cityOptions.length > 1 && (
+                  <Text style={styles.editHint}>Select from available options for this pincode</Text>
+                )}
+              </View>
+
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>Locality/District</Text>
                 <TextInput
+                  ref={localityRef}
                   style={styles.editInput}
-                  value={editData.city || ''}
-                  onChangeText={(text) => setEditData({ ...editData, city: text })}
-                  placeholder="Enter city"
+                  value={editData.locality || ''}
+                  onChangeText={(text) => setEditData({ ...editData, locality: text })}
+                  placeholder="Enter locality/district"
                   placeholderTextColor="#999"
+                  returnKeyType="next"
+                  onSubmitEditing={() => stateRef.current?.focus()}
                 />
+                <Text style={styles.editHint}>Auto-filled from pincode (editable)</Text>
               </View>
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>State</Text>
                 <TextInput
+                  ref={stateRef}
                   style={styles.editInput}
                   value={editData.state || ''}
                   onChangeText={(text) => setEditData({ ...editData, state: text })}
                   placeholder="Enter state"
                   placeholderTextColor="#999"
+                  returnKeyType="next"
+                  onSubmitEditing={() => serviceRadiusRef.current?.focus()}
                 />
-              </View>
-
-              <View style={styles.field}>
-                <Text style={styles.label}>Pincode</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editData.pincode || ''}
-                  onChangeText={(text) => setEditData({ ...editData, pincode: text })}
-                  placeholder="Enter pincode"
-                  placeholderTextColor="#999"
-                  keyboardType="numeric"
-                  maxLength={6}
-                />
+                <Text style={styles.editHint}>Auto-filled from pincode (editable)</Text>
               </View>
 
               <View style={styles.field}>
                 <Text style={styles.label}>Service Radius (km)</Text>
                 <TextInput
+                  ref={serviceRadiusRef}
                   style={styles.input}
                   value={editData.service_radius_km?.toString() || ''}
                   onChangeText={(text) => {
@@ -1726,23 +1950,28 @@ export default function BusinessDetailsScreen() {
                     setEditData({ ...editData, service_radius_km: num });
                   }}
                   placeholder="Enter service radius in kilometers"
-                  placeholderTextColor="#999"
+                  returnKeyType="next"
+                  onSubmitEditing={() => gstNumberRef.current?.focus()}
                   keyboardType="numeric"
+                  placeholderTextColor="#999"
                 />
               </View>
             </View>
 
             <View style={styles.editSection}>
-              <Text style={styles.editSectionTitle}>Verification (Optional)</Text>
+              <Text style={styles.editSectionTitle}>Verification</Text>
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>GST Number</Text>
                 <TextInput
+                  ref={gstNumberRef}
                   style={styles.editInput}
                   value={editData.gst_number || ''}
                   onChangeText={(text) => setEditData({ ...editData, gst_number: text })}
                   placeholder="Enter GST number"
                   placeholderTextColor="#999"
+                  returnKeyType="next"
+                  onSubmitEditing={() => panRef.current?.focus()}
                 />
               </View>
 
@@ -1750,6 +1979,7 @@ export default function BusinessDetailsScreen() {
                 <Text style={styles.editLabel}>PAN *</Text>
                 <Text style={styles.editHint}>Required - Permanent Account Number</Text>
                 <TextInput
+                  ref={panRef}
                   style={styles.editInput}
                   value={editData.business_registration_number || ''}
                   onChangeText={(text) => setEditData({ ...editData, business_registration_number: text })}
@@ -1757,6 +1987,8 @@ export default function BusinessDetailsScreen() {
                   placeholderTextColor="#999"
                   autoCapitalize="characters"
                   maxLength={10}
+                  returnKeyType="next"
+                  onSubmitEditing={() => websiteUrlRef.current?.focus()}
                 />
               </View>
 
@@ -1764,25 +1996,30 @@ export default function BusinessDetailsScreen() {
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Verification Documents</Text>
                 <Text style={styles.editHint}>
-                  Upload images (jpg, png) or PDF files (max 10MB each)
+                  PAN card document is required. Upload images (jpg, png) or PDF files (max 10MB each)
                 </Text>
 
-                {/* Document Types */}
+                {/* Document Types - PAN Card first and mandatory */}
                 {[
-                  { code: 'gst', name: 'GST Certificate' },
-                  { code: 'aadhaar', name: 'Aadhaar Card' },
-                  { code: 'bank_statement', name: 'Bank Statement' },
-                  { code: 'general', name: 'General Document' },
-                  { code: 'business_license', name: 'Business License' },
-                  { code: 'pan', name: 'PAN Card' },
+                  { code: 'pan', name: 'PAN Card', mandatory: true },
+                  { code: 'gst', name: 'GST Certificate', mandatory: false },
+                  { code: 'aadhaar', name: 'Aadhaar Card', mandatory: false },
+                  { code: 'bank_statement', name: 'Bank Statement', mandatory: false },
+                  { code: 'general', name: 'General Document', mandatory: false },
+                  { code: 'business_license', name: 'Business License', mandatory: false },
                 ].map((docType) => {
                   const docs = documentsByType[docType.code] || [];
                   const isUploading = uploadingDocument === docType.code;
 
                   return (
-                    <View key={docType.code} style={styles.documentTypeSection}>
+                    <View key={docType.code} style={[styles.documentTypeSection, docType.mandatory && styles.mandatoryDocumentSection]}>
                       <View style={styles.documentTypeHeader}>
-                        <Text style={styles.documentTypeName}>{docType.name}</Text>
+                        <View style={styles.documentTypeLabelContainer}>
+                          <Text style={styles.documentTypeName}>{docType.name} {docType.mandatory ? '*' : ''}</Text>
+                          {docType.mandatory && (
+                            <Text style={styles.mandatoryDocumentHint}>Required</Text>
+                          )}
+                        </View>
                         <TouchableOpacity
                           style={[styles.addDocumentButton, isUploading && styles.addDocumentButtonDisabled]}
                           onPress={() => handleUploadDocument(docType.code)}
@@ -1841,6 +2078,7 @@ export default function BusinessDetailsScreen() {
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Website URL</Text>
                 <TextInput
+                  ref={websiteUrlRef}
                   style={styles.editInput}
                   value={editData.website_url || ''}
                   onChangeText={(text) => setEditData({ ...editData, website_url: text })}
@@ -1848,12 +2086,15 @@ export default function BusinessDetailsScreen() {
                   placeholderTextColor="#999"
                   autoCapitalize="none"
                   keyboardType="url"
+                  returnKeyType="next"
+                  onSubmitEditing={() => instagramUrlRef.current?.focus()}
                 />
               </View>
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Instagram URL</Text>
                 <TextInput
+                  ref={instagramUrlRef}
                   style={styles.editInput}
                   value={editData.instagram_url || ''}
                   onChangeText={(text) => setEditData({ ...editData, instagram_url: text })}
@@ -1861,12 +2102,15 @@ export default function BusinessDetailsScreen() {
                   placeholderTextColor="#999"
                   autoCapitalize="none"
                   keyboardType="url"
+                  returnKeyType="next"
+                  onSubmitEditing={() => facebookUrlRef.current?.focus()}
                 />
               </View>
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Facebook URL</Text>
                 <TextInput
+                  ref={facebookUrlRef}
                   style={styles.editInput}
                   value={editData.facebook_url || ''}
                   onChangeText={(text) => setEditData({ ...editData, facebook_url: text })}
@@ -1874,12 +2118,15 @@ export default function BusinessDetailsScreen() {
                   placeholderTextColor="#999"
                   autoCapitalize="none"
                   keyboardType="url"
+                  returnKeyType="next"
+                  onSubmitEditing={() => youtubeUrlRef.current?.focus()}
                 />
               </View>
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>YouTube URL</Text>
                 <TextInput
+                  ref={youtubeUrlRef}
                   style={styles.editInput}
                   value={editData.youtube_url || ''}
                   onChangeText={(text) => setEditData({ ...editData, youtube_url: text })}
@@ -1887,6 +2134,7 @@ export default function BusinessDetailsScreen() {
                   placeholderTextColor="#999"
                   autoCapitalize="none"
                   keyboardType="url"
+                  returnKeyType="done"
                 />
               </View>
             </View>
@@ -2441,6 +2689,33 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 20,
   },
+  categoryModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    width: '100%',
+    maxWidth: 400,
+    maxHeight: '80%',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  categoryModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  categoryModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1a1a1a',
+  },
   field: {
     marginBottom: 20,
   },
@@ -2618,6 +2893,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
   },
   closeButton: {
     width: 32,
@@ -2634,11 +2910,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 16,
     color: '#1a1a1a',
-    margin: 20,
+    marginHorizontal: 20,
+    marginTop: 16,
     marginBottom: 12,
   },
   modalCategoryTree: {
-    maxHeight: 400,
+    maxHeight: 350,
     paddingHorizontal: 20,
     paddingVertical: 8,
   },
@@ -2646,6 +2923,17 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  categoryModalFooter: {
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  categoryModalButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
   },
   categoryItem: {
     marginBottom: 4,
@@ -2758,6 +3046,66 @@ const styles = StyleSheet.create({
     color: '#666',
     marginBottom: 8,
   },
+  inputWithStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  pincodeInput: {
+    flex: 1,
+    paddingRight: 44,
+  },
+  inputValid: {
+    borderColor: '#34C759',
+    backgroundColor: '#f0fff4',
+  },
+  inputInvalid: {
+    borderColor: '#FF3B30',
+    backgroundColor: '#fff5f5',
+  },
+  statusIcon: {
+    position: 'absolute',
+    right: 12,
+    height: '100%',
+    justifyContent: 'center',
+  },
+  pincodeErrorText: {
+    fontSize: 12,
+    color: '#FF3B30',
+    marginTop: 4,
+  },
+  pincodeSuccessText: {
+    fontSize: 12,
+    color: '#34C759',
+    marginTop: 4,
+  },
+  cityDropdown: {
+    backgroundColor: '#f8f8f8',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  cityOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  cityOptionSelected: {
+    backgroundColor: '#f0f7ff',
+  },
+  cityOptionText: {
+    fontSize: 16,
+    color: '#1a1a1a',
+  },
+  cityOptionTextSelected: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
   documentTypeSection: {
     marginBottom: 16,
     padding: 12,
@@ -2766,16 +3114,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e0e0e0',
   },
+  mandatoryDocumentSection: {
+    backgroundColor: '#fff9e6',
+    borderColor: '#cc6600',
+  },
   documentTypeHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
   },
+  documentTypeLabelContainer: {
+    flex: 1,
+  },
   documentTypeName: {
     fontSize: 14,
     fontWeight: '600',
     color: '#1a1a1a',
+  },
+  mandatoryDocumentHint: {
+    fontSize: 12,
+    color: '#cc6600',
+    fontWeight: '500',
+    marginTop: 2,
   },
   addDocumentButton: {
     flexDirection: 'row',

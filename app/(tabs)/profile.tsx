@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -37,6 +37,10 @@ export default function ProfileScreen() {
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const router = useRouter();
+  
+  // Refs for keyboard navigation
+  const lastNameRef = useRef<TextInput>(null);
+  const emailRef = useRef<TextInput>(null);
 
   // Fetch image URL from file_storage when profile loads
   useEffect(() => {
@@ -337,11 +341,14 @@ export default function ProfileScreen() {
                   First Name <Text style={styles.required}>*</Text>
                 </Text>
                 <TextInput
+                  ref={null}
                   style={styles.input}
                   placeholder="Enter first name"
                   value={values.firstName}
                   onChangeText={handleChange('firstName')}
                   onBlur={handleBlur('firstName')}
+                  returnKeyType="next"
+                  onSubmitEditing={() => lastNameRef.current?.focus()}
                 />
                 {touched.firstName && errors.firstName && (
                   <Text style={styles.errorText}>{errors.firstName}</Text>
@@ -353,11 +360,14 @@ export default function ProfileScreen() {
                   Last Name <Text style={styles.required}>*</Text>
                 </Text>
                 <TextInput
+                  ref={lastNameRef}
                   style={styles.input}
                   placeholder="Enter last name"
                   value={values.lastName}
                   onChangeText={handleChange('lastName')}
                   onBlur={handleBlur('lastName')}
+                  returnKeyType="next"
+                  onSubmitEditing={() => emailRef.current?.focus()}
                 />
                 {touched.lastName && errors.lastName && (
                   <Text style={styles.errorText}>{errors.lastName}</Text>
@@ -369,6 +379,7 @@ export default function ProfileScreen() {
                   Email Address <Text style={styles.required}>*</Text>
                 </Text>
                 <TextInput
+                  ref={emailRef}
                   style={styles.input}
                   placeholder="Enter email address"
                   keyboardType="email-address"
@@ -376,6 +387,8 @@ export default function ProfileScreen() {
                   value={values.email}
                   onChangeText={handleChange('email')}
                   onBlur={handleBlur('email')}
+                  returnKeyType="done"
+                  onSubmitEditing={() => handleSubmit()}
                 />
                 {touched.email && errors.email && (
                   <Text style={styles.errorText}>{errors.email}</Text>
