@@ -57,12 +57,94 @@ export default function BusinessRegistrationScreen() {
   const [currentPage, setCurrentPage] = useState(0);
   const [businessData, setBusinessData] = useState<Partial<BusinessData>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const { user } = useAuth();
   const router = useRouter();
 
   const totalSteps = 5;
 
   const handleNext = () => {
+    // Dismiss keyboard before validation
+    Keyboard.dismiss();
+    
+    // Validate current step before proceeding
+    const errors: Record<string, string> = {};
+    
+    if (currentPage === 0) {
+      // Basic Information step
+      if (!businessData.businessName || !businessData.businessName.trim()) {
+        errors.businessName = 'Business name is required';
+      }
+      if (!businessData.contactPersonName || !businessData.contactPersonName.trim()) {
+        errors.contactPersonName = 'Contact person name is required';
+      }
+      if (!businessData.email || !businessData.email.trim()) {
+        errors.email = 'Email is required';
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(businessData.email)) {
+        errors.email = 'Please enter a valid email address';
+      }
+      if (!businessData.phoneNumber || !businessData.phoneNumber.trim()) {
+        errors.phoneNumber = 'Phone number is required';
+      }
+    } else if (currentPage === 1) {
+      // Services & Experience step
+      if (!businessData.selectedRootCategoryId) {
+        errors.selectedRootCategoryId = 'Service category is required';
+      }
+      if (!businessData.selectedCategoryIds || businessData.selectedCategoryIds.length === 0) {
+        errors.selectedCategoryIds = 'Please select at least one service category';
+      }
+      if (!businessData.selectedEventIds || businessData.selectedEventIds.length === 0) {
+        errors.selectedEventIds = 'Please select at least one event type';
+      }
+      if (!businessData.businessDescription || !businessData.businessDescription.trim()) {
+        errors.businessDescription = 'Business description is required';
+      }
+      if (!businessData.yearsOfExperience || !businessData.yearsOfExperience.trim()) {
+        errors.yearsOfExperience = 'Years of experience is required';
+      }
+    } else if (currentPage === 2) {
+      // Location & Coverage step
+      if (!businessData.businessAddress || !businessData.businessAddress.trim()) {
+        errors.businessAddress = 'Business address is required';
+      }
+      if (!businessData.pincode || !businessData.pincode.trim()) {
+        errors.pincode = 'Pincode is required';
+      } else if (businessData.pincode.length !== 6) {
+        errors.pincode = 'Pincode must be 6 digits';
+      }
+      if (!businessData.city || !businessData.city.trim()) {
+        errors.city = 'City/Town is required';
+      }
+      if (!businessData.state || !businessData.state.trim()) {
+        errors.state = 'State is required';
+      }
+    } else if (currentPage === 3) {
+      // Verification step - validate PAN number and PAN card image
+      if (!businessData.panNumber || !businessData.panNumber.trim()) {
+        errors.panNumber = 'PAN number is required';
+      }
+      
+      const panDocuments = businessData.verificationDocuments?.['pan'];
+      if (!panDocuments || panDocuments.length === 0) {
+        errors.panDocument = 'PAN card document is required. Please upload your PAN card.';
+      }
+    }
+    // Step 4 (Portfolio & Social) has no mandatory fields
+    
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      Alert.alert(
+        'Validation Error',
+        'Please complete all required fields:\n\n' + Object.values(errors).join('\n'),
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    
+    // Clear validation errors when moving to next step
+    setValidationErrors({});
+    
     if (currentPage < totalSteps - 1) {
       setCurrentPage(currentPage + 1);
     }
@@ -94,35 +176,113 @@ export default function BusinessRegistrationScreen() {
   };
 
   const handleCancel = () => {
-    // Dismiss keyboard first to ensure proper navigation
+    // Dismiss keyboard first to ensure proper navigation and button responsiveness
     Keyboard.dismiss();
     
-    if (hasEnteredData()) {
-      Alert.alert(
-        'Cancel Registration?',
-        'You have entered some information. Are you sure you want to cancel? All entered data will be lost.',
-        [
-          {
-            text: 'Continue Registration',
-            style: 'cancel',
-          },
-          {
-            text: 'Cancel',
-            style: 'destructive',
-            onPress: () => {
-              router.replace('/(tabs)');
+    // Use setTimeout to ensure keyboard is fully dismissed before showing alert
+    setTimeout(() => {
+      if (hasEnteredData()) {
+        Alert.alert(
+          'Cancel Registration?',
+          'You have entered some information. Are you sure you want to cancel? All entered data will be lost.',
+          [
+            {
+              text: 'Continue Registration',
+              style: 'cancel',
             },
-          },
-        ]
-      );
-    } else {
-      // No data entered, just navigate away
-      router.replace('/(tabs)');
-    }
+            {
+              text: 'Cancel',
+              style: 'destructive',
+              onPress: () => {
+                router.back();
+              },
+            },
+          ]
+        );
+      } else {
+        // No data entered, just navigate away
+        router.back();
+      }
+    }, 100);
   };
 
   const updateBusinessData = (data: Partial<BusinessData>) => {
     setBusinessData((prev) => ({ ...prev, ...data }));
+    
+    // Clear validation errors when user fixes the issues
+    if (Object.keys(validationErrors).length > 0) {
+      const updatedErrors = { ...validationErrors };
+      let hasChanges = false;
+      
+      // Clear errors for fields that are being updated
+      if (data.businessName !== undefined && data.businessName.trim() && updatedErrors.businessName) {
+        delete updatedErrors.businessName;
+        hasChanges = true;
+      }
+      if (data.contactPersonName !== undefined && data.contactPersonName.trim() && updatedErrors.contactPersonName) {
+        delete updatedErrors.contactPersonName;
+        hasChanges = true;
+      }
+      if (data.email !== undefined && data.email.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email) && updatedErrors.email) {
+        delete updatedErrors.email;
+        hasChanges = true;
+      }
+      if (data.phoneNumber !== undefined && data.phoneNumber.trim() && updatedErrors.phoneNumber) {
+        delete updatedErrors.phoneNumber;
+        hasChanges = true;
+      }
+      if (data.selectedRootCategoryId !== undefined && updatedErrors.selectedRootCategoryId) {
+        delete updatedErrors.selectedRootCategoryId;
+        hasChanges = true;
+      }
+      if (data.selectedCategoryIds !== undefined && data.selectedCategoryIds.length > 0 && updatedErrors.selectedCategoryIds) {
+        delete updatedErrors.selectedCategoryIds;
+        hasChanges = true;
+      }
+      if (data.selectedEventIds !== undefined && data.selectedEventIds.length > 0 && updatedErrors.selectedEventIds) {
+        delete updatedErrors.selectedEventIds;
+        hasChanges = true;
+      }
+      if (data.businessDescription !== undefined && data.businessDescription.trim() && updatedErrors.businessDescription) {
+        delete updatedErrors.businessDescription;
+        hasChanges = true;
+      }
+      if (data.yearsOfExperience !== undefined && data.yearsOfExperience.trim() && updatedErrors.yearsOfExperience) {
+        delete updatedErrors.yearsOfExperience;
+        hasChanges = true;
+      }
+      if (data.businessAddress !== undefined && data.businessAddress.trim() && updatedErrors.businessAddress) {
+        delete updatedErrors.businessAddress;
+        hasChanges = true;
+      }
+      if (data.pincode !== undefined && data.pincode.trim() && data.pincode.length === 6 && updatedErrors.pincode) {
+        delete updatedErrors.pincode;
+        hasChanges = true;
+      }
+      if (data.city !== undefined && data.city.trim() && updatedErrors.city) {
+        delete updatedErrors.city;
+        hasChanges = true;
+      }
+      if (data.state !== undefined && data.state.trim() && updatedErrors.state) {
+        delete updatedErrors.state;
+        hasChanges = true;
+      }
+      if (data.panNumber !== undefined && data.panNumber.trim() && updatedErrors.panNumber) {
+        delete updatedErrors.panNumber;
+        hasChanges = true;
+      }
+      if (data.verificationDocuments !== undefined) {
+        const panDocuments = data.verificationDocuments?.['pan'];
+        if (panDocuments && panDocuments.length > 0 && updatedErrors.panDocument) {
+          delete updatedErrors.panDocument;
+          hasChanges = true;
+        }
+      }
+      
+      if (hasChanges) {
+        setValidationErrors(updatedErrors);
+      }
+    }
   };
 
   const handleSubmit = async () => {
@@ -306,6 +466,7 @@ export default function BusinessRegistrationScreen() {
         <BasicInformationStep
           data={businessData}
           onUpdate={updateBusinessData}
+          validationErrors={validationErrors}
         />
       ),
     },
@@ -316,6 +477,7 @@ export default function BusinessRegistrationScreen() {
         <ServicesExperienceStep
           data={businessData}
           onUpdate={updateBusinessData}
+          validationErrors={validationErrors}
         />
       ),
     },
@@ -326,6 +488,7 @@ export default function BusinessRegistrationScreen() {
         <LocationCoverageStep
           data={businessData}
           onUpdate={updateBusinessData}
+          validationErrors={validationErrors}
         />
       ),
     },
@@ -333,7 +496,11 @@ export default function BusinessRegistrationScreen() {
       title: 'Verification',
       subtitle: 'Verify your business',
       component: (
-        <VerificationStep data={businessData} onUpdate={updateBusinessData} />
+        <VerificationStep 
+          data={businessData} 
+          onUpdate={updateBusinessData}
+          validationErrors={validationErrors}
+        />
       ),
     },
     {
@@ -363,11 +530,17 @@ export default function BusinessRegistrationScreen() {
           </View>
           <TouchableOpacity
             style={styles.cancelButton}
-            onPress={handleCancel}
+            onPress={(e) => {
+              e?.stopPropagation?.();
+              handleCancel();
+            }}
             activeOpacity={0.6}
             hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+            accessibilityLabel="Close registration"
+            accessibilityRole="button"
+            pointerEvents="box-only"
           >
-            <X size={24} color="#666" />
+            <X size={24} color="#666" strokeWidth={2.5} />
           </TouchableOpacity>
         </View>
         <View style={styles.progressContainer}>
@@ -456,9 +629,13 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   cancelButton: {
-    padding: 8,
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
     marginTop: -4,
-    zIndex: 10,
+    zIndex: 1000,
+    elevation: 10, // For Android
   },
   subtitle: {
     fontSize: 14,

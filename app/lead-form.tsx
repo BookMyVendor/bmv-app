@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -54,6 +54,14 @@ export default function LeadFormScreen() {
   const [eventCategories, setEventCategories] = useState<{ id: string; name: string }[]>([]);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Refs for keyboard navigation
+  const customerPhoneRef = useRef<TextInput>(null);
+  const customerEmailRef = useRef<TextInput>(null);
+  const eventDateRef = useRef<TextInput>(null);
+  const eventLocationRef = useRef<TextInput>(null);
+  const guestCountRef = useRef<TextInput>(null);
+  const eventDurationRef = useRef<TextInput>(null);
 
   useEffect(() => {
     if (user?.id) {
@@ -321,6 +329,8 @@ export default function LeadFormScreen() {
               placeholderTextColor="#999"
               value={formData.customer_name}
               onChangeText={(text) => updateFormData('customer_name', text)}
+              returnKeyType="next"
+              onSubmitEditing={() => customerPhoneRef.current?.focus()}
             />
             {errors.customer_name && (
               <Text style={styles.errorText}>{errors.customer_name}</Text>
@@ -332,12 +342,15 @@ export default function LeadFormScreen() {
               Phone Number <Text style={styles.required}>*</Text>
             </Text>
             <TextInput
+              ref={customerPhoneRef}
               style={[styles.input, errors.customer_phone && styles.inputError]}
               placeholder="Enter phone number"
               placeholderTextColor="#999"
               value={formData.customer_phone}
               onChangeText={(text) => updateFormData('customer_phone', text)}
               keyboardType="phone-pad"
+              returnKeyType="next"
+              onSubmitEditing={() => customerEmailRef.current?.focus()}
             />
             {errors.customer_phone && (
               <Text style={styles.errorText}>{errors.customer_phone}</Text>
@@ -347,6 +360,7 @@ export default function LeadFormScreen() {
           <View style={styles.formGroup}>
             <Text style={styles.label}>Email Address</Text>
             <TextInput
+              ref={customerEmailRef}
               style={[styles.input, errors.customer_email && styles.inputError]}
               placeholder="Enter email address"
               placeholderTextColor="#999"
@@ -354,6 +368,8 @@ export default function LeadFormScreen() {
               onChangeText={(text) => updateFormData('customer_email', text)}
               keyboardType="email-address"
               autoCapitalize="none"
+              returnKeyType="next"
+              onSubmitEditing={() => eventDateRef.current?.focus()}
             />
             {errors.customer_email && (
               <Text style={styles.errorText}>{errors.customer_email}</Text>
@@ -379,11 +395,14 @@ export default function LeadFormScreen() {
               Event Date <Text style={styles.required}>*</Text>
             </Text>
             <TextInput
+              ref={eventDateRef}
               style={[styles.input, errors.event_date && styles.inputError]}
               placeholder="YYYY-MM-DD"
               placeholderTextColor="#999"
               value={formData.event_date}
               onChangeText={(text) => updateFormData('event_date', text)}
+              returnKeyType="next"
+              onSubmitEditing={() => eventLocationRef.current?.focus()}
             />
             {errors.event_date && (
               <Text style={styles.errorText}>{errors.event_date}</Text>
@@ -393,35 +412,43 @@ export default function LeadFormScreen() {
           <View style={styles.formGroup}>
             <Text style={styles.label}>Event Location</Text>
             <TextInput
+              ref={eventLocationRef}
               style={styles.input}
               placeholder="Enter event location (e.g., Hotel, Pune)"
               placeholderTextColor="#999"
               value={formData.event_location}
               onChangeText={(text) => updateFormData('event_location', text)}
+              returnKeyType="next"
+              onSubmitEditing={() => guestCountRef.current?.focus()}
             />
           </View>
 
           <View style={styles.formGroup}>
             <Text style={styles.label}>Guest Count</Text>
             <TextInput
+              ref={guestCountRef}
               style={styles.input}
               placeholder="Number of guests"
               placeholderTextColor="#999"
               value={formData.guest_count}
               onChangeText={(text) => updateFormData('guest_count', text)}
               keyboardType="number-pad"
+              returnKeyType="next"
+              onSubmitEditing={() => eventDurationRef.current?.focus()}
             />
           </View>
 
           <View style={styles.formGroup}>
             <Text style={styles.label}>Event Duration (hours)</Text>
             <TextInput
+              ref={eventDurationRef}
               style={styles.input}
               placeholder="Duration in hours"
               placeholderTextColor="#999"
               value={formData.event_duration_hours}
               onChangeText={(text) => updateFormData('event_duration_hours', text)}
               keyboardType="number-pad"
+              returnKeyType="done"
             />
           </View>
 

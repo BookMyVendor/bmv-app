@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -148,6 +148,25 @@ export default function BusinessDetailsScreen() {
   const [pincodeStatus, setPincodeStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
   const [pincodeError, setPincodeError] = useState<string | null>(null);
   const [cityOptions, setCityOptions] = useState<string[]>([]);
+
+  // Refs for keyboard navigation in edit form
+  const contactPersonNameRef = useRef<TextInput>(null);
+  const contactPersonRoleRef = useRef<TextInput>(null);
+  const businessEmailRef = useRef<TextInput>(null);
+  const contactPersonPhoneRef = useRef<TextInput>(null);
+  const businessDescriptionRef = useRef<TextInput>(null);
+  const addressRef = useRef<TextInput>(null);
+  const pincodeRef = useRef<TextInput>(null);
+  const cityRef = useRef<TextInput>(null);
+  const localityRef = useRef<TextInput>(null);
+  const stateRef = useRef<TextInput>(null);
+  const serviceRadiusRef = useRef<TextInput>(null);
+  const gstNumberRef = useRef<TextInput>(null);
+  const panRef = useRef<TextInput>(null);
+  const websiteUrlRef = useRef<TextInput>(null);
+  const instagramUrlRef = useRef<TextInput>(null);
+  const facebookUrlRef = useRef<TextInput>(null);
+  const youtubeUrlRef = useRef<TextInput>(null);
 
   useEffect(() => {
     if (id) {
@@ -1407,34 +1426,43 @@ export default function BusinessDetailsScreen() {
                   onChangeText={(text) => setEditData({ ...editData, business_name: text })}
                   placeholder="Enter business name"
                   placeholderTextColor="#999"
+                  returnKeyType="next"
+                  onSubmitEditing={() => contactPersonNameRef.current?.focus()}
                 />
               </View>
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Contact Person Name</Text>
                 <TextInput
+                  ref={contactPersonNameRef}
                   style={styles.editInput}
                   value={editData.contact_person_name || ''}
                   onChangeText={(text) => setEditData({ ...editData, contact_person_name: text })}
                   placeholder="Enter contact person name"
                   placeholderTextColor="#999"
+                  returnKeyType="next"
+                  onSubmitEditing={() => contactPersonRoleRef.current?.focus()}
                 />
               </View>
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Contact Person Role</Text>
                 <TextInput
+                  ref={contactPersonRoleRef}
                   style={styles.editInput}
                   value={editData.contact_person_role || ''}
                   onChangeText={(text) => setEditData({ ...editData, contact_person_role: text })}
                   placeholder="e.g., Owner, Manager, Director"
                   placeholderTextColor="#999"
+                  returnKeyType="next"
+                  onSubmitEditing={() => businessEmailRef.current?.focus()}
                 />
               </View>
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Email</Text>
                 <TextInput
+                  ref={businessEmailRef}
                   style={styles.editInput}
                   value={editData.business_email || ''}
                   onChangeText={(text) => setEditData({ ...editData, business_email: text })}
@@ -1442,18 +1470,23 @@ export default function BusinessDetailsScreen() {
                   placeholderTextColor="#999"
                   keyboardType="email-address"
                   autoCapitalize="none"
+                  returnKeyType="next"
+                  onSubmitEditing={() => contactPersonPhoneRef.current?.focus()}
                 />
               </View>
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Phone Number</Text>
                 <TextInput
+                  ref={contactPersonPhoneRef}
                   style={styles.editInput}
                   value={editData.contact_person_phone || ''}
                   onChangeText={(text) => setEditData({ ...editData, contact_person_phone: text })}
                   placeholder="Enter phone number"
                   placeholderTextColor="#999"
                   keyboardType="phone-pad"
+                  returnKeyType="next"
+                  onSubmitEditing={() => businessDescriptionRef.current?.focus()}
                 />
               </View>
             </View>
@@ -1690,6 +1723,7 @@ export default function BusinessDetailsScreen() {
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Business Description</Text>
                 <TextInput
+                  ref={businessDescriptionRef}
                   style={[styles.editInput, styles.textArea]}
                   value={editData.description || ''}
                   onChangeText={(text) => setEditData({ ...editData, description: text })}
@@ -1697,6 +1731,8 @@ export default function BusinessDetailsScreen() {
                   placeholderTextColor="#999"
                   multiline
                   numberOfLines={4}
+                  returnKeyType="next"
+                  onSubmitEditing={() => addressRef.current?.focus()}
                 />
               </View>
 
@@ -1720,11 +1756,14 @@ export default function BusinessDetailsScreen() {
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Business Address</Text>
                 <TextInput
+                  ref={addressRef}
                   style={styles.editInput}
                   value={editData.address || ''}
                   onChangeText={(text) => setEditData({ ...editData, address: text })}
                   placeholder="Enter business address"
                   placeholderTextColor="#999"
+                  returnKeyType="next"
+                  onSubmitEditing={() => pincodeRef.current?.focus()}
                 />
               </View>
 
@@ -1732,6 +1771,7 @@ export default function BusinessDetailsScreen() {
                 <Text style={styles.editLabel}>Pincode *</Text>
                 <View style={styles.inputWithStatus}>
                   <TextInput
+                    ref={pincodeRef}
                     style={[
                       styles.editInput,
                       styles.pincodeInput,
@@ -1746,6 +1786,14 @@ export default function BusinessDetailsScreen() {
                         setPincodeStatus('idle');
                         setPincodeError(null);
                         setCityOptions([]);
+                      }
+                    }}
+                    returnKeyType="next"
+                    onSubmitEditing={() => {
+                      if (cityOptions.length === 0 || cityOptions.length === 1) {
+                        cityRef.current?.focus();
+                      } else {
+                        localityRef.current?.focus();
                       }
                     }}
                     onBlur={async () => {
@@ -1846,11 +1894,14 @@ export default function BusinessDetailsScreen() {
                   </View>
                 ) : (
                   <TextInput
+                    ref={cityRef}
                     style={styles.editInput}
                     value={editData.city || ''}
                     onChangeText={(text) => setEditData({ ...editData, city: text })}
                     placeholder="Enter city/town"
                     placeholderTextColor="#999"
+                    returnKeyType="next"
+                    onSubmitEditing={() => localityRef.current?.focus()}
                   />
                 )}
                 {cityOptions.length > 1 && (
@@ -1861,11 +1912,14 @@ export default function BusinessDetailsScreen() {
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Locality/District</Text>
                 <TextInput
+                  ref={localityRef}
                   style={styles.editInput}
                   value={editData.locality || ''}
                   onChangeText={(text) => setEditData({ ...editData, locality: text })}
                   placeholder="Enter locality/district"
                   placeholderTextColor="#999"
+                  returnKeyType="next"
+                  onSubmitEditing={() => stateRef.current?.focus()}
                 />
                 <Text style={styles.editHint}>Auto-filled from pincode (editable)</Text>
               </View>
@@ -1873,11 +1927,14 @@ export default function BusinessDetailsScreen() {
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>State</Text>
                 <TextInput
+                  ref={stateRef}
                   style={styles.editInput}
                   value={editData.state || ''}
                   onChangeText={(text) => setEditData({ ...editData, state: text })}
                   placeholder="Enter state"
                   placeholderTextColor="#999"
+                  returnKeyType="next"
+                  onSubmitEditing={() => serviceRadiusRef.current?.focus()}
                 />
                 <Text style={styles.editHint}>Auto-filled from pincode (editable)</Text>
               </View>
@@ -1885,6 +1942,7 @@ export default function BusinessDetailsScreen() {
               <View style={styles.field}>
                 <Text style={styles.label}>Service Radius (km)</Text>
                 <TextInput
+                  ref={serviceRadiusRef}
                   style={styles.input}
                   value={editData.service_radius_km?.toString() || ''}
                   onChangeText={(text) => {
@@ -1892,8 +1950,10 @@ export default function BusinessDetailsScreen() {
                     setEditData({ ...editData, service_radius_km: num });
                   }}
                   placeholder="Enter service radius in kilometers"
-                  placeholderTextColor="#999"
+                  returnKeyType="next"
+                  onSubmitEditing={() => gstNumberRef.current?.focus()}
                   keyboardType="numeric"
+                  placeholderTextColor="#999"
                 />
               </View>
             </View>
@@ -1904,11 +1964,14 @@ export default function BusinessDetailsScreen() {
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>GST Number</Text>
                 <TextInput
+                  ref={gstNumberRef}
                   style={styles.editInput}
                   value={editData.gst_number || ''}
                   onChangeText={(text) => setEditData({ ...editData, gst_number: text })}
                   placeholder="Enter GST number"
                   placeholderTextColor="#999"
+                  returnKeyType="next"
+                  onSubmitEditing={() => panRef.current?.focus()}
                 />
               </View>
 
@@ -1916,6 +1979,7 @@ export default function BusinessDetailsScreen() {
                 <Text style={styles.editLabel}>PAN *</Text>
                 <Text style={styles.editHint}>Required - Permanent Account Number</Text>
                 <TextInput
+                  ref={panRef}
                   style={styles.editInput}
                   value={editData.business_registration_number || ''}
                   onChangeText={(text) => setEditData({ ...editData, business_registration_number: text })}
@@ -1923,6 +1987,8 @@ export default function BusinessDetailsScreen() {
                   placeholderTextColor="#999"
                   autoCapitalize="characters"
                   maxLength={10}
+                  returnKeyType="next"
+                  onSubmitEditing={() => websiteUrlRef.current?.focus()}
                 />
               </View>
 
@@ -2012,6 +2078,7 @@ export default function BusinessDetailsScreen() {
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Website URL</Text>
                 <TextInput
+                  ref={websiteUrlRef}
                   style={styles.editInput}
                   value={editData.website_url || ''}
                   onChangeText={(text) => setEditData({ ...editData, website_url: text })}
@@ -2019,12 +2086,15 @@ export default function BusinessDetailsScreen() {
                   placeholderTextColor="#999"
                   autoCapitalize="none"
                   keyboardType="url"
+                  returnKeyType="next"
+                  onSubmitEditing={() => instagramUrlRef.current?.focus()}
                 />
               </View>
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Instagram URL</Text>
                 <TextInput
+                  ref={instagramUrlRef}
                   style={styles.editInput}
                   value={editData.instagram_url || ''}
                   onChangeText={(text) => setEditData({ ...editData, instagram_url: text })}
@@ -2032,12 +2102,15 @@ export default function BusinessDetailsScreen() {
                   placeholderTextColor="#999"
                   autoCapitalize="none"
                   keyboardType="url"
+                  returnKeyType="next"
+                  onSubmitEditing={() => facebookUrlRef.current?.focus()}
                 />
               </View>
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Facebook URL</Text>
                 <TextInput
+                  ref={facebookUrlRef}
                   style={styles.editInput}
                   value={editData.facebook_url || ''}
                   onChangeText={(text) => setEditData({ ...editData, facebook_url: text })}
@@ -2045,12 +2118,15 @@ export default function BusinessDetailsScreen() {
                   placeholderTextColor="#999"
                   autoCapitalize="none"
                   keyboardType="url"
+                  returnKeyType="next"
+                  onSubmitEditing={() => youtubeUrlRef.current?.focus()}
                 />
               </View>
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>YouTube URL</Text>
                 <TextInput
+                  ref={youtubeUrlRef}
                   style={styles.editInput}
                   value={editData.youtube_url || ''}
                   onChangeText={(text) => setEditData({ ...editData, youtube_url: text })}
@@ -2058,6 +2134,7 @@ export default function BusinessDetailsScreen() {
                   placeholderTextColor="#999"
                   autoCapitalize="none"
                   keyboardType="url"
+                  returnKeyType="done"
                 />
               </View>
             </View>

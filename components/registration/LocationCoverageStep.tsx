@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import { validatePincode } from '@/lib/pincodeValidation';
 interface LocationCoverageStepProps {
   data: any;
   onUpdate: (data: any) => void;
+  validationErrors?: Record<string, string>;
 }
 
 const INDIAN_STATES = [
@@ -52,11 +53,19 @@ const INDIAN_STATES = [
 export default function LocationCoverageStep({
   data,
   onUpdate,
+  validationErrors = {},
 }: LocationCoverageStepProps) {
   const [validatingPincode, setValidatingPincode] = useState(false);
   const [pincodeStatus, setPincodeStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
   const [pincodeError, setPincodeError] = useState<string | null>(null);
   const [cityOptions, setCityOptions] = useState<string[]>([]);
+
+  // Refs for keyboard navigation
+  const businessAddressRef = useRef<TextInput>(null);
+  const pincodeRef = useRef<TextInput>(null);
+  const cityRef = useRef<TextInput>(null);
+  const localityRef = useRef<TextInput>(null);
+  const serviceRadiusRef = useRef<TextInput>(null);
 
   const handleChange = (field: string, value: string | number) => {
     onUpdate({ [field]: value });
@@ -130,7 +139,12 @@ export default function LocationCoverageStep({
       <View style={styles.field}>
         <Text style={styles.label}>Business Address *</Text>
         <TextInput
-          style={[styles.input, styles.textArea]}
+          ref={businessAddressRef}
+          style={[
+            styles.input,
+            styles.textArea,
+            validationErrors.businessAddress && styles.inputError
+          ]}
           value={data.businessAddress || ''}
           onChangeText={(text) => handleChange('businessAddress', text)}
           placeholder="Enter your complete business address"
@@ -138,18 +152,25 @@ export default function LocationCoverageStep({
           multiline
           numberOfLines={3}
           textAlignVertical="top"
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => pincodeRef.current?.focus()}
         />
+        {validationErrors.businessAddress && (
+          <Text style={styles.errorText}>{validationErrors.businessAddress}</Text>
+        )}
       </View>
 
       <View style={styles.field}>
         <Text style={styles.label}>Pincode *</Text>
         <View style={styles.inputWithStatus}>
           <TextInput
+            ref={pincodeRef}
             style={[
               styles.input,
               styles.pincodeInput,
               pincodeStatus === 'valid' && styles.inputValid,
-              pincodeStatus === 'invalid' && styles.inputInvalid,
+              (pincodeStatus === 'invalid' || validationErrors.pincode) && styles.inputInvalid,
             ]}
             value={data.pincode || ''}
             onChangeText={handlePincodeChange}
@@ -158,6 +179,15 @@ export default function LocationCoverageStep({
             placeholderTextColor="#999"
             keyboardType="numeric"
             maxLength={6}
+            returnKeyType="next"
+            onSubmitEditing={() => {
+              // If city is a TextInput, focus it; otherwise focus locality
+              if (cityOptions.length <= 1 && cityRef.current) {
+                cityRef.current.focus();
+              } else if (localityRef.current) {
+                localityRef.current.focus();
+              }
+            }}
           />
           <View style={styles.statusIcon}>
             {validatingPincode && (
@@ -171,10 +201,10 @@ export default function LocationCoverageStep({
             )}
           </View>
         </View>
-        {pincodeError && (
-          <Text style={styles.errorText}>{pincodeError}</Text>
+        {(pincodeError || validationErrors.pincode) && (
+          <Text style={styles.errorText}>{pincodeError || validationErrors.pincode}</Text>
         )}
-        {pincodeStatus === 'valid' && (
+        {pincodeStatus === 'valid' && !validationErrors.pincode && (
           <Text style={styles.successText}>
             Pincode verified - Location details auto-filled
           </Text>
@@ -195,26 +225,38 @@ export default function LocationCoverageStep({
           />
         ) : (
           <TextInput
-            style={styles.input}
+            ref={cityRef}
+            style={[
+              styles.input,
+              validationErrors.city && styles.inputError
+            ]}
             value={data.city || ''}
             onChangeText={(text) => handleChange('city', text)}
             placeholder="Enter city/town"
             placeholderTextColor="#999"
+            returnKeyType="next"
+            onSubmitEditing={() => localityRef.current?.focus()}
           />
         )}
         {cityOptions.length > 1 && (
           <Text style={styles.hintText}>Select from available options for this pincode</Text>
+        )}
+        {validationErrors.city && (
+          <Text style={styles.errorText}>{validationErrors.city}</Text>
         )}
       </View>
 
       <View style={styles.field}>
         <Text style={styles.label}>Locality/District</Text>
         <TextInput
+          ref={localityRef}
           style={styles.input}
           value={data.locality || ''}
           onChangeText={(text) => handleChange('locality', text)}
           placeholder="Enter locality/district"
           placeholderTextColor="#999"
+          returnKeyType="next"
+          onSubmitEditing={() => serviceRadiusRef.current?.focus()}
         />
         <Text style={styles.hintText}>Auto-filled from pincode (editable)</Text>
       </View>
@@ -231,11 +273,15 @@ export default function LocationCoverageStep({
           onChange={(value) => handleChange('state', value)}
         />
         <Text style={styles.hintText}>Auto-filled from pincode (editable)</Text>
+        {validationErrors.state && (
+          <Text style={styles.errorText}>{validationErrors.state}</Text>
+        )}
       </View>
 
       <View style={styles.field}>
         <Text style={styles.label}>Service Radius (km)</Text>
         <TextInput
+          ref={serviceRadiusRef}
           style={styles.input}
           value={data.serviceRadiusKm?.toString() || ''}
           onChangeText={(text) => {
@@ -245,6 +291,7 @@ export default function LocationCoverageStep({
           placeholder="Enter service radius in kilometers"
           placeholderTextColor="#999"
           keyboardType="numeric"
+          returnKeyType="done"
         />
       </View>
 
@@ -320,6 +367,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#FF3B30',
     marginTop: 4,
+    fontWeight: '500',
+  },
+  inputError: {
+    borderColor: '#FF3B30',
+    backgroundColor: '#fff5f5',
+    borderWidth: 2,
   },
   successText: {
     fontSize: 12,
