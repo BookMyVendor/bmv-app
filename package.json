@@ -54,6 +54,7 @@
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/react": "~19.1.10",
+    "baseline-browser-mapping": "^2.8.31",
     "cross-env": "^10.1.0",
     "typescript": "~5.9.2"
   }

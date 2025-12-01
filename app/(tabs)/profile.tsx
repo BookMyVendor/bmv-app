@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -37,6 +37,10 @@ export default function ProfileScreen() {
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const router = useRouter();
+  
+  // Refs for keyboard navigation
+  const lastNameRef = useRef<TextInput>(null);
+  const emailRef = useRef<TextInput>(null);
 
   // Fetch image URL from file_storage when profile loads
   useEffect(() => {
@@ -84,11 +88,14 @@ export default function ProfileScreen() {
   };
 
   const pickImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    // On web, permissions are handled by the browser
+    if (Platform.OS !== 'web') {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Please allow access to your photos');
-      return;
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please allow access to your photos');
+        return;
+      }
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -106,6 +113,13 @@ export default function ProfileScreen() {
   };
 
   const takePhoto = async () => {
+    // Camera is typically not available on web
+    if (Platform.OS === 'web') {
+      // On web, just open image picker instead
+      pickImage();
+      return;
+    }
+
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
 
     if (status !== 'granted') {
@@ -127,11 +141,17 @@ export default function ProfileScreen() {
   };
 
   const showImageOptions = () => {
-    Alert.alert('Change Photo', 'Select an option', [
-      { text: 'Take Photo', onPress: takePhoto },
-      { text: 'Choose from Gallery', onPress: pickImage },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    if (Platform.OS === 'web') {
+      // On web, directly open file picker (camera not typically available)
+      pickImage();
+    } else {
+      // On mobile, use Alert to choose between camera and gallery
+      Alert.alert('Change Photo', 'Select an option', [
+        { text: 'Take Photo', onPress: takePhoto },
+        { text: 'Choose from Gallery', onPress: pickImage },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+    }
   };
 
   // Note: uploadImage function is no longer used directly
@@ -147,23 +167,51 @@ export default function ProfileScreen() {
     try {
       let imageFileId = profile?.image_file_id;
 
-      // If a new photo was selected (local URI, not a URL), upload it and create file_storage record
-      if (photoUri && (photoUri.startsWith('file://') || photoUri.startsWith('content://') || photoUri.startsWith('ph://'))) {
+      // If a new photo was selected (local URI or blob URL, not a remote URL), upload it and create file_storage record
+      // Check if it's a local/blob URI (not an http/https URL from storage)
+      const isLocalImage = photoUri && !photoUri.startsWith('http://') && !photoUri.startsWith('https://');
+      
+      if (isLocalImage) {
+        console.log('📤 Uploading new profile photo:', photoUri);
+        
         // Step 1: Upload image to storage bucket
         const response = await fetch(photoUri);
+        if (!response.ok) {
+          throw new Error('Failed to load image');
+        }
+        
         const blob = await response.blob();
-        const fileExt = photoUri.split('.').pop() || 'jpg';
+        console.log('✅ Image blob created, size:', blob.size);
+        
+        // Determine file extension from blob type or URI
+        let fileExt = 'jpg';
+        if (blob.type) {
+          if (blob.type.includes('png')) fileExt = 'png';
+          else if (blob.type.includes('jpeg') || blob.type.includes('jpg')) fileExt = 'jpg';
+          else if (blob.type.includes('webp')) fileExt = 'webp';
+        } else {
+          fileExt = photoUri.split('.').pop() || 'jpg';
+        }
+        
         const fileName = `${user?.id}-${Date.now()}.${fileExt}`;
         const filePath = `profile-photos/${fileName}`;
+        console.log('📤 Uploading to storage:', filePath);
 
         // Upload to storage bucket
         const { error: uploadError } = await supabaseCore.storage
           .from('vendor-media')
-          .upload(filePath, blob);
+          .upload(filePath, blob, {
+            contentType: blob.type || `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`,
+          });
 
-        if (uploadError) throw uploadError;
+        if (uploadError) {
+          console.error('❌ Storage upload error:', uploadError);
+          throw uploadError;
+        }
+        console.log('✅ Image uploaded to storage');
 
         // Step 2: Create file_storage record
+        console.log('📤 Creating file_storage record');
         const { data: fileData, error: fileError } = await supabaseCms
           .from('file_storage')
           .insert({
@@ -171,7 +219,7 @@ export default function ProfileScreen() {
             stored_filename: fileName,
             file_path: filePath,
             file_size: blob.size,
-            mime_type: blob.type,
+            mime_type: blob.type || `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`,
             file_extension: fileExt,
             storage_provider: 'supabase',
             storage_bucket: 'vendor-media',
@@ -182,7 +230,11 @@ export default function ProfileScreen() {
           .select()
           .single();
 
-        if (fileError) throw fileError;
+        if (fileError) {
+          console.error('❌ File storage record error:', fileError);
+          throw fileError;
+        }
+        console.log('✅ File storage record created:', fileData.id);
         imageFileId = fileData.id;
 
         // Step 3: Create vendor_verification_documents entry for profile photo
@@ -212,19 +264,82 @@ export default function ProfileScreen() {
       }
 
       // Step 4: Update vendors table
-      const { error } = await supabaseCore
+      console.log('📤 Updating vendor record');
+      console.log('  - user?.id:', user?.id);
+      console.log('  - imageFileId:', imageFileId);
+      console.log('  - isLocalImage:', isLocalImage);
+      console.log('  - update data:', {
+        first_name: values.firstName,
+        last_name: values.lastName,
+        email: values.email,
+        image_file_id: imageFileId || null,
+      });
+      
+      const updateData: any = {
+        first_name: values.firstName,
+        last_name: values.lastName,
+        email: values.email,
+      };
+      
+      // Only include image_file_id if we have a value (either new or existing)
+      if (imageFileId) {
+        updateData.image_file_id = imageFileId;
+      }
+      
+      console.log('  - Final update data:', updateData);
+      
+      const { data: updateResult, error } = await supabaseCore
         .from('vendors')
-        .update({
-          first_name: values.firstName,
-          last_name: values.lastName,
-          email: values.email,
-          image_file_id: imageFileId || null,
-        })
-        .eq('id', user?.id);
+        .update(updateData)
+        .eq('id', user?.id)
+        .select();
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Vendor update error:', error);
+        console.error('  - Error details:', JSON.stringify(error, null, 2));
+        throw error;
+      }
+      
+      console.log('✅ Vendor record updated');
+      console.log('  - Update result:', updateResult);
+      
+      // Verify the update by fetching the record
+      const { data: verifyData, error: verifyError } = await supabaseCore
+        .from('vendors')
+        .select('image_file_id')
+        .eq('id', user?.id)
+        .single();
+      
+      if (verifyError) {
+        console.warn('⚠️ Could not verify update:', verifyError);
+      } else {
+        console.log('✅ Verified image_file_id in database:', verifyData?.image_file_id);
+      }
 
+      // Small delay to ensure database update is committed
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Refresh profile to get updated data
       await refreshProfile();
+      
+      // If we uploaded a new image, update the photoUri to show the uploaded image
+      if (isLocalImage && imageFileId) {
+        // Fetch the public URL for the uploaded image
+        const { data: fileData } = await supabaseCms
+          .from('file_storage')
+          .select('file_path, storage_bucket')
+          .eq('id', imageFileId)
+          .single();
+
+        if (fileData) {
+          const { data: urlData } = supabaseCore.storage
+            .from(fileData.storage_bucket || 'vendor-media')
+            .getPublicUrl(fileData.file_path);
+          setPhotoUri(urlData.publicUrl);
+          console.log('✅ Updated photoUri to:', urlData.publicUrl);
+        }
+      }
+      
       Alert.alert('Success', 'Profile updated successfully');
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to save profile');
@@ -343,11 +458,14 @@ export default function ProfileScreen() {
                   First Name <Text style={styles.required}>*</Text>
                 </Text>
                 <TextInput
+                  ref={null}
                   style={styles.input}
                   placeholder="Enter first name"
                   value={values.firstName}
                   onChangeText={handleChange('firstName')}
                   onBlur={handleBlur('firstName')}
+                  returnKeyType="next"
+                  onSubmitEditing={() => lastNameRef.current?.focus()}
                 />
                 {touched.firstName && errors.firstName && (
                   <Text style={styles.errorText}>{errors.firstName}</Text>
@@ -359,11 +477,14 @@ export default function ProfileScreen() {
                   Last Name <Text style={styles.required}>*</Text>
                 </Text>
                 <TextInput
+                  ref={lastNameRef}
                   style={styles.input}
                   placeholder="Enter last name"
                   value={values.lastName}
                   onChangeText={handleChange('lastName')}
                   onBlur={handleBlur('lastName')}
+                  returnKeyType="next"
+                  onSubmitEditing={() => emailRef.current?.focus()}
                 />
                 {touched.lastName && errors.lastName && (
                   <Text style={styles.errorText}>{errors.lastName}</Text>
@@ -375,6 +496,7 @@ export default function ProfileScreen() {
                   Email Address <Text style={styles.required}>*</Text>
                 </Text>
                 <TextInput
+                  ref={emailRef}
                   style={styles.input}
                   placeholder="Enter email address"
                   keyboardType="email-address"
@@ -382,6 +504,8 @@ export default function ProfileScreen() {
                   value={values.email}
                   onChangeText={handleChange('email')}
                   onBlur={handleBlur('email')}
+                  returnKeyType="done"
+                  onSubmitEditing={() => handleSubmit()}
                 />
                 {touched.email && errors.email && (
                   <Text style={styles.errorText}>{errors.email}</Text>

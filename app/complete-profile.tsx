@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -31,6 +31,10 @@ export default function CompleteProfileScreen() {
   const [uploading, setUploading] = useState(false);
   const { user, refreshProfile } = useAuth();
   const router = useRouter();
+  
+  // Refs for keyboard navigation
+  const lastNameRef = useRef<TextInput>(null);
+  const emailRef = useRef<TextInput>(null);
   const resizeImage = async (uri: string): Promise<string> => {
     try {
       console.log('Resizing image from:', uri);
@@ -338,9 +342,7 @@ export default function CompleteProfileScreen() {
                 onChangeText={handleChange('firstName')}
                 onBlur={handleBlur('firstName')}
                 returnKeyType="next"
-                onSubmitEditing={() => {
-                  // Focus next field or submit if last field
-                }}
+                onSubmitEditing={() => lastNameRef.current?.focus()}
               />
               {touched.firstName && errors.firstName && (
                 <Text style={styles.errorText}>{errors.firstName}</Text>
@@ -352,12 +354,14 @@ export default function CompleteProfileScreen() {
                 Last Name <Text style={styles.required}>*</Text>
               </Text>
               <TextInput
+                ref={lastNameRef}
                 style={styles.input}
                 placeholder="Enter last name"
                 value={values.lastName}
                 onChangeText={handleChange('lastName')}
                 onBlur={handleBlur('lastName')}
                 returnKeyType="next"
+                onSubmitEditing={() => emailRef.current?.focus()}
               />
               {touched.lastName && errors.lastName && (
                 <Text style={styles.errorText}>{errors.lastName}</Text>
@@ -369,6 +373,7 @@ export default function CompleteProfileScreen() {
                 Email Address <Text style={styles.required}>*</Text>
               </Text>
               <TextInput
+                ref={emailRef}
                 style={styles.input}
                 placeholder="Enter email address"
                 keyboardType="email-address"

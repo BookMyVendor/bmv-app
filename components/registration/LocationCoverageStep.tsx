@@ -1,16 +1,20 @@
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
   TextInput,
   StyleSheet,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
+import { Check, AlertCircle } from 'lucide-react-native';
 import Dropdown from '@/components/Dropdown';
+import { validatePincode } from '@/lib/pincodeValidation';
 
 interface LocationCoverageStepProps {
   data: any;
   onUpdate: (data: any) => void;
+  validationErrors?: Record<string, string>;
 }
 
 const INDIAN_STATES = [
@@ -49,9 +53,85 @@ const INDIAN_STATES = [
 export default function LocationCoverageStep({
   data,
   onUpdate,
+  validationErrors = {},
 }: LocationCoverageStepProps) {
-  const handleChange = (field: string, value: string) => {
+  const [validatingPincode, setValidatingPincode] = useState(false);
+  const [pincodeStatus, setPincodeStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
+  const [pincodeError, setPincodeError] = useState<string | null>(null);
+  const [cityOptions, setCityOptions] = useState<string[]>([]);
+
+  // Refs for keyboard navigation
+  const businessAddressRef = useRef<TextInput>(null);
+  const pincodeRef = useRef<TextInput>(null);
+  const cityRef = useRef<TextInput>(null);
+  const localityRef = useRef<TextInput>(null);
+  const serviceRadiusRef = useRef<TextInput>(null);
+
+  const handleChange = (field: string, value: string | number) => {
     onUpdate({ [field]: value });
+  };
+
+  const handlePincodeChange = (text: string) => {
+    // Only allow digits
+    const cleanText = text.replace(/\D/g, '');
+    handleChange('pincode', cleanText);
+    
+    // Reset status when typing
+    if (pincodeStatus !== 'idle') {
+      setPincodeStatus('idle');
+      setPincodeError(null);
+      setCityOptions([]);
+    }
+  };
+
+  const handlePincodeBlur = async () => {
+    const pincode = data.pincode;
+    
+    // Only validate if 6 digits
+    if (!pincode || pincode.length !== 6) {
+      if (pincode && pincode.length > 0 && pincode.length < 6) {
+        setPincodeStatus('invalid');
+        setPincodeError('Pincode must be 6 digits');
+      }
+      return;
+    }
+
+    setValidatingPincode(true);
+    setPincodeError(null);
+
+    try {
+      const result = await validatePincode(pincode);
+
+      if (result.valid) {
+        setPincodeStatus('valid');
+        
+        // Set city options for dropdown
+        if (result.cityOptions && result.cityOptions.length > 0) {
+          setCityOptions(result.cityOptions);
+        }
+        
+        // Auto-fill fields
+        if (result.city) {
+          handleChange('city', result.city);
+        }
+        if (result.locality) {
+          handleChange('locality', result.locality);
+        }
+        if (result.state) {
+          handleChange('state', result.state);
+        }
+      } else {
+        setPincodeStatus('invalid');
+        setPincodeError(result.error || 'Invalid pincode');
+        setCityOptions([]);
+      }
+    } catch (error) {
+      setPincodeStatus('invalid');
+      setPincodeError('Failed to validate pincode');
+      setCityOptions([]);
+    } finally {
+      setValidatingPincode(false);
+    }
   };
 
   return (
@@ -59,7 +139,12 @@ export default function LocationCoverageStep({
       <View style={styles.field}>
         <Text style={styles.label}>Business Address *</Text>
         <TextInput
-          style={[styles.input, styles.textArea]}
+          ref={businessAddressRef}
+          style={[
+            styles.input,
+            styles.textArea,
+            validationErrors.businessAddress && styles.inputError
+          ]}
           value={data.businessAddress || ''}
           onChangeText={(text) => handleChange('businessAddress', text)}
           placeholder="Enter your complete business address"
@@ -67,18 +152,113 @@ export default function LocationCoverageStep({
           multiline
           numberOfLines={3}
           textAlignVertical="top"
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => pincodeRef.current?.focus()}
         />
+        {validationErrors.businessAddress && (
+          <Text style={styles.errorText}>{validationErrors.businessAddress}</Text>
+        )}
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>City *</Text>
+        <Text style={styles.label}>Pincode *</Text>
+        <View style={styles.inputWithStatus}>
+          <TextInput
+            ref={pincodeRef}
+            style={[
+              styles.input,
+              styles.pincodeInput,
+              pincodeStatus === 'valid' && styles.inputValid,
+              (pincodeStatus === 'invalid' || validationErrors.pincode) && styles.inputInvalid,
+            ]}
+            value={data.pincode || ''}
+            onChangeText={handlePincodeChange}
+            onBlur={handlePincodeBlur}
+            placeholder="Enter 6-digit pincode"
+            placeholderTextColor="#999"
+            keyboardType="numeric"
+            maxLength={6}
+            returnKeyType="next"
+            onSubmitEditing={() => {
+              // If city is a TextInput, focus it; otherwise focus locality
+              if (cityOptions.length <= 1 && cityRef.current) {
+                cityRef.current.focus();
+              } else if (localityRef.current) {
+                localityRef.current.focus();
+              }
+            }}
+          />
+          <View style={styles.statusIcon}>
+            {validatingPincode && (
+              <ActivityIndicator size="small" color="#007AFF" />
+            )}
+            {!validatingPincode && pincodeStatus === 'valid' && (
+              <Check size={20} color="#34C759" />
+            )}
+            {!validatingPincode && pincodeStatus === 'invalid' && (
+              <AlertCircle size={20} color="#FF3B30" />
+            )}
+          </View>
+        </View>
+        {(pincodeError || validationErrors.pincode) && (
+          <Text style={styles.errorText}>{pincodeError || validationErrors.pincode}</Text>
+        )}
+        {pincodeStatus === 'valid' && !validationErrors.pincode && (
+          <Text style={styles.successText}>
+            Pincode verified - Location details auto-filled
+          </Text>
+        )}
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.label}>City/Town *</Text>
+        {cityOptions.length > 1 ? (
+          <Dropdown
+            options={cityOptions.map((city) => ({
+              label: city,
+              value: city,
+            }))}
+            value={data.city || ''}
+            placeholder="Select city/town"
+            onChange={(value) => handleChange('city', value)}
+          />
+        ) : (
+          <TextInput
+            ref={cityRef}
+            style={[
+              styles.input,
+              validationErrors.city && styles.inputError
+            ]}
+            value={data.city || ''}
+            onChangeText={(text) => handleChange('city', text)}
+            placeholder="Enter city/town"
+            placeholderTextColor="#999"
+            returnKeyType="next"
+            onSubmitEditing={() => localityRef.current?.focus()}
+          />
+        )}
+        {cityOptions.length > 1 && (
+          <Text style={styles.hintText}>Select from available options for this pincode</Text>
+        )}
+        {validationErrors.city && (
+          <Text style={styles.errorText}>{validationErrors.city}</Text>
+        )}
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.label}>Locality/District</Text>
         <TextInput
+          ref={localityRef}
           style={styles.input}
-          value={data.city || ''}
-          onChangeText={(text) => handleChange('city', text)}
-          placeholder="Enter your city"
+          value={data.locality || ''}
+          onChangeText={(text) => handleChange('locality', text)}
+          placeholder="Enter locality/district"
           placeholderTextColor="#999"
+          returnKeyType="next"
+          onSubmitEditing={() => serviceRadiusRef.current?.focus()}
         />
+        <Text style={styles.hintText}>Auto-filled from pincode (editable)</Text>
       </View>
 
       <View style={styles.field}>
@@ -92,24 +272,16 @@ export default function LocationCoverageStep({
           placeholder="Select state"
           onChange={(value) => handleChange('state', value)}
         />
-      </View>
-
-      <View style={styles.field}>
-        <Text style={styles.label}>Pincode</Text>
-        <TextInput
-          style={styles.input}
-          value={data.pincode || ''}
-          onChangeText={(text) => handleChange('pincode', text)}
-          placeholder="Enter pincode"
-          placeholderTextColor="#999"
-          keyboardType="numeric"
-          maxLength={6}
-        />
+        <Text style={styles.hintText}>Auto-filled from pincode (editable)</Text>
+        {validationErrors.state && (
+          <Text style={styles.errorText}>{validationErrors.state}</Text>
+        )}
       </View>
 
       <View style={styles.field}>
         <Text style={styles.label}>Service Radius (km)</Text>
         <TextInput
+          ref={serviceRadiusRef}
           style={styles.input}
           value={data.serviceRadiusKm?.toString() || ''}
           onChangeText={(text) => {
@@ -119,13 +291,13 @@ export default function LocationCoverageStep({
           placeholder="Enter service radius in kilometers"
           placeholderTextColor="#999"
           keyboardType="numeric"
+          returnKeyType="done"
         />
       </View>
 
       <View style={styles.infoBox}>
         <Text style={styles.infoText}>
-          This information helps customers find vendors in their area. Make sure
-          your address is accurate.
+          Enter your pincode to auto-fill city, locality, and state. This helps customers find vendors in their area.
         </Text>
       </View>
     </ScrollView>
@@ -159,9 +331,53 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#1a1a1a',
   },
+  pincodeInput: {
+    flex: 1,
+    paddingRight: 44,
+  },
+  inputValid: {
+    borderColor: '#34C759',
+    backgroundColor: '#f0fff4',
+  },
+  inputInvalid: {
+    borderColor: '#FF3B30',
+    backgroundColor: '#fff5f5',
+  },
+  inputWithStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  statusIcon: {
+    position: 'absolute',
+    right: 12,
+    height: '100%',
+    justifyContent: 'center',
+  },
   textArea: {
     minHeight: 80,
     paddingTop: 14,
+  },
+  hintText: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+  },
+  errorText: {
+    fontSize: 12,
+    color: '#FF3B30',
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  inputError: {
+    borderColor: '#FF3B30',
+    backgroundColor: '#fff5f5',
+    borderWidth: 2,
+  },
+  successText: {
+    fontSize: 12,
+    color: '#34C759',
+    marginTop: 4,
   },
   infoBox: {
     backgroundColor: '#f0f7ff',

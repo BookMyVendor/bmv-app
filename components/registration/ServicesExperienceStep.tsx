@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import { supabaseCore } from '@/lib/supabase';
 interface ServicesExperienceStepProps {
   data: any;
   onUpdate: (data: any) => void;
+  validationErrors?: Record<string, string>;
 }
 
 interface Category {
@@ -44,6 +45,7 @@ const EXPERIENCE_OPTIONS = [
 export default function ServicesExperienceStep({
   data,
   onUpdate,
+  validationErrors = {},
 }: ServicesExperienceStepProps) {
   const [allBusinessCategories, setAllBusinessCategories] = useState<Category[]>([]);
   const [eventCategories, setEventCategories] = useState<Category[]>([]);
@@ -59,6 +61,9 @@ export default function ServicesExperienceStep({
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [eventSearchQuery, setEventSearchQuery] = useState('');
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+
+  // Refs for keyboard navigation
+  const businessDescriptionRef = useRef<TextInput>(null);
 
   useEffect(() => {
     fetchCategories();
@@ -441,7 +446,10 @@ export default function ServicesExperienceStep({
         
         {/* Dropdown Trigger */}
         <TouchableOpacity
-          style={styles.dropdownTrigger}
+          style={[
+            styles.dropdownTrigger,
+            (validationErrors.selectedRootCategoryId || validationErrors.selectedCategoryIds) && styles.dropdownTriggerError
+          ]}
           onPress={() => setIsCategoryModalOpen(true)}
           activeOpacity={0.7}
         >
@@ -450,6 +458,11 @@ export default function ServicesExperienceStep({
           </Text>
           <ChevronDown size={20} color="#666" />
         </TouchableOpacity>
+        {(validationErrors.selectedRootCategoryId || validationErrors.selectedCategoryIds) && (
+          <Text style={styles.errorText}>
+            {validationErrors.selectedRootCategoryId || validationErrors.selectedCategoryIds}
+          </Text>
+        )}
 
         {/* Selected Categories Display */}
         {selectedCategoriesWithPaths.length > 0 && (
@@ -536,7 +549,10 @@ export default function ServicesExperienceStep({
         
         {/* Event Dropdown Trigger */}
         <TouchableOpacity
-          style={styles.dropdownTrigger}
+          style={[
+            styles.dropdownTrigger,
+            validationErrors.selectedEventIds && styles.dropdownTriggerError
+          ]}
           onPress={() => setIsEventModalOpen(true)}
           activeOpacity={0.7}
         >
@@ -545,6 +561,9 @@ export default function ServicesExperienceStep({
           </Text>
           <ChevronDown size={20} color="#666" />
         </TouchableOpacity>
+        {validationErrors.selectedEventIds && (
+          <Text style={styles.errorText}>{validationErrors.selectedEventIds}</Text>
+        )}
 
         {/* Selected Events Display */}
         {selectedEventNames.length > 0 && (
@@ -665,7 +684,12 @@ export default function ServicesExperienceStep({
       <View style={styles.field}>
         <Text style={styles.label}>Business Description *</Text>
         <TextInput
-          style={[styles.input, styles.textArea]}
+          ref={businessDescriptionRef}
+          style={[
+            styles.input,
+            styles.textArea,
+            validationErrors.businessDescription && styles.inputError
+          ]}
           value={data.businessDescription || ''}
           onChangeText={(text) => handleChange('businessDescription', text)}
           placeholder="Describe your services and what makes your business unique"
@@ -673,7 +697,12 @@ export default function ServicesExperienceStep({
           multiline
           numberOfLines={4}
           textAlignVertical="top"
+          returnKeyType="done"
+          blurOnSubmit={true}
         />
+        {validationErrors.businessDescription && (
+          <Text style={styles.errorText}>{validationErrors.businessDescription}</Text>
+        )}
       </View>
 
       <View style={styles.field}>
@@ -687,6 +716,9 @@ export default function ServicesExperienceStep({
           placeholder="Select experience"
           onChange={(value: string) => handleChange('yearsOfExperience', value)}
         />
+        {validationErrors.yearsOfExperience && (
+          <Text style={styles.errorText}>{validationErrors.yearsOfExperience}</Text>
+        )}
       </View>
     </ScrollView>
   );
@@ -773,6 +805,22 @@ const styles = StyleSheet.create({
   },
   placeholder: {
     color: '#999',
+  },
+  dropdownTriggerError: {
+    borderColor: '#FF3B30',
+    backgroundColor: '#fff5f5',
+    borderWidth: 2,
+  },
+  inputError: {
+    borderColor: '#FF3B30',
+    backgroundColor: '#fff5f5',
+    borderWidth: 2,
+  },
+  errorText: {
+    fontSize: 12,
+    color: '#FF3B30',
+    marginTop: 4,
+    fontWeight: '500',
   },
   selectedContainer: {
     marginBottom: 16,

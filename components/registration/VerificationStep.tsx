@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '@/lib/docum
 interface VerificationStepProps {
   data: any;
   onUpdate: (data: any) => void;
+  validationErrors?: Record<string, string>;
 }
 
 interface DocumentType {
@@ -34,13 +35,19 @@ interface DocumentGroup {
 export default function VerificationStep({
   data,
   onUpdate,
+  validationErrors = {},
 }: VerificationStepProps) {
   const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([]);
   const [loadingTypes, setLoadingTypes] = useState(true);
   const [uploading, setUploading] = useState<string | null>(null); // typeCode of document being uploaded
 
-  // Document types we need to support
-  const requiredDocumentTypeCodes = ['gst', 'aadhaar', 'bank_statement', 'general', 'business_license', 'pan'];
+  // Refs for keyboard navigation
+  const panNumberRef = useRef<TextInput>(null);
+  const gstNumberRef = useRef<TextInput>(null);
+
+  // Document types we need to support (PAN is first and mandatory)
+  const requiredDocumentTypeCodes = ['pan', 'gst', 'aadhaar', 'bank_statement', 'general', 'business_license'];
+  const mandatoryDocumentTypes = ['pan'];
 
   // Initialize document groups from data or create empty ones
   const [documentGroups, setDocumentGroups] = useState<DocumentGroup[]>(() => {
@@ -208,7 +215,7 @@ export default function VerificationStep({
       <View style={styles.infoBox}>
         <Text style={styles.infoTitle}>Business Verification</Text>
         <Text style={styles.infoText}>
-          Adding verification details helps build trust with customers. PAN is required, other documents are optional.
+          Adding verification details helps build trust with customers. PAN number and PAN card document upload are required. Other documents are optional.
         </Text>
       </View>
 
@@ -216,20 +223,30 @@ export default function VerificationStep({
         <Text style={styles.label}>PAN *</Text>
         <Text style={styles.hint}>Required - Permanent Account Number</Text>
         <TextInput
-          style={styles.input}
+          ref={panNumberRef}
+          style={[
+            styles.input,
+            validationErrors.panNumber && styles.inputError
+          ]}
           value={data.panNumber || ''}
           onChangeText={(text) => handleChange('panNumber', text)}
           placeholder="Enter PAN (e.g., ABCDE1234F)"
           placeholderTextColor="#999"
           autoCapitalize="characters"
           maxLength={10}
+          returnKeyType="next"
+          onSubmitEditing={() => gstNumberRef.current?.focus()}
         />
+        {validationErrors.panNumber && (
+          <Text style={styles.errorText}>{validationErrors.panNumber}</Text>
+        )}
       </View>
 
       <View style={styles.field}>
         <Text style={styles.label}>GST Number</Text>
         <Text style={styles.hint}>Optional - For registered businesses</Text>
         <TextInput
+          ref={gstNumberRef}
           style={styles.input}
           value={data.gstNumber || ''}
           onChangeText={(text) => handleChange('gstNumber', text)}
@@ -237,6 +254,7 @@ export default function VerificationStep({
           placeholderTextColor="#999"
           autoCapitalize="characters"
           maxLength={15}
+          returnKeyType="done"
         />
       </View>
 
@@ -244,12 +262,16 @@ export default function VerificationStep({
       {documentGroups.map((group) => {
         const typeName = group.typeName || group.typeCode;
         const isUploading = uploading === group.typeCode;
+        const isMandatory = mandatoryDocumentTypes.includes(group.typeCode);
+        const hasError = isMandatory && group.typeCode === 'pan' && validationErrors.panDocument;
 
         return (
           <View key={group.typeCode} style={styles.field}>
-            <Text style={styles.label}>{typeName}</Text>
-            <Text style={styles.hint}>
-              Optional - Upload images (jpg, png) or PDF files (max 10MB each)
+            <Text style={styles.label}>{typeName} {isMandatory ? '*' : ''}</Text>
+            <Text style={[styles.hint, isMandatory && styles.mandatoryHint]}>
+              {isMandatory 
+                ? 'Required - Upload PAN card image (jpg, png) or PDF (max 10MB)'
+                : 'Optional - Upload images (jpg, png) or PDF files (max 10MB each)'}
             </Text>
 
             {/* Uploaded Documents */}
@@ -261,18 +283,27 @@ export default function VerificationStep({
               </View>
             )}
 
+            {/* Error message for PAN document */}
+            {hasError && (
+              <Text style={styles.errorText}>{validationErrors.panDocument}</Text>
+            )}
+
             {/* Upload Button */}
             <TouchableOpacity
-              style={[styles.uploadButton, isUploading && styles.uploadButtonDisabled]}
+              style={[
+                styles.uploadButton, 
+                isUploading && styles.uploadButtonDisabled,
+                hasError && styles.uploadButtonError
+              ]}
               onPress={() => handlePickDocuments(group.typeCode)}
               disabled={isUploading}
             >
               {isUploading ? (
                 <ActivityIndicator size="small" color="#007AFF" />
               ) : (
-                <Upload size={20} color="#007AFF" />
+                <Upload size={20} color={hasError ? "#FF3B30" : "#007AFF"} />
               )}
-              <Text style={styles.uploadButtonText}>
+              <Text style={[styles.uploadButtonText, hasError && styles.uploadButtonTextError]}>
                 {isUploading ? 'Uploading...' : `Add ${typeName}`}
               </Text>
             </TouchableOpacity>
@@ -324,6 +355,10 @@ const styles = StyleSheet.create({
     color: '#666',
     marginBottom: 8,
   },
+  mandatoryHint: {
+    color: '#cc6600',
+    fontWeight: '500',
+  },
   input: {
     backgroundColor: '#f8f8f8',
     borderWidth: 1,
@@ -333,6 +368,17 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     fontSize: 16,
     color: '#1a1a1a',
+  },
+  inputError: {
+    borderColor: '#FF3B30',
+    backgroundColor: '#fff5f5',
+    borderWidth: 2,
+  },
+  errorText: {
+    fontSize: 12,
+    color: '#FF3B30',
+    marginTop: 4,
+    fontWeight: '500',
   },
   uploadButton: {
     flexDirection: 'row',
@@ -350,6 +396,15 @@ const styles = StyleSheet.create({
   },
   uploadButtonDisabled: {
     opacity: 0.6,
+  },
+  uploadButtonError: {
+    backgroundColor: '#fff5f5',
+    borderColor: '#FF3B30',
+    borderWidth: 2,
+    borderStyle: 'solid',
+  },
+  uploadButtonTextError: {
+    color: '#FF3B30',
   },
   uploadButtonText: {
     fontSize: 14,
