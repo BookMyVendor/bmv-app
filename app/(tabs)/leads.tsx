@@ -439,7 +439,7 @@ export default function LeadsScreen() {
         <View style={styles.headerTitleContainer}>
         <Logo
          size={48}
-         style={{ ...styles.headerLogo, transform: [{ scale: 1.5}] }}
+         style={{ ...styles.headerLogo, transform: [{ scale: 1.2}] }}
 />
           <Text style={styles.headerTitle}>Leads</Text>
           {timeFilter !== 'all' && (
@@ -728,7 +728,7 @@ const styles = StyleSheet.create({
     marginVertical: 0,
   },
   headerTitle: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '700',
     textAlignVertical: 'center',
     height: '100%',

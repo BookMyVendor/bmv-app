@@ -211,7 +211,7 @@ export default function DashboardScreen() {
       </LinearGradient> */}
       <View style={[styles.header, { paddingTop: insets.top + 20, paddingLeft: insets.top + 15, backgroundColor: '#fff' }]}>
   <View style={styles.headerContent}>
-    <Logo size={48} style={{ ...styles.headerLogo, transform: [{ scale: 1.5 }] }} />
+    <Logo size={48} style={{ ...styles.headerLogo, transform: [{ scale: 1.2 }] }} />
     <Text style={[styles.headerTitle, { color: Colors.neutral.black }]}>Dashboard</Text>
   </View>
 </View>
@@ -265,7 +265,7 @@ export default function DashboardScreen() {
               }}
             >
               <LinearGradient
-                colors={[Colors.info.main, Colors.info.light]}
+                colors={['#b1dafc', '#bbf2fc']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.statCardGradient}
@@ -289,7 +289,7 @@ export default function DashboardScreen() {
               }}
             >
               <LinearGradient
-                colors={[Colors.success.main, Colors.success.light]}
+                colors={['#7cf293', '#9df5ae']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.statCardGradient}
@@ -313,7 +313,7 @@ export default function DashboardScreen() {
               }}
             >
               <LinearGradient
-                colors={[Colors.warning.main, Colors.warning.light]}
+                colors={['#ffd24d', '#ffd573']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.statCardGradient}
@@ -443,7 +443,7 @@ const styles = StyleSheet.create({
     marginVertical: 0,
   },
   headerTitle: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '700',
     textAlignVertical: 'center',
     height: '100%',

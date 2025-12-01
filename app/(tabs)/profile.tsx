@@ -276,7 +276,7 @@ export default function ProfileScreen() {
         <View style={styles.headerContent}>
           <Logo
             size={48}
-            style={{ ...styles.headerLogo, transform: [{ scale: 1.5 }] }}
+            style={{ ...styles.headerLogo, transform: [{ scale: 1.2 }] }}
           />
           <Text style={styles.headerTitle}>Profile</Text>
         </View>
@@ -287,7 +287,7 @@ export default function ProfileScreen() {
           disabled={false}
         >
 
-          <LogOut size={20} color={Colors.neutral.white} strokeWidth={2} />
+          <LogOut size={20} color={Colors.neutral.black} strokeWidth={2} />
         </TouchableOpacity>
       </View>
       {/* </LinearGradient> */}
@@ -440,7 +440,7 @@ const styles = StyleSheet.create({
     marginVertical: 0,
   },
   headerTitle: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '700',
     textAlignVertical: 'center',
     height: '100%',

@@ -483,7 +483,7 @@ export default function ReviewsScreen() {
         <View style={styles.headerContent}>
         <Logo
          size={48}
-         style={{ ...styles.headerLogo, transform: [{ scale: 1.5}] }}
+         style={{ ...styles.headerLogo, transform: [{ scale: 1.2}] }}
 />
           <Text style={styles.headerTitle}>Reviews</Text>
         </View>
@@ -599,7 +599,7 @@ const styles = StyleSheet.create({
     marginVertical: 0,
   },
   headerTitle: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '700',
     textAlignVertical: 'center',
     height: '100%',
