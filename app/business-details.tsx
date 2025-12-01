@@ -132,11 +132,12 @@ export default function BusinessDetailsScreen() {
 
   // Category selection state
   const [allBusinessCategories, setAllBusinessCategories] = useState<any[]>([]);
-  const [eventCategories, setEventCategories] = useState<any[]>([]);
+  const [allEventCategories, setAllEventCategories] = useState<any[]>([]);
   const [selectedRootCategoryId, setSelectedRootCategoryId] = useState<string | null>(null);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
   const [selectedEventIds, setSelectedEventIds] = useState<string[]>([]);
   const [expandedCategoryIds, setExpandedCategoryIds] = useState<Set<string>>(new Set());
+  const [expandedEventCategoryIds, setExpandedEventCategoryIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [eventSearchQuery, setEventSearchQuery] = useState('');
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
@@ -317,19 +318,18 @@ export default function BusinessDetailsScreen() {
         setAllBusinessCategories(businessCats || []);
       }
 
-      // Fetch only root level event categories
+      // Fetch all event categories with hierarchy info
       const { data: eventCats, error: eventError } = await supabaseCore
         .from('categories')
         .select('id, name, icon, parent_category_id, category_level, sort_order')
         .eq('category_type', 'event')
         .eq('visible', true)
-        .or('parent_category_id.is.null,category_level.eq.1')
         .order('sort_order', { ascending: true });
 
       if (eventError) {
         console.error('Error fetching event categories:', eventError);
       } else {
-        setEventCategories(eventCats || []);
+        setAllEventCategories(eventCats || []);
       }
     } catch (error) {
       console.error('Error fetching categories:', error);
@@ -610,31 +610,127 @@ export default function BusinessDetailsScreen() {
     return `${selectedCategoriesWithPaths.length} categories selected`;
   };
 
-  // Filter event categories based on search
-  const filteredEventCategories = React.useMemo(() => {
-    if (!eventSearchQuery.trim()) return eventCategories;
-    const lowerQuery = eventSearchQuery.toLowerCase();
-    return eventCategories.filter((cat) =>
-      cat.name.toLowerCase().includes(lowerQuery)
-    );
-  }, [eventCategories, eventSearchQuery]);
+  // Build hierarchical tree structure for event categories
+  const buildEventCategoryTree = (categories: any[]): any[] => {
+    const categoryMap = new Map<string, any>();
+    const rootCategories: any[] = [];
 
-  // Get selected event names for display
-  const selectedEventNames = React.useMemo(() => {
-    return eventCategories
-      .filter((cat) => selectedEventIds.includes(cat.id))
-      .map((cat) => cat.name);
-  }, [selectedEventIds, eventCategories]);
+    // First pass: create all nodes
+    categories.forEach((cat) => {
+      categoryMap.set(cat.id, {
+        ...cat,
+        children: [],
+      });
+    });
+
+    // Second pass: build tree structure
+    categories.forEach((cat) => {
+      const node = categoryMap.get(cat.id)!;
+      if (cat.parent_category_id) {
+        const parent = categoryMap.get(cat.parent_category_id);
+        if (parent) {
+          parent.children.push(node);
+        }
+      } else {
+        rootCategories.push(node);
+      }
+    });
+
+    // Sort children by sort_order
+    const sortChildren = (nodes: any[]) => {
+      nodes.forEach((node) => {
+        node.children.sort((a: any, b: any) => {
+          const aOrder = allEventCategories.find((c) => c.id === a.id)?.sort_order ?? 0;
+          const bOrder = allEventCategories.find((c) => c.id === b.id)?.sort_order ?? 0;
+          return aOrder - bOrder;
+        });
+        sortChildren(node.children);
+      });
+    };
+
+    sortChildren(rootCategories);
+    return rootCategories;
+  };
+
+  // Build event category tree
+  const eventCategoryTree = React.useMemo(() => {
+    return buildEventCategoryTree(allEventCategories);
+  }, [allEventCategories]);
+
+  // Filter event category tree based on search
+  const filterEventCategories = (nodes: any[], query: string): any[] => {
+    if (!query.trim()) return nodes;
+
+    const lowerQuery = query.toLowerCase();
+    const filtered: any[] = [];
+
+    const matchesQuery = (node: any): boolean => {
+      return node.name.toLowerCase().includes(lowerQuery);
+    };
+
+    const filterNode = (node: any): any | null => {
+      const filteredChildren = node.children
+        .map(filterNode)
+        .filter((n: any): n is any => n !== null);
+
+      if (matchesQuery(node) || filteredChildren.length > 0) {
+        return {
+          ...node,
+          children: filteredChildren,
+        };
+      }
+      return null;
+    };
+
+    nodes.forEach((node) => {
+      const filteredNode = filterNode(node);
+      if (filteredNode) {
+        filtered.push(filteredNode);
+      }
+    });
+
+    return filtered;
+  };
+
+  const filteredEventTree = React.useMemo(() => {
+    return filterEventCategories(eventCategoryTree, eventSearchQuery);
+  }, [eventCategoryTree, eventSearchQuery]);
+
+  // Get full path for an event category
+  const getEventCategoryPath = (categoryId: string, categories: any[]): string => {
+    const categoryMap = new Map<string, any>();
+    categories.forEach((cat) => categoryMap.set(cat.id, cat));
+
+    const path: string[] = [];
+    let currentId: string | null = categoryId;
+
+    while (currentId) {
+      const cat = categoryMap.get(currentId);
+      if (!cat) break;
+      path.unshift(cat.name);
+      currentId = cat.parent_category_id;
+    }
+
+    return path.join(' > ');
+  };
+
+  // Get selected event categories with full paths
+  const selectedEventsWithPaths = React.useMemo(() => {
+    return selectedEventIds.map((id) => ({
+      id,
+      path: getEventCategoryPath(id, allEventCategories),
+    }));
+  }, [selectedEventIds, allEventCategories]);
 
   // Get display text for event dropdown
   const getEventDropdownDisplayText = (): string => {
-    if (selectedEventNames.length === 0) {
+    if (selectedEventsWithPaths.length === 0) {
       return 'Select event types';
     }
-    if (selectedEventNames.length === 1) {
-      return selectedEventNames[0];
+    if (selectedEventsWithPaths.length === 1) {
+      return selectedEventsWithPaths[0].path;
     }
-    return `${selectedEventNames.length} events selected`;
+    return `${selectedEventsWithPaths.length} events selected`;
   };
 
   // Toggle event selection
@@ -643,8 +739,111 @@ export default function BusinessDetailsScreen() {
       if (prev.includes(eventId)) {
         return prev.filter((id) => id !== eventId);
       } else {
+        // Find the category and expand it if it has children
+        const category = allEventCategories.find((c) => c.id === eventId);
+        if (category) {
+          const hasChildren = allEventCategories.some(
+            (c) => c.parent_category_id === eventId
+          );
+          if (hasChildren) {
+            setExpandedEventCategoryIds((expanded) => new Set([...expanded, eventId]));
+          }
+        }
         return [...prev, eventId];
       }
+    });
+  };
+
+  // Toggle event category expansion
+  const toggleEventExpansion = (categoryId: string) => {
+    setExpandedEventCategoryIds((expanded) => {
+      const newExpanded = new Set(expanded);
+      if (newExpanded.has(categoryId)) {
+        newExpanded.delete(categoryId);
+      } else {
+        newExpanded.add(categoryId);
+      }
+      return newExpanded;
+    });
+  };
+
+  // Auto-expand selected event categories with children
+  React.useEffect(() => {
+    setExpandedEventCategoryIds((currentExpanded) => {
+      const newExpanded = new Set(currentExpanded);
+      let changed = false;
+      selectedEventIds.forEach((categoryId) => {
+        const hasChildren = allEventCategories.some(
+          (c) => c.parent_category_id === categoryId
+        );
+        if (hasChildren && !newExpanded.has(categoryId)) {
+          newExpanded.add(categoryId);
+          changed = true;
+        }
+      });
+      return changed ? newExpanded : currentExpanded;
+    });
+  }, [selectedEventIds, allEventCategories]);
+
+  // Render event category tree recursively
+  const renderEventCategoryTree = (nodes: any[], level: number = 0): React.ReactNode => {
+    return nodes.map((node) => {
+      const isSelected = selectedEventIds.includes(node.id);
+      const isExpanded = expandedEventCategoryIds.has(node.id);
+      const hasChildren = node.children.length > 0;
+
+      return (
+        <View key={node.id} style={styles.categoryItem}>
+          <TouchableOpacity
+            style={[styles.categoryRow, { paddingLeft: level * 20 + 12 }]}
+            onPress={() => toggleEventSelection(node.id)}
+            activeOpacity={0.7}
+          >
+            {hasChildren && (
+              <TouchableOpacity
+                style={styles.expandButton}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  toggleEventExpansion(node.id);
+                }}
+              >
+                {isExpanded ? (
+                  <ChevronDown size={16} color="#666" />
+                ) : (
+                  <ChevronRight size={16} color="#666" />
+                )}
+              </TouchableOpacity>
+            )}
+            {!hasChildren && <View style={styles.expandButton} />}
+
+            <View style={styles.checkbox}>
+              {isSelected ? (
+                <View style={styles.checkboxSelected}>
+                  <Check size={14} color="#fff" strokeWidth={3} />
+                </View>
+              ) : (
+                <View style={styles.checkboxUnselected} />
+              )}
+            </View>
+
+            {node.icon && <Text style={styles.categoryIcon}>{node.icon}</Text>}
+            <Text
+              style={[
+                styles.categoryName,
+                isSelected && styles.categoryNameSelected,
+              ]}
+            >
+              {node.name}
+            </Text>
+          </TouchableOpacity>
+
+          {hasChildren && isExpanded && (
+            <View style={styles.childrenContainer}>
+              {renderEventCategoryTree(node.children, level + 1)}
+            </View>
+          )}
+        </View>
+      );
     });
   };
 
@@ -1598,34 +1797,35 @@ export default function BusinessDetailsScreen() {
                   onPress={() => setIsEventModalOpen(true)}
                   activeOpacity={0.7}
                 >
-                  <Text style={[styles.dropdownText, selectedEventNames.length === 0 && styles.placeholder]}>
+                  <Text style={[styles.dropdownText, selectedEventsWithPaths.length === 0 && styles.placeholder]}>
                     {getEventDropdownDisplayText()}
                   </Text>
                   <ChevronDown size={20} color="#666" />
                 </TouchableOpacity>
 
                 {/* Selected Events Display */}
-                {selectedEventNames.length > 0 && (
+                {selectedEventsWithPaths.length > 0 && (
                   <View style={styles.selectedContainer}>
                     <Text style={styles.selectedLabel}>
-                      Selected Events ({selectedEventNames.length}):
+                      Selected Events ({selectedEventsWithPaths.length}):
                     </Text>
-                    {eventCategories
-                      .filter((cat) => selectedEventIds.includes(cat.id))
-                      .map((eventCategory) => (
-                        <View key={eventCategory.id} style={styles.selectedChip}>
+                    {selectedEventsWithPaths.map((item) => {
+                      const eventCategory = allEventCategories.find((c) => c.id === item.id);
+                      return (
+                        <View key={item.id} style={styles.selectedChip}>
                           <Text style={styles.selectedChipText}>
-                            {eventCategory.icon ? `${eventCategory.icon} ` : ''}
-                            {eventCategory.name}
+                            {eventCategory?.icon ? `${eventCategory.icon} ` : ''}
+                            {item.path}
                           </Text>
                           <TouchableOpacity
-                            onPress={() => toggleEventSelection(eventCategory.id)}
+                            onPress={() => toggleEventSelection(item.id)}
                             style={styles.removeButton}
                           >
                             <X size={16} color="#fff" />
                           </TouchableOpacity>
                         </View>
-                      ))}
+                      );
+                    })}
                   </View>
                 )}
 
@@ -1663,47 +1863,16 @@ export default function BusinessDetailsScreen() {
                         onChangeText={setEventSearchQuery}
                       />
 
-                      {/* Event List */}
+                      {/* Event Category Tree */}
                       <ScrollView 
                         style={styles.modalCategoryTree}
                         nestedScrollEnabled={true}
                         showsVerticalScrollIndicator={true}
                       >
-                        {filteredEventCategories.length === 0 ? (
+                        {filteredEventTree.length === 0 ? (
                           <Text style={styles.emptyText}>No events found</Text>
                         ) : (
-                          filteredEventCategories.map((eventCategory) => {
-                            const isSelected = selectedEventIds.includes(eventCategory.id);
-                            return (
-                              <TouchableOpacity
-                                key={eventCategory.id}
-                                style={styles.eventOption}
-                                onPress={() => toggleEventSelection(eventCategory.id)}
-                                activeOpacity={0.7}
-                              >
-                                <View style={styles.checkbox}>
-                                  {isSelected ? (
-                                    <View style={styles.checkboxSelected}>
-                                      <Check size={14} color="#fff" strokeWidth={3} />
-                                    </View>
-                                  ) : (
-                                    <View style={styles.checkboxUnselected} />
-                                  )}
-                                </View>
-                                {eventCategory.icon && (
-                                  <Text style={styles.categoryIcon}>{eventCategory.icon}</Text>
-                                )}
-                                <Text
-                                  style={[
-                                    styles.eventOptionText,
-                                    isSelected && styles.eventOptionTextSelected,
-                                  ]}
-                                >
-                                  {eventCategory.name}
-                                </Text>
-                              </TouchableOpacity>
-                            );
-                          })
+                          renderEventCategoryTree(filteredEventTree)
                         )}
                       </ScrollView>
 
