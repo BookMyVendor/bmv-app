@@ -14,7 +14,7 @@ export const Logo: React.FC<LogoProps> = ({
 }) => {
   return (
     <Image
-      source={require('@/assets/images/bmv-logo-transparent.png')}
+      source={require('@/assets/images/bmv_internal_logo.png')}
       style={[
         {
           width: size,
@@ -26,6 +26,8 @@ export const Logo: React.FC<LogoProps> = ({
     />
   );
 };
+
+
 
 export default Logo;
 

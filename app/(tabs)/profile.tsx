@@ -380,26 +380,32 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.container}>
-      <LinearGradient
+      <View style={[styles.header, { paddingTop: insets.top + 20, paddingLeft: insets.top + 15, backgroundColor: '#fff' }]}>
+
+        {/* <LinearGradient
         colors={[Colors.info.main, Colors.info.light]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={[styles.header, { paddingTop: insets.top + 20 }]}
-      >
+      > */}
         <View style={styles.headerContent}>
-          <Logo size={48} style={styles.headerLogo} />
+          <Logo
+            size={48}
+            style={{ ...styles.headerLogo, transform: [{ scale: 1.2 }] }}
+          />
           <Text style={styles.headerTitle}>Profile</Text>
         </View>
-        <TouchableOpacity 
-            style={styles.signOutButton} 
-            onPress={() => handleSignOut()}
-            activeOpacity={0.7} // This will help you see if press is registering
-          disabled={false} 
+        <TouchableOpacity
+          style={styles.signOutButton}
+          onPress={() => handleSignOut()}
+          activeOpacity={0.7} // This will help you see if press is registering
+          disabled={false}
         >
-          
-          <LogOut size={20} color={Colors.neutral.white} strokeWidth={2} />
+
+          <LogOut size={20} color={Colors.neutral.black} strokeWidth={2} />
         </TouchableOpacity>
-      </LinearGradient>
+      </View>
+      {/* </LinearGradient> */}
 
       <ScrollView contentContainerStyle={styles.content}>
         <Formik
@@ -539,14 +545,14 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background.secondary,
+    backgroundColor: 'rgba(138, 151, 209, 0.02)',
   },
   header: {
     paddingHorizontal: Spacing.xxxl,
     paddingBottom: Spacing.xl,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+   
   },
   headerContent: {
     flexDirection: 'row',
@@ -558,9 +564,11 @@ const styles = StyleSheet.create({
     marginVertical: 0,
   },
   headerTitle: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '700',
-    color: Colors.neutral.white,
+    textAlignVertical: 'center',
+    height: '100%',
+    color: Colors.neutral.black,
   },
   signOutButton: {
     padding: Spacing.sm,

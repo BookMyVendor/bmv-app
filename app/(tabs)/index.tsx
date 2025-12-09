@@ -195,19 +195,29 @@ export default function DashboardScreen() {
 
   return (
     <View style={styles.container}>
-      <LinearGradient
+      {/* <LinearGradient
         colors={[Colors.primary.main, Colors.primary.light]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={[styles.header, { paddingTop: insets.top + 20 }]}
       >
         <View style={styles.headerContent}>
-          <Logo size={48} style={styles.headerLogo} />
+        <Logo
+         size={48}
+         style={{ ...styles.headerLogo, transform: [{ scale: 1.3}] }}
+/>
           <Text style={styles.headerTitle}>Dashboard</Text>
         </View>
-      </LinearGradient>
+      </LinearGradient> */}
+      <View style={[styles.header, { paddingTop: insets.top + 20, paddingLeft: insets.top + 15, backgroundColor: '#fff' }]}>
+  <View style={styles.headerContent}>
+    <Logo size={48} style={{ ...styles.headerLogo, transform: [{ scale: 1.2 }] }} />
+    <Text style={[styles.headerTitle, { color: Colors.neutral.black }]}>Dashboard</Text>
+  </View>
+</View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+
+      <ScrollView contentContainerStyle={[styles.content, { backgroundColor: 'rgba(138, 151, 209, 0.02)' }]}>
         <View style={styles.statsSection}>
           <Text style={styles.sectionTitle}>Lead Statistics</Text>
 
@@ -255,13 +265,13 @@ export default function DashboardScreen() {
               }}
             >
               <LinearGradient
-                colors={[Colors.info.main, Colors.info.light]}
+                colors={['#b1dafc', '#bbf2fc']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.statCardGradient}
               >
                 <View style={styles.statIconCircle}>
-                  <TrendingUp size={24} color={Colors.neutral.white} strokeWidth={2.5} />
+                  <TrendingUp size={24} color={Colors.neutral.black} strokeWidth={2.5} />
                 </View>
                 <Text style={styles.statValue}>{leadStats.total}</Text>
                 <Text style={styles.statLabel}>Total Leads</Text>
@@ -279,13 +289,13 @@ export default function DashboardScreen() {
               }}
             >
               <LinearGradient
-                colors={[Colors.success.main, Colors.success.light]}
+                colors={['#7cf293', '#9df5ae']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.statCardGradient}
               >
                 <View style={styles.statIconCircle}>
-                  <Calendar size={24} color={Colors.neutral.white} strokeWidth={2.5} />
+                  <Calendar size={24} color={Colors.neutral.black} strokeWidth={2.5} />
                 </View>
                 <Text style={styles.statValue}>{leadStats.monthly}</Text>
                 <Text style={styles.statLabel}>This Month</Text>
@@ -303,13 +313,13 @@ export default function DashboardScreen() {
               }}
             >
               <LinearGradient
-                colors={[Colors.warning.main, Colors.warning.light]}
+                colors={['#ffd24d', '#ffd573']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.statCardGradient}
               >
                 <View style={styles.statIconCircle}>
-                  <Eye size={24} color={Colors.neutral.white} strokeWidth={2.5} />
+                  <Eye size={24} color={Colors.neutral.black} strokeWidth={2.5} />
                 </View>
                 <Text style={styles.statValue}>{leadStats.today}</Text>
                 <Text style={styles.statLabel}>Today</Text>
@@ -325,8 +335,8 @@ export default function DashboardScreen() {
               style={styles.addButton}
               onPress={() => router.push('/business-registration')}
             >
-              <Plus size={20} color={Colors.primary.main} strokeWidth={2.5} />
-              <Text style={styles.addButtonText}>Add New</Text>
+              <Plus size={20} color={Colors.neutral.black} strokeWidth={2.5} />
+              <Text style={styles.addButtonText}>Add Businesses</Text>
             </TouchableOpacity>
           </View>
 
@@ -421,7 +431,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: Spacing.xxxl,
-    paddingBottom: Spacing.xl,
+    paddingBottom: Spacing.lg,
   },
   headerContent: {
     flexDirection: 'row',
@@ -433,9 +443,11 @@ const styles = StyleSheet.create({
     marginVertical: 0,
   },
   headerTitle: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '700',
-    color: Colors.neutral.white,
+    textAlignVertical: 'center',
+    height: '100%',
+    color: Colors.neutral.black,
   },
   content: {
     padding: 20,
@@ -475,12 +487,12 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 28,
     fontWeight: '700',
-    color: Colors.neutral.white,
+    color: Colors.neutral.black,
     marginBottom: 4,
   },
   statLabel: {
     fontSize: 12,
-    color: Colors.neutral.white,
+    color: Colors.neutral.black,
     textAlign: 'center',
     fontWeight: '600',
     opacity: 0.9,
@@ -525,7 +537,7 @@ const styles = StyleSheet.create({
   addButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: Colors.primary.main,
+    color: Colors.neutral.black,
   },
   emptyState: {
     backgroundColor: '#fff',

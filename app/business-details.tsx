@@ -1406,12 +1406,14 @@ export default function BusinessDetailsScreen() {
 
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={[Colors.secondary.main, Colors.secondary.light]}
+      {/* <LinearGradient
+        colors={[Colors.neutral.white, Colors.neutral.white]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={[styles.header, { paddingTop: insets.top + 16 }]}
-      >
+      > */}
+                  <View style={[styles.header, { backgroundColor: 'rgba(138, 151, 209, 0.02)' }, { paddingTop: insets.top + 20, paddingLeft: insets.top + 15, backgroundColor: '#fff' }]}>
+
         <View style={styles.headerContent}>
           <TouchableOpacity
             style={styles.backButton}
@@ -1423,9 +1425,9 @@ export default function BusinessDetailsScreen() {
               }
             }}
           >
-            <ChevronLeft size={24} color="#fff" />
+            <ChevronLeft size={24} color="#000" />
           </TouchableOpacity>
-          <Logo size={38} style={styles.headerLogo} />
+          <Logo size={48} style={{ ...styles.headerLogo, transform: [{ scale: 1.3}] }} />
           <View style={styles.headerTitleContainer}>
             <Text style={styles.headerTitle} numberOfLines={1}>
               {business.business_name}
@@ -1435,7 +1437,8 @@ export default function BusinessDetailsScreen() {
             </Text>
           </View>
         </View>
-
+        {/* </LinearGradient> */}
+        </View>
         <View style={styles.tabContainer}>
           {/*
           <TouchableOpacity
@@ -1492,7 +1495,7 @@ export default function BusinessDetailsScreen() {
             </Text>
           </TouchableOpacity>
         </View>
-      </LinearGradient>
+     
 
       <ScrollView
         style={styles.content}
@@ -2497,15 +2500,15 @@ const styles = StyleSheet.create({
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
+ 
     gap: 12,
   },
   headerLogo: {
-    marginLeft: 4,
+    marginLeft: 2,
     marginVertical: 0,
   },
   backButton: {
-    width: 40,
+    width: 15,
     height: 40,
     borderRadius: 20,
     backgroundColor: 'rgba(255,255,255,0.2)',
@@ -2519,7 +2522,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#fff',
+    color: '#000',
     marginBottom: 4,
   },
   headerSubtitle: {
@@ -2529,6 +2532,7 @@ const styles = StyleSheet.create({
   tabContainer: {
     flexDirection: 'row',
     gap: 8,
+    backgroundColor: '#52aad9',
   },
   tab: {
     flex: 1,
@@ -2537,7 +2541,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 10,
     paddingHorizontal: 12,
-    borderRadius: 12,
+ 
     gap: 6,
   },
   activeTab: {

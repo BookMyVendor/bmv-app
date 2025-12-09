@@ -581,17 +581,23 @@ export default function ReviewsScreen() {
 
   return (
     <View style={styles.container}>
-      <LinearGradient
+     <View style={[styles.header, { paddingTop: insets.top + 20, paddingLeft: insets.top + 15, backgroundColor: '#fff' }]}>
+
+      {/* <LinearGradient
         colors={[Colors.accent.main, Colors.accent.light]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={[styles.header, { paddingTop: insets.top + 20 }]}
-      >
+      > */}
         <View style={styles.headerContent}>
-          <Logo size={48} style={styles.headerLogo} />
+        <Logo
+         size={48}
+         style={{ ...styles.headerLogo, transform: [{ scale: 1.2}] }}
+/>
           <Text style={styles.headerTitle}>Reviews</Text>
         </View>
-      </LinearGradient>
+        </View>
+      {/* </LinearGradient> */}
 
       {loading ? (
         <View style={styles.loadingContainer}>
@@ -686,7 +692,7 @@ export default function ReviewsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background.secondary,
+    backgroundColor: 'rgba(138, 151, 209, 0.02)',
   },
   header: {
     paddingHorizontal: Spacing.xxxl,
@@ -695,16 +701,18 @@ const styles = StyleSheet.create({
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
+      gap: Spacing.md,
   },
   headerLogo: {
     marginRight: Spacing.sm,
     marginVertical: 0,
   },
   headerTitle: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '700',
-    color: Colors.text.primary,
+    textAlignVertical: 'center',
+    height: '100%',
+     color: Colors.text.primary,
   },
   loadingContainer: {
     flex: 1,

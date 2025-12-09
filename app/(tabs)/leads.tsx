@@ -428,14 +428,19 @@ export default function LeadsScreen() {
 
   return (
     <View style={styles.container}>
-      <LinearGradient
+            <View style={[styles.header, { backgroundColor: 'rgba(138, 151, 209, 0.02)' }, { paddingTop: insets.top + 20, paddingLeft: insets.top + 15, backgroundColor: '#fff' }]}>
+
+      {/* <LinearGradient
         colors={[Colors.secondary.main, Colors.secondary.light]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={[styles.header, { paddingTop: insets.top + 20 }]}
-      >
+      > */}
         <View style={styles.headerTitleContainer}>
-          <Logo size={48} style={styles.headerLogo} />
+        <Logo
+         size={48}
+         style={{ ...styles.headerLogo, transform: [{ scale: 1.2}] }}
+/>
           <Text style={styles.headerTitle}>Leads</Text>
           {timeFilter !== 'all' && (
             <View style={styles.timeFilterBadge}>
@@ -470,7 +475,8 @@ export default function LeadsScreen() {
             </>
           )}
         </View>
-      </LinearGradient>
+        </View>
+      {/* </LinearGradient> */}
 
       {bulkSelectMode && selectedLeads.length > 0 && (
         <View style={styles.bulkActionsBar}>
@@ -704,12 +710,11 @@ export default function LeadsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background.secondary,
+   // backgroundColor: 'rgba(138, 151, 209, 0.02)',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
     paddingHorizontal: Spacing.xxxl,
     paddingBottom: Spacing.lg,
   },
@@ -723,9 +728,11 @@ const styles = StyleSheet.create({
     marginVertical: 0,
   },
   headerTitle: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '700',
-    color: Colors.neutral.white,
+    textAlignVertical: 'center',
+    height: '100%',
+    color: Colors.neutral.black,
   },
   timeFilterBadge: {
     backgroundColor: 'rgba(255, 255, 255, 0.3)',
@@ -804,7 +811,6 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   filterBar: {
-    backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
     paddingVertical: 12,

@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
 import Logo from '@/components/Logo';
+import ExternalLogo from '@/components/ExternalLogo';
 
 const DEV_MODE = true;
 const DEV_OTP = '123456';
@@ -54,7 +55,7 @@ export default function LoginScreen() {
       // In dev mode, skip Twilio entirely - just proceed to OTP step
       setLoading(false);
       setStep('otp');
-      setDevInfo(`Development Mode: Use OTP ${DEV_OTP}`);
+      //setDevInfo(`Development Mode: Use OTP ${DEV_OTP}`);
       return;
      */}
 
@@ -90,7 +91,7 @@ export default function LoginScreen() {
 
   return (
     <LinearGradient
-      colors={[Colors.background.gradient[0], Colors.background.gradient[1], '#FFFFFF']}
+      colors={[Colors.background.primary, '#FFFFFF']}
       style={styles.container}
     >
       <KeyboardAvoidingView
@@ -99,11 +100,20 @@ export default function LoginScreen() {
       >
         <View style={styles.content}>
           <View style={styles.headerContainer}>
-            <Text style={styles.titleSmall}>Welcome to</Text>
-            <Logo size={220} style={styles.logo} />
+            <ExternalLogo size={170} style={styles.logo} />
+            <View style={styles.titleWrapper}>
+              <Text style={styles.titleSmall}>Welcome to</Text>
+              <Text style={styles.titleLarge}>BookMyVendor</Text>
+            </View>
+            {/* <Text style={styles.title}>Welcome to BookMyVendor</Text> */}
+            {/* {step !== 'phone' && (
+             <Text style={styles.subtitle}>
+                 Enter the OTP sent to your phone
+                </Text>
+                )} */}
           </View>
 
-          {/* DEV_MODE && (
+          {/* {DEV_MODE && (
             <TouchableOpacity
               style={styles.dummyLoginButton}
               onPress={async () => {
@@ -112,7 +122,7 @@ export default function LoginScreen() {
             >
               <Text style={styles.dummyLoginText}>🚀 Skip Login (Dev Mode)</Text>
             </TouchableOpacity>
-          ) */}
+          )} */}
 
           {step === 'phone' ? (
             <>
@@ -172,7 +182,9 @@ export default function LoginScreen() {
                   onSubmitEditing={handleVerifyOTP}
                   blurOnSubmit={true}
                 />
+
               </View>
+
               <TouchableOpacity
                 style={[styles.button, loading && styles.buttonDisabled]}
                 onPress={handleVerifyOTP}
@@ -192,8 +204,19 @@ export default function LoginScreen() {
                   )}
                 </LinearGradient>
               </TouchableOpacity>
+              {/* <TouchableOpacity
+                style={styles.backButton}
+                onPress={() => {
+                  setStep('phone');
+                  setOtp('');
+                  setError('');
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.backButtonText}>Change Phone Number</Text>
+              </TouchableOpacity> */}
               <TouchableOpacity
-                style={[styles.button, styles.secondaryButton]}
+                style={styles.button}
                 onPress={() => {
                   setStep('phone');
                   setOtp('');
@@ -202,14 +225,15 @@ export default function LoginScreen() {
                 activeOpacity={0.8}
               >
                 <LinearGradient
-                  colors={['#87CEEB', '#6BB6FF']}
+                  colors={[Colors.secondary.main, Colors.secondary.light]}
                   start={{ x: 0, y: 0 }}
-                  end={{ x: 0, y: 1 }}
+                  end={{ x: 1, y: 0 }}
                   style={styles.buttonGradient}
                 >
                   <Text style={styles.buttonText}>Change Phone Number</Text>
                 </LinearGradient>
               </TouchableOpacity>
+
             </>
           )}
 
@@ -241,11 +265,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: Spacing.xxxl,
   },
+  titleWrapper: {
+    alignItems: 'center',
+  },
+  
   titleSmall: {
     fontSize: 22,
     fontWeight: '600',
     color: Colors.neutral.black,
-    marginBottom: Spacing.lg,
+  },
+  
+  titleLarge: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: Colors.primary.black,
   },
   
   headerContainer: {
@@ -314,8 +347,18 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    color: Colors.neutral.white,
+    color: Colors.neutral.black,
     fontSize: 16,
+    fontWeight: '500',
+    letterSpacing: 0.5,
+  },
+  backButton: {
+    alignItems: 'center',
+    padding: Spacing.md,
+  },
+  backButtonText: {
+    color: Colors.primary.main,
+    fontSize: 15,
     fontWeight: '600',
   },
   secondaryButton: {
@@ -355,7 +398,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   dummyLoginText: {
-    color: '#fff',
+    color: '#000',
     fontSize: 14,
     fontWeight: '600',
   },
