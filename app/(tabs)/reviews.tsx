@@ -70,47 +70,156 @@ export default function ReviewsScreen() {
   const { user } = useAuth();
 
   useEffect(() => {
-    fetchReviews();
-  }, []);
+    if (user?.id) {
+      fetchReviews();
+    }
+  }, [user?.id]);
 
   const fetchReviews = async () => {
     try {
+      if (!user?.id) return;
+      
       const isRefresh = refreshing;
       if (!isRefresh) setLoading(true);
 
-      const { data: businessData } = await supabaseCore
+      // Get business data for mapping business_id to business_name
+      const { data: businessData, error: businessError } = await supabaseCore
         .from('vendor_businesses')
         .select('id, business_name')
-        .eq('vendor_id', user?.id);
+        .eq('vendor_id', user.id);
 
-      if (!businessData || businessData.length === 0) {
+      if (businessError) {
+        console.error('Error fetching businesses:', businessError);
+      }
+
+      const businessMap = new Map((businessData || []).map((b) => [b.id, b.business_name]));
+
+      // Fetch all reviews for this vendor (by vendor_id), regardless of status or business_id
+      // Fetch reviews first, then join with related tables manually for better reliability
+      const { data: reviewsData, error: reviewsError } = await supabaseCrm
+        .from('customer_reviews')
+        .select('*')
+        .eq('vendor_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (reviewsError) {
+        console.error('Error fetching reviews:', reviewsError);
+        throw reviewsError;
+      }
+
+      if (!reviewsData || reviewsData.length === 0) {
+        console.log('No reviews found for vendor:', user.id);
         setReviews([]);
         setLoading(false);
         setRefreshing(false);
         return;
       }
 
-      const businessIds = businessData.map((b) => b.id);
-      const businessMap = new Map(businessData.map((b) => [b.id, b.business_name]));
+      console.log(`Found ${reviewsData.length} reviews for vendor ${user.id}`);
 
-      // Fetch reviews without join
-      const { data, error } = await supabaseCrm
-        .from('customer_reviews')
-        .select('*')
-        .in('business_id', businessIds)
-        .order('created_at', { ascending: false });
+      // Fetch customers separately
+      const customerIds = [...new Set(reviewsData.map((r: any) => r.customer_id).filter(Boolean))];
+      const customersMap = new Map();
+      if (customerIds.length > 0) {
+        const { data: customersData, error: customersError } = await supabaseCrm
+          .from('customers')
+          .select('id, name, email')
+          .in('id', customerIds);
+        
+        if (customersError) {
+          console.error('Error fetching customers:', customersError);
+        } else if (customersData) {
+          customersData.forEach((c: any) => customersMap.set(c.id, c));
+        }
+      }
 
-      if (error) throw error;
+      // Fetch leads separately
+      const leadIds = [...new Set(reviewsData.map((r: any) => r.lead_id).filter(Boolean))];
+      const leadsMap = new Map();
+      if (leadIds.length > 0) {
+        const { data: leadsData, error: leadsError } = await supabaseCrm
+          .from('customer_leads')
+          .select('id, template_id, sub_template_id')
+          .in('id', leadIds);
+        
+        if (leadsError) {
+          console.error('Error fetching leads:', leadsError);
+        } else if (leadsData) {
+          leadsData.forEach((l: any) => leadsMap.set(l.id, l));
+        }
+      }
 
-      // Map business names to reviews
-      const reviewsWithBusiness = (data || []).map((review) => ({
+      // Map reviews with manually fetched data
+      const reviewsWithJoins = reviewsData.map((review: any) => ({
         ...review,
-        business_name: businessMap.get(review.business_id) || 'Unknown Business',
+        customers: customersMap.get(review.customer_id) || null,
+        customer_leads: leadsMap.get(review.lead_id) || null,
       }));
 
+      // Fetch event template names for event types
+      const templateIds = reviewsWithJoins
+        .map((r: any) => r.customer_leads?.template_id || r.customer_leads?.sub_template_id)
+        .filter(Boolean);
+      
+      let eventTypeMap = new Map();
+      if (templateIds.length > 0) {
+        const { data: templates, error: templatesError } = await supabaseCore
+          .from('event_templates')
+          .select('id, name')
+          .in('id', templateIds);
+        
+        const { data: subTemplates, error: subTemplatesError } = await supabaseCore
+          .from('event_sub_templates')
+          .select('id, name')
+          .in('id', templateIds);
+
+        if (templatesError) {
+          console.error('Error fetching templates:', templatesError);
+        } else if (templates) {
+          templates.forEach((t: any) => eventTypeMap.set(t.id, t.name));
+        }
+
+        if (subTemplatesError) {
+          console.error('Error fetching sub-templates:', subTemplatesError);
+        } else if (subTemplates) {
+          subTemplates.forEach((t: any) => eventTypeMap.set(t.id, t.name));
+        }
+      }
+
+      // Map reviews to match the Review interface
+      const reviewsWithBusiness = reviewsWithJoins.map((review: any) => {
+        const customer = review.customers || {};
+        const lead = review.customer_leads || {};
+        const eventTypeId = lead?.template_id || lead?.sub_template_id;
+        const eventType = eventTypeId ? eventTypeMap.get(eventTypeId) : null;
+
+        // Get business name if business_id exists, otherwise show "No Business"
+        const businessName = review.business_id 
+          ? (businessMap.get(review.business_id) || 'Unknown Business')
+          : 'No Business';
+
+        return {
+          id: review.id,
+          customer_name: customer.name || 'Anonymous',
+          profile_photo_url: null,
+          rating: review.rating,
+          comment: review.review_text || review.review_title || null,
+          event_type: eventType,
+          is_flagged: review.status === 'rejected',
+          vendor_response: review.vendor_response || null,
+          responded_at: review.vendor_response_date || null,
+          created_at: review.created_at,
+          businesses: {
+            business_name: businessName,
+          },
+        };
+      });
+
+      console.log(`Mapped ${reviewsWithBusiness.length} reviews`);
       setReviews(reviewsWithBusiness);
     } catch (error) {
       console.error('Error fetching reviews:', error);
+      setReviews([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -135,7 +244,7 @@ export default function ReviewsScreen() {
         .from('customer_reviews')
         .update({
           vendor_response: replyText,
-          responded_at: new Date().toISOString(),
+          vendor_response_date: new Date().toISOString(),
         })
         .eq('id', selectedReview.id);
 

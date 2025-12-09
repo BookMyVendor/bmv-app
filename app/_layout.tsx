@@ -41,6 +41,10 @@ function RootLayoutNav() {
 
     // If we have session and profile, handle navigation
     if (session && profile) {
+      // Don't redirect if user is on business-registration screen
+      if (inBusinessReg) {
+        return;
+      }
       if (!profile?.first_name && !inCompleteProfile) {
         router.replace('/complete-profile');
       } else if (profile?.first_name && (inAuthGroup || inCompleteProfile)) {

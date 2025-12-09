@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,8 +9,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   Keyboard,
+  AppState,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore } from '@/lib/supabase';
@@ -53,13 +55,87 @@ interface BusinessData {
   coverPhotoUri?: string; // Add this
 }
 
+const STORAGE_KEY = 'business_registration_data';
+const STORAGE_PAGE_KEY = 'business_registration_page';
+
 export default function BusinessRegistrationScreen() {
   const [currentPage, setCurrentPage] = useState(0);
   const [businessData, setBusinessData] = useState<Partial<BusinessData>>({});
   const [submitting, setSubmitting] = useState(false);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
-  const { user } = useAuth();
+  const [isRestored, setIsRestored] = useState(false);
+  const { user, profile } = useAuth();
   const router = useRouter();
+
+  // Save form data to AsyncStorage whenever it changes
+  useEffect(() => {
+    if (isRestored) {
+      const saveData = async () => {
+        try {
+          await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(businessData));
+          await AsyncStorage.setItem(STORAGE_PAGE_KEY, currentPage.toString());
+        } catch (error) {
+          console.error('Error saving business registration data:', error);
+        }
+      };
+      saveData();
+    }
+  }, [businessData, currentPage, isRestored]);
+
+  // Restore form data from AsyncStorage when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      const restoreData = async () => {
+        try {
+          const savedData = await AsyncStorage.getItem(STORAGE_KEY);
+          const savedPage = await AsyncStorage.getItem(STORAGE_PAGE_KEY);
+          
+          if (savedData) {
+            const parsedData = JSON.parse(savedData);
+            setBusinessData(parsedData);
+          }
+          
+          if (savedPage) {
+            setCurrentPage(parseInt(savedPage, 10));
+          }
+          
+          setIsRestored(true);
+        } catch (error) {
+          console.error('Error restoring business registration data:', error);
+          setIsRestored(true);
+        }
+      };
+      
+      restoreData();
+    }, [])
+  );
+
+  // Initialize business data with vendor's phone and email when component mounts
+  useEffect(() => {
+    if (profile && isRestored) {
+      setBusinessData((prev) => {
+        // Only set if not already set (don't overwrite user input or restored data)
+        const updated: Partial<BusinessData> = { ...prev };
+        if (!prev.phoneNumber && profile.phone) {
+          updated.phoneNumber = profile.phone;
+        }
+        if (!prev.email && profile.email) {
+          updated.email = profile.email;
+        }
+        return updated;
+      });
+    }
+  }, [profile, isRestored]);
+
+  // Clear saved data when registration is successfully submitted
+  const clearSavedData = async () => {
+    try {
+      await AsyncStorage.removeItem(STORAGE_KEY);
+      await AsyncStorage.removeItem(STORAGE_PAGE_KEY);
+    } catch (error) {
+      console.error('Error clearing saved data:', error);
+    }
+  };
 
   const totalSteps = 5;
 
@@ -176,6 +252,7 @@ export default function BusinessRegistrationScreen() {
   };
 
   const handleCancel = () => {
+    console.log('Close button pressed');
     // Dismiss keyboard first to ensure proper navigation and button responsiveness
     Keyboard.dismiss();
     
@@ -193,15 +270,24 @@ export default function BusinessRegistrationScreen() {
             {
               text: 'Cancel',
               style: 'destructive',
-              onPress: () => {
-                router.back();
+              onPress: async () => {
+                // Clear saved data when user cancels
+                await clearSavedData();
+                console.log('Navigating to dashboard after cancel');
+                router.replace('/(tabs)');
               },
             },
           ]
         );
       } else {
-        // No data entered, just navigate away
-        router.back();
+        // No data entered, clear saved data and navigate away
+        clearSavedData().then(() => {
+          console.log('Navigating to dashboard (no data entered)');
+          router.replace('/(tabs)');
+        }).catch(() => {
+          console.log('Navigating to dashboard (clear data error)');
+          router.replace('/(tabs)');
+        });
       }
     }, 100);
   };
@@ -449,6 +535,8 @@ export default function BusinessRegistrationScreen() {
         }
       }
 
+      // Clear saved form data before navigating
+      await clearSavedData();
       router.replace('/(tabs)');
     } catch (error: any) {
       console.error('Error submitting business:', error);
@@ -530,15 +618,12 @@ export default function BusinessRegistrationScreen() {
           </View>
           <TouchableOpacity
             style={styles.cancelButton}
-            onPress={(e) => {
-              e?.stopPropagation?.();
-              handleCancel();
-            }}
-            activeOpacity={0.6}
-            hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+            onPress={handleCancel}
+            activeOpacity={0.7}
+            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
             accessibilityLabel="Close registration"
             accessibilityRole="button"
-            pointerEvents="box-only"
+            disabled={submitting}
           >
             <X size={24} color="#666" strokeWidth={2.5} />
           </TouchableOpacity>
@@ -613,6 +698,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     marginBottom: 16,
+    position: 'relative',
   },
   headerLogo: {
     marginRight: 12,
@@ -621,6 +707,7 @@ const styles = StyleSheet.create({
   headerTextContainer: {
     flex: 1,
     marginRight: 16,
+    flexShrink: 1,
   },
   title: {
     fontSize: 24,
@@ -631,11 +718,15 @@ const styles = StyleSheet.create({
   cancelButton: {
     width: 44,
     height: 44,
+    minWidth: 44,
+    minHeight: 44,
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: -4,
-    zIndex: 1000,
+    zIndex: 9999,
     elevation: 10, // For Android
+    backgroundColor: 'transparent',
+    flexShrink: 0,
   },
   subtitle: {
     fontSize: 14,
