@@ -1,5 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
-import { Platform } from 'react-native';
+import { Platform, InteractionManager } from 'react-native';
 
 export interface DocumentFile {
   uri: string;
@@ -99,6 +99,19 @@ export const pickDocuments = async (allowMultiple: boolean = true): Promise<Pick
         error: new Error('Permission to access media library is required'),
       };
     }
+
+    // Ensure the component is fully mounted and ready before launching the image picker
+    // This prevents "unregistered ActivityResultLauncher" errors on Android
+    await new Promise(resolve => {
+      if (Platform.OS === 'android') {
+        // Use InteractionManager to ensure UI is ready, then add a small delay
+        InteractionManager.runAfterInteractions(() => {
+          setTimeout(resolve, 100);
+        });
+      } else {
+        resolve(undefined);
+      }
+    });
 
     // Use expo-image-picker with all media types
     // Note: expo-image-picker may not support PDFs directly on all platforms
@@ -260,6 +273,19 @@ export const pickImages = async (allowMultiple: boolean = true): Promise<PickDoc
         error: new Error('Permission to access media library is required'),
       };
     }
+
+    // Ensure the component is fully mounted and ready before launching the image picker
+    // This prevents "unregistered ActivityResultLauncher" errors on Android
+    await new Promise(resolve => {
+      if (Platform.OS === 'android') {
+        // Use InteractionManager to ensure UI is ready, then add a small delay
+        InteractionManager.runAfterInteractions(() => {
+          setTimeout(resolve, 100);
+        });
+      } else {
+        resolve(undefined);
+      }
+    });
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
