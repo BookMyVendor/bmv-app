@@ -581,7 +581,7 @@ export default function ReviewsScreen() {
 
   return (
     <View style={styles.container}>
-     <View style={[styles.header, { paddingTop: insets.top + 20, paddingLeft: insets.top + 15, backgroundColor: '#fff' }]}>
+     <View style={[styles.header, { paddingTop: insets.top + 20,  backgroundColor: '#fff' }]}>
 
       {/* <LinearGradient
         colors={[Colors.accent.main, Colors.accent.light]}

@@ -391,7 +391,7 @@ export default function ProfileScreen() {
         <View style={styles.headerContent}>
           <Logo
             size={48}
-            style={{ ...styles.headerLogo, transform: [{ scale: 1.2 }] }}
+            style={{ ...styles.headerLogo, transform: [{ scale: 1.1 }] }}
           />
           <Text style={styles.headerTitle}>Profile</Text>
         </View>
