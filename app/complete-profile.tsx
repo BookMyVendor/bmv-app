@@ -164,18 +164,54 @@ export default function CompleteProfileScreen() {
         let fileDataId: string;
 
       // Step 1: Upload image to storage bucket (photo is required)
-      console.log('📤 Step 1: Fetching image from URI:', photoUri);
-      const response = await fetch(photoUri!);
-      if (!response.ok) {
-        console.error('❌ Failed to fetch image:', response.status, response.statusText);
-        throw new Error('Failed to load image');
+      console.log('📤 Step 1: Processing image from URI:', photoUri);
+      
+      let fileBytes: Uint8Array;
+      let fileExt: string;
+      let mimeType: string;
+      
+      if (Platform.OS === 'web') {
+        // On web, fetch and convert to blob
+        const response = await fetch(photoUri!);
+        if (!response.ok) {
+          console.error('❌ Failed to fetch image:', response.status, response.statusText);
+          throw new Error('Failed to load image');
+        }
+        console.log('✅ Image fetched successfully');
+        
+        const blob = await response.blob();
+        console.log('✅ Blob created, size:', blob.size);
+        fileBytes = new Uint8Array(await blob.arrayBuffer());
+        fileExt = photoUri!.split('.').pop() || 'jpg';
+        mimeType = blob.type || `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`;
+      } else {
+        // On mobile, use ImageManipulator to get base64, then convert to Uint8Array
+        const manipResult = await ImageManipulator.manipulateAsync(
+          photoUri!,
+          [],
+          {
+            compress: 0.8,
+            format: ImageManipulator.SaveFormat.JPEG,
+            base64: true,
+          }
+        );
+        
+        if (!manipResult.base64) {
+          throw new Error('Failed to process image');
+        }
+        
+        // Convert base64 to Uint8Array
+        const base64Data = manipResult.base64;
+        const byteCharacters = atob(base64Data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        fileBytes = new Uint8Array(byteNumbers);
+        fileExt = 'jpg';
+        mimeType = 'image/jpeg';
       }
-      console.log('✅ Image fetched successfully');
       
-      const blob = await response.blob();
-      console.log('✅ Blob created, size:', blob.size);
-      
-      const fileExt = photoUri!.split('.').pop() || 'jpg';
       const fileName = `${user.id}-${Date.now()}.${fileExt}`;
       const filePath = `profile-photos/${fileName}`;
       console.log('📤 Step 2: Uploading to storage:', filePath);
@@ -183,7 +219,9 @@ export default function CompleteProfileScreen() {
       // Upload to storage bucket
       const { error: uploadError } = await supabaseCore.storage
         .from('profile_image')
-        .upload(filePath, blob);
+        .upload(filePath, fileBytes, {
+          contentType: mimeType,
+        });
 
       if (uploadError) {
         console.error('❌ Storage upload error:', uploadError);
@@ -193,14 +231,14 @@ export default function CompleteProfileScreen() {
 
       // Step 2: Create file_storage record
       console.log('📤 Step 3: Creating file_storage record');
-      const { data: fileData, error: fileError } = await supabaseCms
+      const { data: fileStorageRecord, error: fileError } = await supabaseCms
         .from('file_storage')
         .insert({
           original_filename: fileName,
           stored_filename: fileName,
           file_path: filePath,
-          file_size: blob.size,
-          mime_type: blob.type || `image/${fileExt}`,
+          file_size: fileBytes.length,
+          mime_type: mimeType,
           file_extension: fileExt,
           storage_provider: 'supabase',
           storage_bucket: 'profile_image',
@@ -215,8 +253,8 @@ export default function CompleteProfileScreen() {
         console.error('❌ file_storage insert error:', fileError);
         throw fileError;
       }
-      console.log('✅ file_storage record created:', fileData?.id);
-      fileDataId = fileData.id;
+      console.log('✅ file_storage record created:', fileStorageRecord?.id);
+      fileDataId = fileStorageRecord.id;
 
       // Step 3: Update vendors table
       console.log('📤 Step 4: Updating vendors table');
