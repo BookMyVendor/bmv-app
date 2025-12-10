@@ -231,10 +231,9 @@ export default function ServicesExperienceStep({
   // Handle root category selection
   const handleRootSelection = (categoryId: string) => {
     setSelectedRootCategoryId(categoryId);
-    // Clear all previous selections when root changes
-    setSelectedCategoryIds([]);
+    // Don't clear child selections when root changes - allow independent selection
     // Expand the selected root to show children
-    setExpandedCategoryIds(new Set([categoryId]));
+    setExpandedCategoryIds((expanded) => new Set([...expanded, categoryId]));
   };
 
   // Handle child category selection
@@ -243,9 +242,25 @@ export default function ServicesExperienceStep({
       if (prev.includes(categoryId)) {
         return prev.filter((id) => id !== categoryId);
       } else {
-        // Find the category and expand it if it has children
+        // Find the category and expand parent chain so it's visible
         const category = allBusinessCategories.find((c) => c.id === categoryId);
         if (category) {
+          // Auto-expand parent chain to make the selected category visible
+          const parentChain: string[] = [];
+          let currentParentId: string | null = category.parent_category_id;
+          
+          while (currentParentId) {
+            parentChain.push(currentParentId);
+            const parent = allBusinessCategories.find((c) => c.id === currentParentId);
+            currentParentId = parent?.parent_category_id || null;
+          }
+          
+          // Expand all parents in the chain
+          if (parentChain.length > 0) {
+            setExpandedCategoryIds((expanded) => new Set([...expanded, ...parentChain]));
+          }
+          
+          // Expand the category itself if it has children
           const hasChildren = allBusinessCategories.some(
             (c) => c.parent_category_id === categoryId
           );
@@ -271,12 +286,14 @@ export default function ServicesExperienceStep({
     });
   };
 
-  // Auto-expand selected categories with children
+  // Auto-expand selected categories with children and their parent chains
   useEffect(() => {
     setExpandedCategoryIds((currentExpanded) => {
       const newExpanded = new Set(currentExpanded);
       let changed = false;
+      
       selectedCategoryIds.forEach((categoryId) => {
+        // Expand the category itself if it has children
         const hasChildren = allBusinessCategories.some(
           (c) => c.parent_category_id === categoryId
         );
@@ -284,7 +301,22 @@ export default function ServicesExperienceStep({
           newExpanded.add(categoryId);
           changed = true;
         }
+        
+        // Expand parent chain so selected child categories are visible
+        const category = allBusinessCategories.find((c) => c.id === categoryId);
+        if (category) {
+          let currentParentId: string | null = category.parent_category_id;
+          while (currentParentId) {
+            if (!newExpanded.has(currentParentId)) {
+              newExpanded.add(currentParentId);
+              changed = true;
+            }
+            const parent = allBusinessCategories.find((c) => c.id === currentParentId);
+            currentParentId = parent?.parent_category_id || null;
+          }
+        }
       });
+      
       return changed ? newExpanded : currentExpanded;
     });
   }, [selectedCategoryIds, allBusinessCategories]);
