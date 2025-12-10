@@ -41,9 +41,18 @@ function RootLayoutNav() {
     if (hasSeenOnboarding === null) return;
 
     const inOnboarding = segments[0] === 'onboarding';
-    
-    // Don't interfere if user is on onboarding screen - let onboarding handle navigation
+    const inAuthGroup = segments[0] === '(auth)';
+    const inTabsGroup = segments[0] === '(tabs)';
+    const inCompleteProfile = segments[0] === 'complete-profile';
+    const inBusinessReg = segments[0] === 'business-registration';
+
+    // If user is on onboarding screen, don't interfere - let onboarding handle navigation
     if (inOnboarding) {
+      // But still hide splash screen if not already hidden
+      if (initialLoad) {
+        SplashScreen.hideAsync().catch(() => {});
+        setInitialLoad(false);
+      }
       return;
     }
 
@@ -59,21 +68,17 @@ function RootLayoutNav() {
         setInitialLoad(false);
       }
 
-      const inAuthGroup = segments[0] === '(auth)';
-      const inTabsGroup = segments[0] === '(tabs)';
-      const inCompleteProfile = segments[0] === 'complete-profile';
-      const inBusinessReg = segments[0] === 'business-registration';
-
       // Show onboarding for first-time users (only if not logged in)
-      if (hasSeenOnboarding === false && !session) {
+      // But only if we're not already navigating away from onboarding
+      if (hasSeenOnboarding === false && !session && !inAuthGroup) {
         router.replace('/onboarding');
         return;
       }
 
-      // If no session, redirect to login (this handles logout case)
+      // If no session, redirect to login (this handles logout case and post-onboarding)
       // Check both session and user to ensure we're truly logged out
       if (!session && !loading && hasSeenOnboarding) {
-        if (!inAuthGroup) {
+        if (!inAuthGroup && !inOnboarding) {
           router.replace('/(auth)/login');
         }
         return;
@@ -99,7 +104,7 @@ function RootLayoutNav() {
     };
 
     hideSplashAndNavigate();
-  }, [session, profile, loading, segments, hasSeenOnboarding]);
+  }, [session, profile, loading, segments, hasSeenOnboarding, initialLoad]);
 
   // Show gradient splash screen during initial load
   if (loading && initialLoad) {
