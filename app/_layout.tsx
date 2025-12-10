@@ -2,19 +2,40 @@ import { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SplashScreen from 'expo-splash-screen';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+
+const ONBOARDING_STORAGE_KEY = 'has_seen_onboarding';
 
 function RootLayoutNav() {
   const { session, profile, loading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
   const [initialLoad, setInitialLoad] = useState(true);
+  const [hasSeenOnboarding, setHasSeenOnboarding] = useState<boolean | null>(null);
+
+  // Check if user has seen onboarding
+  useEffect(() => {
+    const checkOnboarding = async () => {
+      try {
+        const value = await AsyncStorage.getItem(ONBOARDING_STORAGE_KEY);
+        setHasSeenOnboarding(value === 'true');
+      } catch (error) {
+        console.error('Error checking onboarding:', error);
+        setHasSeenOnboarding(false);
+      }
+    };
+    checkOnboarding();
+  }, []);
 
   useEffect(() => {
-    // Don't navigate during initial load
+    // Don't navigate during initial load or while checking onboarding
     if (loading && initialLoad) return;
+    if (hasSeenOnboarding === null) return;
 
     if (initialLoad) {
       setInitialLoad(false);
@@ -24,11 +45,18 @@ function RootLayoutNav() {
     const inTabsGroup = segments[0] === '(tabs)';
     const inCompleteProfile = segments[0] === 'complete-profile';
     const inBusinessReg = segments[0] === 'business-registration';
+    const inOnboarding = segments[0] === 'onboarding';
+
+    // Show onboarding for first-time users (only if not logged in)
+    if (hasSeenOnboarding === false && !session && !inOnboarding) {
+      router.replace('/onboarding');
+      return;
+    }
 
     // If no session, redirect to login (this handles logout case)
     // Check both session and user to ensure we're truly logged out
-    if (!session && !loading) {
-      if (!inAuthGroup) {
+    if (!session && !loading && hasSeenOnboarding) {
+      if (!inAuthGroup && !inOnboarding) {
         router.replace('/(auth)/login');
       }
       return;
@@ -53,16 +81,25 @@ function RootLayoutNav() {
     }
   }, [session, profile, loading, segments]);
 
+  // Show gradient splash screen during initial load
   if (loading && initialLoad) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
-      </View>
+      <LinearGradient
+        colors={['#FFFFFF', '#FFF8F0', '#FFE5D0']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.splashContainer}
+      >
+        <View style={styles.splashContent}>
+          <ActivityIndicator size="large" color="#ffb543" />
+        </View>
+      </LinearGradient>
     );
   }
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="onboarding" />
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="complete-profile" />
@@ -73,11 +110,13 @@ function RootLayoutNav() {
 }
 
 const styles = StyleSheet.create({
-  loadingContainer: {
+  splashContainer: {
+    flex: 1,
+  },
+  splashContent: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
   },
 });
 
