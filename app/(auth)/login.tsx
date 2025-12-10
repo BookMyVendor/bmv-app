@@ -100,11 +100,8 @@ export default function LoginScreen() {
       >
         <View style={styles.content}>
           <View style={styles.headerContainer}>
-            <ExternalLogo size={170} style={styles.logo} />
-            <View style={styles.titleWrapper}>
-              <Text style={styles.titleSmall}>Welcome to</Text>
-              <Text style={styles.titleLarge}>BookMyVendor</Text>
-            </View>
+            <Text style={styles.titleSmall}>Welcome to</Text>
+            <ExternalLogo size={280} style={styles.logo} />
             {/* <Text style={styles.title}>Welcome to BookMyVendor</Text> */}
             {/* {step !== 'phone' && (
              <Text style={styles.subtitle}>
@@ -286,7 +283,9 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xxxl,
   },
   logo: {
-    marginTop: Spacing.sm,
+    marginTop: Spacing.md,
+    marginBottom: Spacing.md,
+    ...Shadows.colored,
   },
   iconCircle: {
     width: 100,
