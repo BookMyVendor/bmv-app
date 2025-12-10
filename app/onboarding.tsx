@@ -82,25 +82,29 @@ export default function OnboardingScreen() {
 
   const handleSkip = async () => {
     try {
+      console.log('Skip button pressed');
+      // Save onboarding status first
+      await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
       // Ensure splash screen is hidden
       if (!splashHidden) {
         await SplashScreen.hideAsync();
         setSplashHidden(true);
       }
       // Small delay to ensure splash screen is fully hidden
-      await new Promise(resolve => setTimeout(resolve, 150));
-      // Save onboarding status
-      await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
-      // Navigate to login
+      await new Promise(resolve => setTimeout(resolve, 300));
+      // Navigate to login - use replace for proper navigation
+      console.log('Navigating to login...');
       router.replace('/(auth)/login');
     } catch (error) {
       console.error('Error in handleSkip:', error);
       // Even if there's an error, try to navigate
       try {
+        await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
         if (!splashHidden) {
           await SplashScreen.hideAsync();
           setSplashHidden(true);
         }
+        await new Promise(resolve => setTimeout(resolve, 100));
       } catch (e) {
         // Ignore errors
       }
@@ -110,25 +114,29 @@ export default function OnboardingScreen() {
 
   const handleFinish = async () => {
     try {
+      console.log('Get Started button pressed');
+      // Save onboarding status first
+      await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
       // Ensure splash screen is hidden
       if (!splashHidden) {
         await SplashScreen.hideAsync();
         setSplashHidden(true);
       }
       // Small delay to ensure splash screen is fully hidden
-      await new Promise(resolve => setTimeout(resolve, 150));
-      // Save onboarding status
-      await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
-      // Navigate to login
+      await new Promise(resolve => setTimeout(resolve, 300));
+      // Navigate to login - use replace for proper navigation
+      console.log('Navigating to login...');
       router.replace('/(auth)/login');
     } catch (error) {
       console.error('Error in handleFinish:', error);
       // Even if there's an error, try to navigate
       try {
+        await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
         if (!splashHidden) {
           await SplashScreen.hideAsync();
           setSplashHidden(true);
         }
+        await new Promise(resolve => setTimeout(resolve, 100));
       } catch (e) {
         // Ignore errors
       }
@@ -160,7 +168,7 @@ export default function OnboardingScreen() {
         {ONBOARDING_DATA.map((item, index) => {
           const IconComponent = item.icon;
           return (
-            <View key={item.id} style={[styles.slide, { width }]}>
+            <View key={item.id} style={styles.slide}>
               <LinearGradient
                 colors={item.gradient as any}
                 start={{ x: 0, y: 0 }}
@@ -179,7 +187,7 @@ export default function OnboardingScreen() {
                 )}
 
                 {/* Content */}
-                <View style={[styles.content, { paddingTop: insets.top + 60 }]}>
+                <View style={[styles.content, { paddingTop: insets.top + 60, paddingBottom: insets.bottom + Spacing.xxxl }]}>
                   {/* Logo */}
                   <View style={styles.logoContainer}>
                     <ExternalLogo size={140} />
@@ -245,13 +253,20 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: 'transparent',
   },
   slide: {
-    flex: 1,
+    width: width,
     height: height,
   },
   gradient: {
-    flex: 1,
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   skipButton: {
     position: 'absolute',
