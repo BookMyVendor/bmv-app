@@ -9,6 +9,9 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 
+// Keep the splash screen visible while we fetch resources
+SplashScreen.preventAutoHideAsync();
+
 const ONBOARDING_STORAGE_KEY = 'has_seen_onboarding';
 
 function RootLayoutNav() {
@@ -37,49 +40,66 @@ function RootLayoutNav() {
     if (loading && initialLoad) return;
     if (hasSeenOnboarding === null) return;
 
-    if (initialLoad) {
-      setInitialLoad(false);
-    }
-
-    const inAuthGroup = segments[0] === '(auth)';
-    const inTabsGroup = segments[0] === '(tabs)';
-    const inCompleteProfile = segments[0] === 'complete-profile';
-    const inBusinessReg = segments[0] === 'business-registration';
     const inOnboarding = segments[0] === 'onboarding';
-
-    // Show onboarding for first-time users (only if not logged in)
-    if (hasSeenOnboarding === false && !session && !inOnboarding) {
-      router.replace('/onboarding');
+    
+    // Don't interfere if user is on onboarding screen - let onboarding handle navigation
+    if (inOnboarding) {
       return;
     }
 
-    // If no session, redirect to login (this handles logout case)
-    // Check both session and user to ensure we're truly logged out
-    if (!session && !loading && hasSeenOnboarding) {
-      if (!inAuthGroup && !inOnboarding) {
-        router.replace('/(auth)/login');
+    const hideSplashAndNavigate = async () => {
+      // Hide splash screen first
+      try {
+        await SplashScreen.hideAsync();
+      } catch (error) {
+        console.error('Error hiding splash screen:', error);
       }
-      return;
-    }
 
-    // If we have a session but no profile yet, wait for profile to load
-    if (session && !profile && loading) {
-      return;
-    }
+      if (initialLoad) {
+        setInitialLoad(false);
+      }
 
-    // If we have session and profile, handle navigation
-    if (session && profile) {
-      // Don't redirect if user is on business-registration screen
-      if (inBusinessReg) {
+      const inAuthGroup = segments[0] === '(auth)';
+      const inTabsGroup = segments[0] === '(tabs)';
+      const inCompleteProfile = segments[0] === 'complete-profile';
+      const inBusinessReg = segments[0] === 'business-registration';
+
+      // Show onboarding for first-time users (only if not logged in)
+      if (hasSeenOnboarding === false && !session) {
+        router.replace('/onboarding');
         return;
       }
-      if (!profile?.first_name && !inCompleteProfile) {
-        router.replace('/complete-profile');
-      } else if (profile?.first_name && (inAuthGroup || inCompleteProfile)) {
-        router.replace('/(tabs)');
+
+      // If no session, redirect to login (this handles logout case)
+      // Check both session and user to ensure we're truly logged out
+      if (!session && !loading && hasSeenOnboarding) {
+        if (!inAuthGroup) {
+          router.replace('/(auth)/login');
+        }
+        return;
       }
-    }
-  }, [session, profile, loading, segments]);
+
+      // If we have a session but no profile yet, wait for profile to load
+      if (session && !profile && loading) {
+        return;
+      }
+
+      // If we have session and profile, handle navigation
+      if (session && profile) {
+        // Don't redirect if user is on business-registration screen
+        if (inBusinessReg) {
+          return;
+        }
+        if (!profile?.first_name && !inCompleteProfile) {
+          router.replace('/complete-profile');
+        } else if (profile?.first_name && (inAuthGroup || inCompleteProfile)) {
+          router.replace('/(tabs)');
+        }
+      }
+    };
+
+    hideSplashAndNavigate();
+  }, [session, profile, loading, segments, hasSeenOnboarding]);
 
   // Show gradient splash screen during initial load
   if (loading && initialLoad) {

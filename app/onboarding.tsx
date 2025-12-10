@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronRight, Building2, TrendingUp, Star } from 'lucide-react-native';
+import * as SplashScreen from 'expo-splash-screen';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, Spacing, Shadows } from '@/constants/theme';
 import ExternalLogo from '@/components/ExternalLogo';
@@ -45,9 +46,26 @@ const ONBOARDING_DATA = [
 
 export default function OnboardingScreen() {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [splashHidden, setSplashHidden] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const router = useRouter();
   const insets = useSafeAreaInsets();
+
+  // Hide splash screen when onboarding screen mounts
+  useEffect(() => {
+    const hideSplash = async () => {
+      if (splashHidden) return;
+      try {
+        await SplashScreen.hideAsync();
+        setSplashHidden(true);
+      } catch (error) {
+        console.error('Error hiding splash screen:', error);
+        setSplashHidden(true); // Mark as attempted even if it fails
+      }
+    };
+    hideSplash();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
 
   const handleNext = () => {
     if (currentIndex < ONBOARDING_DATA.length - 1) {
@@ -63,13 +81,59 @@ export default function OnboardingScreen() {
   };
 
   const handleSkip = async () => {
-    await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
-    router.replace('/(auth)/login');
+    try {
+      // Ensure splash screen is hidden
+      if (!splashHidden) {
+        await SplashScreen.hideAsync();
+        setSplashHidden(true);
+      }
+      // Small delay to ensure splash screen is fully hidden
+      await new Promise(resolve => setTimeout(resolve, 150));
+      // Save onboarding status
+      await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
+      // Navigate to login
+      router.replace('/(auth)/login');
+    } catch (error) {
+      console.error('Error in handleSkip:', error);
+      // Even if there's an error, try to navigate
+      try {
+        if (!splashHidden) {
+          await SplashScreen.hideAsync();
+          setSplashHidden(true);
+        }
+      } catch (e) {
+        // Ignore errors
+      }
+      router.replace('/(auth)/login');
+    }
   };
 
   const handleFinish = async () => {
-    await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
-    router.replace('/(auth)/login');
+    try {
+      // Ensure splash screen is hidden
+      if (!splashHidden) {
+        await SplashScreen.hideAsync();
+        setSplashHidden(true);
+      }
+      // Small delay to ensure splash screen is fully hidden
+      await new Promise(resolve => setTimeout(resolve, 150));
+      // Save onboarding status
+      await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
+      // Navigate to login
+      router.replace('/(auth)/login');
+    } catch (error) {
+      console.error('Error in handleFinish:', error);
+      // Even if there's an error, try to navigate
+      try {
+        if (!splashHidden) {
+          await SplashScreen.hideAsync();
+          setSplashHidden(true);
+        }
+      } catch (e) {
+        // Ignore errors
+      }
+      router.replace('/(auth)/login');
+    }
   };
 
   const handleDotPress = (index: number) => {
@@ -98,7 +162,7 @@ export default function OnboardingScreen() {
           return (
             <View key={item.id} style={[styles.slide, { width }]}>
               <LinearGradient
-                colors={item.gradient}
+                colors={item.gradient as any}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 0, y: 1 }}
                 style={styles.gradient}
@@ -124,7 +188,7 @@ export default function OnboardingScreen() {
                   {/* Icon */}
                   <View style={styles.iconContainer}>
                     <View style={styles.iconCircle}>
-                      <IconComponent size={64} color="#fff" strokeWidth={2} />
+                      <IconComponent size={64} color="#000" strokeWidth={2} />
                     </View>
                   </View>
 
@@ -165,7 +229,7 @@ export default function OnboardingScreen() {
                           ? 'Get Started'
                           : 'Next'}
                       </Text>
-                      <ChevronRight size={20} color="#fff" strokeWidth={2.5} />
+                      <ChevronRight size={20} color="#000" strokeWidth={2.5} />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -197,12 +261,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
   },
   skipText: {
-    color: '#fff',
+    color: '#000',
     fontSize: 16,
     fontWeight: '600',
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
   },
   content: {
     flex: 1,
@@ -223,11 +284,11 @@ const styles = StyleSheet.create({
     width: 140,
     height: 140,
     borderRadius: 70,
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 3,
-    borderColor: 'rgba(255, 255, 255, 0.4)',
+    borderColor: '#000',
     ...Shadows.large,
   },
   textContainer: {
@@ -240,22 +301,15 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 32,
     fontWeight: '700',
-    color: '#fff',
+    color: '#000',
     textAlign: 'center',
     marginBottom: Spacing.lg,
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
   },
   description: {
     fontSize: 18,
-    color: '#fff',
+    color: '#1a1a1a',
     textAlign: 'center',
     lineHeight: 26,
-    opacity: 0.95,
-    textShadowColor: 'rgba(0, 0, 0, 0.15)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
   },
   dotsContainer: {
     flexDirection: 'row',
@@ -271,11 +325,11 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
   },
   dotActive: {
     width: 24,
-    backgroundColor: '#fff',
+    backgroundColor: '#000',
   },
   buttonContainer: {
     paddingBottom: Spacing.xl,
@@ -284,22 +338,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
     paddingVertical: Spacing.lg,
     paddingHorizontal: Spacing.xxxl,
     borderRadius: 30,
     borderWidth: 2,
-    borderColor: '#fff',
+    borderColor: '#000',
     gap: Spacing.sm,
     ...Shadows.medium,
   },
   nextButtonText: {
-    color: '#fff',
+    color: '#000',
     fontSize: 18,
     fontWeight: '700',
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
   },
 });
 
