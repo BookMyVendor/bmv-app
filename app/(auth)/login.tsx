@@ -8,6 +8,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Smartphone, Shield } from 'lucide-react-native';
@@ -97,8 +98,14 @@ export default function LoginScreen() {
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        <View style={styles.content}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.content}>
           <View style={styles.headerContainer}>
             <Text style={styles.titleSmall}>Welcome to</Text>
             <ExternalLogo size={280} style={styles.logo} />
@@ -244,7 +251,8 @@ export default function LoginScreen() {
               <Text style={styles.devInfo}>{devInfo}</Text>
             </View>
           ) : null}
-        </View>
+          </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </LinearGradient>
   );
@@ -257,10 +265,14 @@ const styles = StyleSheet.create({
   keyboardView: {
     flex: 1,
   },
+  scrollContent: {
+    flexGrow: 1,
+  },
   content: {
     flex: 1,
     justifyContent: 'center',
     paddingHorizontal: Spacing.xxxl,
+    paddingVertical: Spacing.xl,
   },
   titleWrapper: {
     alignItems: 'center',

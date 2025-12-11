@@ -9,8 +9,9 @@ import {
   Image,
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
-import { Platform } from 'react-native';
 
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -407,7 +408,16 @@ export default function ProfileScreen() {
       </View>
       {/* </LinearGradient> */}
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <KeyboardAvoidingView
+        style={styles.keyboardView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      >
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
         <Formik
           initialValues={{
             firstName: profile?.first_name || '',
@@ -537,7 +547,8 @@ export default function ProfileScreen() {
             </>
           )}
         </Formik>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -579,8 +590,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  keyboardView: {
+    flex: 1,
+  },
   content: {
     padding: 24,
+    flexGrow: 1,
   },
   photoContainer: {
     alignSelf: 'center',
