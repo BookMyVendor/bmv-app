@@ -10,6 +10,7 @@ import {
   Platform,
   Keyboard,
   AppState,
+  ScrollView,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -639,9 +640,14 @@ export default function BusinessRegistrationScreen() {
         </View>
       </View>
 
-      <View style={styles.pager}>
+      <ScrollView
+        style={styles.pager}
+        contentContainerStyle={styles.pagerContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         {steps[currentPage].component}
-      </View>
+      </ScrollView>
 
       <View style={styles.footer}>
         {currentPage > 0 && (
@@ -745,6 +751,9 @@ const styles = StyleSheet.create({
   },
   pager: {
     flex: 1,
+  },
+  pagerContent: {
+    flexGrow: 1,
   },
   footer: {
     flexDirection: 'row',
