@@ -1412,7 +1412,7 @@ export default function BusinessDetailsScreen() {
         end={{ x: 1, y: 1 }}
         style={[styles.header, { paddingTop: insets.top + 16 }]}
       > */}
-                  <View style={[styles.header, { backgroundColor: 'rgba(138, 151, 209, 0.02)' }, { paddingTop: insets.top + 20, paddingLeft: insets.top + 15, backgroundColor: '#fff' }]}>
+                  <View style={[styles.header, { backgroundColor: 'rgba(138, 151, 209, 0.02)' }, { paddingTop: insets.top + 20,backgroundColor: '#fff' }]}>
 
         <View style={styles.headerContent}>
           <TouchableOpacity

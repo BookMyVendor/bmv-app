@@ -209,7 +209,7 @@ export default function DashboardScreen() {
           <Text style={styles.headerTitle}>Dashboard</Text>
         </View>
       </LinearGradient> */}
-      <View style={[styles.header, { paddingTop: insets.top + 20, paddingLeft: insets.top + 15, backgroundColor: '#fff' }]}>
+      <View style={[styles.header, { paddingTop: insets.top + 20,  backgroundColor: '#fff' }]}>
   <View style={styles.headerContent}>
     <Logo size={48} style={{ ...styles.headerLogo, transform: [{ scale: 1.2 }] }} />
     <Text style={[styles.headerTitle, { color: Colors.neutral.black }]}>Dashboard</Text>

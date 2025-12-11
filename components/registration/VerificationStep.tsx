@@ -9,6 +9,7 @@ import {
   Image,
   ActivityIndicator,
   Alert,
+  InteractionManager,
 } from 'react-native';
 import { Upload, X, FileText, Image as ImageIcon } from 'lucide-react-native';
 import { supabaseCore } from '@/lib/supabase';
@@ -40,6 +41,7 @@ export default function VerificationStep({
   const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([]);
   const [loadingTypes, setLoadingTypes] = useState(true);
   const [uploading, setUploading] = useState<string | null>(null); // typeCode of document being uploaded
+  const [isMounted, setIsMounted] = useState(false);
 
   // Refs for keyboard navigation
   const panNumberRef = useRef<TextInput>(null);
@@ -60,6 +62,14 @@ export default function VerificationStep({
 
   useEffect(() => {
     loadDocumentTypes();
+    // Ensure component is mounted before allowing image picker calls
+    InteractionManager.runAfterInteractions(() => {
+      setIsMounted(true);
+    });
+    
+    return () => {
+      setIsMounted(false);
+    };
   }, []);
 
   const loadDocumentTypes = async () => {
@@ -101,6 +111,12 @@ export default function VerificationStep({
   };
 
   const handlePickDocuments = async (typeCode: string) => {
+    // Prevent calling image picker if component is not fully mounted
+    if (!isMounted) {
+      // Wait a bit for component to be ready
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    
     try {
       setUploading(typeCode);
       const { files, error } = await pickDocuments(true);

@@ -51,13 +51,13 @@ export default function LoginScreen() {
     setError('');
     setDevInfo('');
 
-    if (DEV_MODE) {
+    if (DEV_MODE) {/* 
       // In dev mode, skip Twilio entirely - just proceed to OTP step
       setLoading(false);
       setStep('otp');
       //setDevInfo(`Development Mode: Use OTP ${DEV_OTP}`);
       return;
-    }
+     */}
 
     const { error } = await signInWithOTP(phone);
 
@@ -100,11 +100,8 @@ export default function LoginScreen() {
       >
         <View style={styles.content}>
           <View style={styles.headerContainer}>
-            <ExternalLogo size={170} style={styles.logo} />
-            <View style={styles.titleWrapper}>
-              <Text style={styles.titleSmall}>Welcome to</Text>
-              <Text style={styles.titleLarge}>BookMyVendor</Text>
-            </View>
+            <Text style={styles.titleSmall}>Welcome to</Text>
+            <ExternalLogo size={280} style={styles.logo} />
             {/* <Text style={styles.title}>Welcome to BookMyVendor</Text> */}
             {/* {step !== 'phone' && (
              <Text style={styles.subtitle}>
@@ -128,12 +125,12 @@ export default function LoginScreen() {
             <>
               <View style={styles.inputContainer}>
                 <View style={styles.inputIconContainer}>
-                  <Smartphone size={20} color={Colors.primary.main} />
+                  <Smartphone size={20} color="#FFA500" />
                 </View>
                 <TextInput
                   style={styles.input}
                   placeholder="Mobile Number"
-                  placeholderTextColor={Colors.text.tertiary}
+                  placeholderTextColor="#999"
                   keyboardType="phone-pad"
                   value={phone}
                   onChangeText={setPhone}
@@ -150,9 +147,9 @@ export default function LoginScreen() {
                 activeOpacity={0.8}
               >
                 <LinearGradient
-                  colors={[Colors.primary.main, Colors.primary.light]}
+                  colors={['#FFA500', '#FF8C00']}
                   start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
+                  end={{ x: 0, y: 1 }}
                   style={styles.buttonGradient}
                 >
                   {loading ? (
@@ -167,13 +164,13 @@ export default function LoginScreen() {
             <>
               <View style={styles.inputContainer}>
                 <View style={styles.inputIconContainer}>
-                  <Shield size={20} color={Colors.secondary.main} />
+                  <Shield size={20} color="#6BB6FF" />
                 </View>
                 <TextInput
                   ref={otpInputRef}
                   style={styles.input}
                   placeholder="Enter 6-digit OTP"
-                  placeholderTextColor={Colors.text.tertiary}
+                  placeholderTextColor="#999"
                   keyboardType="number-pad"
                   value={otp}
                   onChangeText={setOtp}
@@ -192,9 +189,9 @@ export default function LoginScreen() {
                 activeOpacity={0.8}
               >
                 <LinearGradient
-                  colors={[Colors.secondary.main, Colors.secondary.light]}
+                  colors={['#87CEEB', '#6BB6FF']}
                   start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
+                  end={{ x: 0, y: 1 }}
                   style={styles.buttonGradient}
                 >
                   {loading ? (
@@ -211,6 +208,7 @@ export default function LoginScreen() {
                   setOtp('');
                   setError('');
                 }}
+                activeOpacity={0.8}
               >
                 <Text style={styles.backButtonText}>Change Phone Number</Text>
               </TouchableOpacity> */}
@@ -284,6 +282,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: Spacing.xxxl,
   },
+  logo: {
+    marginTop: Spacing.md,
+    marginBottom: Spacing.md,
+    ...Shadows.colored,
+  },
   iconCircle: {
     width: 100,
     height: 100,
@@ -310,32 +313,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.neutral.white,
-    borderRadius: BorderRadius.md,
+    borderRadius: 12,
     marginBottom: Spacing.lg,
     paddingHorizontal: Spacing.lg,
-    borderWidth: 2,
-    borderColor: Colors.neutral.light,
-    ...Shadows.small,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    minHeight: 56,
   },
   inputIconContainer: {
     marginRight: Spacing.md,
   },
   input: {
     flex: 1,
-    padding: Spacing.lg,
+    paddingVertical: Spacing.md,
     fontSize: 16,
     color: Colors.text.primary,
   },
   button: {
-    borderRadius: BorderRadius.md,
+    borderRadius: 12,
     overflow: 'hidden',
-    marginBottom: Spacing.lg,
-    ...Shadows.medium,
+    marginBottom: Spacing.md,
+    minHeight: 56,
   },
   buttonGradient: {
-    padding: Spacing.lg,
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 56,
   },
   buttonDisabled: {
     opacity: 0.6,
@@ -354,6 +359,9 @@ const styles = StyleSheet.create({
     color: Colors.primary.main,
     fontSize: 15,
     fontWeight: '600',
+  },
+  secondaryButton: {
+    marginTop: 0,
   },
   errorContainer: {
     backgroundColor: Colors.error.light + '20',

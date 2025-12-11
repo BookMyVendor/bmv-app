@@ -30,6 +30,7 @@ const profileSchema = Yup.object().shape({
 export default function CompleteProfileScreen() {
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [photoError, setPhotoError] = useState<string>('');
   const { user, refreshProfile } = useAuth();
   const router = useRouter();
   
@@ -82,6 +83,7 @@ export default function CompleteProfileScreen() {
         // Resize the image before setting it
         const resizedUri = await resizeImage(result.assets[0].uri);
         setPhotoUri(resizedUri);
+        setPhotoError(''); // Clear error when photo is selected
       }
     } catch (error) {
       console.error('Error picking image:', error);
@@ -108,6 +110,7 @@ export default function CompleteProfileScreen() {
       // Resize the image before setting it
       const resizedUri = await resizeImage(result.assets[0].uri);
       setPhotoUri(resizedUri);
+      setPhotoError(''); // Clear error when photo is selected
     }
   };
 
@@ -148,16 +151,29 @@ export default function CompleteProfileScreen() {
       return;
     }
 
-    console.log('✅ Starting submission process');
-    setUploading(true);
+    // Validate that profile photo is uploaded
+    if (!photoUri) {
+      setPhotoError('Profile photo is required');
+      Alert.alert('Profile Photo Required', 'Please upload a profile photo to continue.');
+      return;
+    }
 
-    try {
-      let fileDataId: string | null = null;
+      console.log('✅ Starting submission process');
+      setUploading(true);
 
-      // Step 1: Upload image to storage bucket (if photo provided)
-      if (photoUri) {
-        console.log('📤 Step 1: Fetching image from URI:', photoUri);
-        const response = await fetch(photoUri);
+      try {
+        let fileDataId: string;
+
+      // Step 1: Upload image to storage bucket (photo is required)
+      console.log('📤 Step 1: Processing image from URI:', photoUri);
+      
+      let fileBytes: Uint8Array;
+      let fileExt: string;
+      let mimeType: string;
+      
+      if (Platform.OS === 'web') {
+        // On web, fetch and convert to blob
+        const response = await fetch(photoUri!);
         if (!response.ok) {
           console.error('❌ Failed to fetch image:', response.status, response.statusText);
           throw new Error('Failed to load image');
@@ -166,52 +182,80 @@ export default function CompleteProfileScreen() {
         
         const blob = await response.blob();
         console.log('✅ Blob created, size:', blob.size);
-        
-        const fileExt = photoUri.split('.').pop() || 'jpg';
-        const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-        const filePath = `profile-photos/${fileName}`;
-        console.log('📤 Step 2: Uploading to storage:', filePath);
-
-        // Upload to storage bucket
-        const { error: uploadError } = await supabaseCore.storage
-          .from('profile_image')
-          .upload(filePath, blob);
-
-        if (uploadError) {
-          console.error('❌ Storage upload error:', uploadError);
-          throw uploadError;
-        }
-        console.log('✅ Image uploaded to storage');
-
-        // Step 2: Create file_storage record
-        console.log('📤 Step 3: Creating file_storage record');
-        const { data: fileData, error: fileError } = await supabaseCms
-          .from('file_storage')
-          .insert({
-            original_filename: fileName,
-            stored_filename: fileName,
-            file_path: filePath,
-            file_size: blob.size,
-            mime_type: blob.type || `image/${fileExt}`,
-            file_extension: fileExt,
-            storage_provider: 'supabase',
-            storage_bucket: 'profile_image',
-            upload_status: 'completed',
-            uploaded_by_type: 'vendor',
-            uploaded_by_id: user?.id,
-          })
-          .select()
-          .single();
-
-        if (fileError) {
-          console.error('❌ file_storage insert error:', fileError);
-          throw fileError;
-        }
-        console.log('✅ file_storage record created:', fileData?.id);
-        fileDataId = fileData.id;
+        fileBytes = new Uint8Array(await blob.arrayBuffer());
+        fileExt = photoUri!.split('.').pop() || 'jpg';
+        mimeType = blob.type || `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`;
       } else {
-        console.log('ℹ️ No photo provided, skipping image upload');
+        // On mobile, use ImageManipulator to get base64, then convert to Uint8Array
+        const manipResult = await ImageManipulator.manipulateAsync(
+          photoUri!,
+          [],
+          {
+            compress: 0.8,
+            format: ImageManipulator.SaveFormat.JPEG,
+            base64: true,
+          }
+        );
+        
+        if (!manipResult.base64) {
+          throw new Error('Failed to process image');
+        }
+        
+        // Convert base64 to Uint8Array
+        const base64Data = manipResult.base64;
+        const byteCharacters = atob(base64Data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        fileBytes = new Uint8Array(byteNumbers);
+        fileExt = 'jpg';
+        mimeType = 'image/jpeg';
       }
+      
+      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+      const filePath = `profile-photos/${fileName}`;
+      console.log('📤 Step 2: Uploading to storage:', filePath);
+
+      // Upload to storage bucket
+      const { error: uploadError } = await supabaseCore.storage
+        .from('profile_image')
+        .upload(filePath, fileBytes, {
+          contentType: mimeType,
+        });
+
+      if (uploadError) {
+        console.error('❌ Storage upload error:', uploadError);
+        throw uploadError;
+      }
+      console.log('✅ Image uploaded to storage');
+
+      // Step 2: Create file_storage record
+      console.log('📤 Step 3: Creating file_storage record');
+      const { data: fileStorageRecord, error: fileError } = await supabaseCms
+        .from('file_storage')
+        .insert({
+          original_filename: fileName,
+          stored_filename: fileName,
+          file_path: filePath,
+          file_size: fileBytes.length,
+          mime_type: mimeType,
+          file_extension: fileExt,
+          storage_provider: 'supabase',
+          storage_bucket: 'profile_image',
+          upload_status: 'completed',
+          uploaded_by_type: 'vendor',
+          uploaded_by_id: user?.id,
+        })
+        .select()
+        .single();
+
+      if (fileError) {
+        console.error('❌ file_storage insert error:', fileError);
+        throw fileError;
+      }
+      console.log('✅ file_storage record created:', fileStorageRecord?.id);
+      fileDataId = fileStorageRecord.id;
 
       // Step 3: Update vendors table
       console.log('📤 Step 4: Updating vendors table');
@@ -219,11 +263,8 @@ export default function CompleteProfileScreen() {
         first_name: values.firstName,
         last_name: values.lastName,
         email: values.email,
+        image_file_id: fileDataId, // Photo is required, so always set
       };
-      
-      if (fileDataId) {
-        updateData.image_file_id = fileDataId;
-      }
 
       const { error: vendorError } = await supabaseCore
         .from('vendors')
@@ -236,30 +277,28 @@ export default function CompleteProfileScreen() {
       }
       console.log('✅ vendors table updated');
 
-      // Step 4: Create vendor_verification_documents entry for profile photo (if photo uploaded)
-      if (fileDataId) {
-        const { data: docTypeData } = await supabaseCore
-          .from('document_types')
-          .select('id')
-          .eq('type_code', 'profile_photo')
-          .maybeSingle();
+      // Step 4: Create vendor_verification_documents entry for profile photo
+      const { data: docTypeData } = await supabaseCore
+        .from('document_types')
+        .select('id')
+        .eq('type_code', 'profile_photo')
+        .maybeSingle();
 
-        if (docTypeData) {
-          // Create verification document entry
-          const { error: verificationDocError } = await supabaseCms
-            .from('vendor_verification_documents')
-            .insert({
-              vendor_id: user?.id,
-              document_type_id: docTypeData.id,
-              file_id: fileDataId,
-              verification_status: 'pending',
-              uploaded_at: new Date().toISOString(),
-            });
+      if (docTypeData) {
+        // Create verification document entry
+        const { error: verificationDocError } = await supabaseCms
+          .from('vendor_verification_documents')
+          .insert({
+            vendor_id: user?.id,
+            document_type_id: docTypeData.id,
+            file_id: fileDataId,
+            verification_status: 'pending',
+            uploaded_at: new Date().toISOString(),
+          });
 
-          // Don't throw error if this fails - it's optional tracking
-          if (verificationDocError) {
-            console.warn('Failed to create verification document entry:', verificationDocError);
-          }
+        // Don't throw error if this fails - it's optional tracking
+        if (verificationDocError) {
+          console.warn('Failed to create verification document entry:', verificationDocError);
         }
       }
 
@@ -322,24 +361,40 @@ export default function CompleteProfileScreen() {
           isValid,
         }) => (
           <>
-            <TouchableOpacity
-              style={styles.photoContainer}
-              onPress={() => {
-                console.log('Photo container pressed');
-                showImageOptions();
-              }}
-              activeOpacity={0.7}
-            >
-              {photoUri ? (
-                <Image source={{ uri: photoUri }} style={styles.photo} />
-              ) : (
-                <View style={styles.photoPlaceholder}>
-                  <Camera size={32} color="#999" />
-                  <Text style={styles.photoPlaceholderText}>Add Photo</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-            
+            <View style={styles.photoSection}>
+              <Text style={styles.label}>
+                Profile Photo <Text style={styles.required}>*</Text>
+              </Text>
+              <TouchableOpacity
+                style={[
+                  styles.photoContainer,
+                  photoError && styles.photoContainerError
+                ]}
+                onPress={() => {
+                  console.log('Photo container pressed');
+                  showImageOptions();
+                }}
+                activeOpacity={0.7}
+              >
+                {photoUri ? (
+                  <Image source={{ uri: photoUri }} style={styles.photo} />
+                ) : (
+                  <View style={[
+                    styles.photoPlaceholder,
+                    photoError && styles.photoPlaceholderError
+                  ]}>
+                    <Camera size={32} color={photoError ? "#FF3B30" : "#999"} />
+                    <Text style={[
+                      styles.photoPlaceholderText,
+                      photoError && styles.photoPlaceholderTextError
+                    ]}>Add Photo</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+              {photoError ? (
+                <Text style={styles.errorText}>{photoError}</Text>
+              ) : null}
+            </View>
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>
@@ -354,9 +409,9 @@ export default function CompleteProfileScreen() {
                 returnKeyType="next"
                 onSubmitEditing={() => lastNameRef.current?.focus()}
               />
-              {touched.firstName && errors.firstName && (
+              {touched.firstName && errors.firstName ? (
                 <Text style={styles.errorText}>{errors.firstName}</Text>
-              )}
+              ) : null}
             </View>
 
             <View style={styles.inputGroup}>
@@ -373,9 +428,9 @@ export default function CompleteProfileScreen() {
                 returnKeyType="next"
                 onSubmitEditing={() => emailRef.current?.focus()}
               />
-              {touched.lastName && errors.lastName && (
+              {touched.lastName && errors.lastName ? (
                 <Text style={styles.errorText}>{errors.lastName}</Text>
-              )}
+              ) : null}
             </View>
 
             <View style={styles.inputGroup}>
@@ -394,9 +449,9 @@ export default function CompleteProfileScreen() {
                 returnKeyType="done"
                 onSubmitEditing={() => formikHandleSubmit()}
               />
-              {touched.email && errors.email && (
+              {touched.email && errors.email ? (
                 <Text style={styles.errorText}>{errors.email}</Text>
-              )}
+              ) : null}
             </View>
 
             <TouchableOpacity
@@ -521,5 +576,22 @@ const styles = StyleSheet.create({
     color: '#FF3B30',
     fontSize: 12,
     marginTop: 4,
+  },
+  photoSection: {
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  photoContainerError: {
+    borderWidth: 2,
+    borderColor: '#FF3B30',
+    borderRadius: 60,
+  },
+  photoPlaceholderError: {
+    borderColor: '#FF3B30',
+    borderWidth: 2,
+    backgroundColor: '#fff5f5',
+  },
+  photoPlaceholderTextError: {
+    color: '#FF3B30',
   },
 });
