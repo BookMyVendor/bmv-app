@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,8 @@ interface DropdownProps {
   error?: string;
   onSelect?: (value: string) => void;
   onChange?: (value: string) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 export default function Dropdown({
@@ -30,8 +32,20 @@ export default function Dropdown({
   error,
   onSelect,
   onChange,
+  open: controlledOpen,
+  onOpenChange,
 }: DropdownProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  
+  const setIsOpen = (open: boolean) => {
+    if (controlledOpen === undefined) {
+      setInternalOpen(open);
+    }
+    if (onOpenChange) {
+      onOpenChange(open);
+    }
+  };
 
   const normalizeOption = (
     option: DropdownOption
@@ -51,6 +65,13 @@ export default function Dropdown({
     if (onChange) onChange(optionValue);
     setIsOpen(false);
   };
+
+  // Sync internal state with controlled prop
+  useEffect(() => {
+    if (controlledOpen !== undefined) {
+      // Controlled mode - state is managed externally
+    }
+  }, [controlledOpen]);
 
   return (
     <View>

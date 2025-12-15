@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,10 +17,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore } from '@/lib/supabase';
-import BasicInformationStep from '@/components/registration/BasicInformationStep';
-import ServicesExperienceStep from '@/components/registration/ServicesExperienceStep';
-import LocationCoverageStep from '@/components/registration/LocationCoverageStep';
-import VerificationStep from '@/components/registration/VerificationStep';
+import BasicInformationStep, { BasicInformationStepRef } from '@/components/registration/BasicInformationStep';
+import ServicesExperienceStep, { ServicesExperienceStepRef } from '@/components/registration/ServicesExperienceStep';
+import LocationCoverageStep, { LocationCoverageStepRef } from '@/components/registration/LocationCoverageStep';
+import VerificationStep, { VerificationStepRef } from '@/components/registration/VerificationStep';
 import PortfolioSocialStep from '@/components/registration/PortfolioSocialStep';
 import { pickMultipleImages, uploadMultipleBusinessImages, uploadMultipleVerificationDocuments, UploadDocumentData } from '@/lib/businessApi';
 import { INDIAN_STATES } from '@/constants/indianStates';
@@ -67,6 +67,10 @@ export default function BusinessRegistrationScreen() {
   const [isRestored, setIsRestored] = useState(false);
   const { user, profile } = useAuth();
   const router = useRouter();
+  const basicInfoStepRef = useRef<BasicInformationStepRef>(null);
+  const servicesStepRef = useRef<ServicesExperienceStepRef>(null);
+  const locationStepRef = useRef<LocationCoverageStepRef>(null);
+  const verificationStepRef = useRef<VerificationStepRef>(null);
 
   // Save form data to AsyncStorage whenever it changes
   useEffect(() => {
@@ -139,6 +143,51 @@ export default function BusinessRegistrationScreen() {
   };
 
   const totalSteps = 5;
+
+  // Check if all mandatory fields are filled for current step
+  const areMandatoryFieldsFilled = (): boolean => {
+    if (currentPage === 0) {
+      // Basic Information step - all fields must be filled AND valid
+      const hasBusinessName = !!(businessData.businessName?.trim());
+      const hasContactName = !!(businessData.contactPersonName?.trim());
+      const hasEmail = !!(businessData.email?.trim()) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(businessData.email);
+      const hasPhone = !!(businessData.phoneNumber?.trim());
+      return hasBusinessName && hasContactName && hasEmail && hasPhone;
+    } else if (currentPage === 1) {
+      // Services & Experience step
+      const hasCategory = !!(businessData.selectedRootCategoryId || (businessData.selectedCategoryIds && businessData.selectedCategoryIds.length > 0));
+      const hasEvents = !!(businessData.selectedEventIds && businessData.selectedEventIds.length > 0);
+      const hasDescription = !!(businessData.businessDescription?.trim());
+      const hasExperience = !!(businessData.yearsOfExperience?.trim());
+      return hasCategory && hasEvents && hasDescription && hasExperience;
+    } else if (currentPage === 2) {
+      // Location & Coverage step
+      const hasAddress = !!(businessData.businessAddress?.trim());
+      const hasPincode = !!(businessData.pincode?.trim()) && businessData.pincode.length === 6;
+      const hasCity = !!(businessData.city?.trim());
+      const hasState = !!(businessData.state?.trim());
+      return hasAddress && hasPincode && hasCity && hasState;
+    } else if (currentPage === 3) {
+      // Verification step
+      const hasPanNumber = !!(businessData.panNumber?.trim());
+      const hasPanDoc = !!(businessData.verificationDocuments?.['pan'] && businessData.verificationDocuments['pan'].length > 0);
+      return hasPanNumber && hasPanDoc;
+    }
+    // Step 4 (Portfolio & Social) has no mandatory fields
+    return true;
+  };
+
+  const handleNextField = () => {
+    if (currentPage === 0) {
+      basicInfoStepRef.current?.focusNextEmptyField();
+    } else if (currentPage === 1) {
+      servicesStepRef.current?.focusNextEmptyField();
+    } else if (currentPage === 2) {
+      locationStepRef.current?.focusNextEmptyField();
+    } else if (currentPage === 3) {
+      verificationStepRef.current?.focusNextEmptyField();
+    }
+  };
 
   const handleNext = () => {
     // Dismiss keyboard before validation
@@ -551,6 +600,7 @@ export default function BusinessRegistrationScreen() {
       subtitle: 'Tell us about your business',
       component: (
         <BasicInformationStep
+          ref={basicInfoStepRef}
           data={businessData}
           onUpdate={updateBusinessData}
           validationErrors={validationErrors}
@@ -562,6 +612,7 @@ export default function BusinessRegistrationScreen() {
       subtitle: 'What services do you provide?',
       component: (
         <ServicesExperienceStep
+          ref={servicesStepRef}
           data={businessData}
           onUpdate={updateBusinessData}
           validationErrors={validationErrors}
@@ -573,6 +624,7 @@ export default function BusinessRegistrationScreen() {
       subtitle: 'Where do you operate?',
       component: (
         <LocationCoverageStep
+          ref={locationStepRef}
           data={businessData}
           onUpdate={updateBusinessData}
           validationErrors={validationErrors}
@@ -583,7 +635,8 @@ export default function BusinessRegistrationScreen() {
       title: 'Verification',
       subtitle: 'Verify your business',
       component: (
-        <VerificationStep 
+        <VerificationStep
+          ref={verificationStepRef}
           data={businessData} 
           onUpdate={updateBusinessData}
           validationErrors={validationErrors}
@@ -663,10 +716,17 @@ export default function BusinessRegistrationScreen() {
         <View style={{ flex: 1 }} />
 
         {currentPage < totalSteps - 1 ? (
-          <TouchableOpacity style={styles.primaryButton} onPress={handleNext}>
-            <Text style={styles.primaryButtonText}>Next Step</Text>
-            <ChevronRight size={20} color="#fff" />
-          </TouchableOpacity>
+          areMandatoryFieldsFilled() ? (
+            <TouchableOpacity style={styles.primaryButton} onPress={handleNext}>
+              <Text style={styles.primaryButtonText}>Next Step</Text>
+              <ChevronRight size={20} color="#fff" />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.nextFieldButton} onPress={handleNextField}>
+              <Text style={styles.nextFieldButtonText}>Continue</Text>
+              <ChevronRight size={20} color="#007AFF" />
+            </TouchableOpacity>
+          )
         ) : (
           <TouchableOpacity
             style={[styles.primaryButton, submitting && styles.buttonDisabled]}
@@ -790,6 +850,22 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.6,
+  },
+  nextFieldButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#f0f0f0',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  nextFieldButtonText: {
+    color: '#007AFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
   field: {
     marginBottom: 16,

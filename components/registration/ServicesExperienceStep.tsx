@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useImperativeHandle, forwardRef } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,10 @@ interface ServicesExperienceStepProps {
   data: any;
   onUpdate: (data: any) => void;
   validationErrors?: Record<string, string>;
+}
+
+export interface ServicesExperienceStepRef {
+  focusNextEmptyField: () => void;
 }
 
 interface Category {
@@ -42,11 +46,11 @@ const EXPERIENCE_OPTIONS = [
   'More than 10 years',
 ];
 
-export default function ServicesExperienceStep({
+const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExperienceStepProps>(({
   data,
   onUpdate,
   validationErrors = {},
-}: ServicesExperienceStepProps) {
+}, ref) => {
   const [allBusinessCategories, setAllBusinessCategories] = useState<Category[]>([]);
   const [eventCategories, setEventCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,9 +65,27 @@ export default function ServicesExperienceStep({
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [eventSearchQuery, setEventSearchQuery] = useState('');
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+  const [isExperienceDropdownOpen, setIsExperienceDropdownOpen] = useState(false);
 
   // Refs for keyboard navigation
   const businessDescriptionRef = useRef<TextInput>(null);
+
+  // Expose method to focus next empty mandatory field
+  useImperativeHandle(ref, () => ({
+    focusNextEmptyField: () => {
+      // Focus first empty mandatory field
+      if (!data.selectedRootCategoryId && (!data.selectedCategoryIds || data.selectedCategoryIds.length === 0)) {
+        // Can't focus dropdown, but we can scroll to it or show modal
+        setIsCategoryModalOpen(true);
+      } else if (!data.selectedEventIds || data.selectedEventIds.length === 0) {
+        setIsEventModalOpen(true);
+      } else if (!data.businessDescription || !data.businessDescription.trim()) {
+        businessDescriptionRef.current?.focus();
+      } else if (!data.yearsOfExperience || !data.yearsOfExperience.trim()) {
+        setIsExperienceDropdownOpen(true);
+      }
+    },
+  }));
 
   useEffect(() => {
     fetchCategories();
@@ -747,6 +769,8 @@ export default function ServicesExperienceStep({
           value={data.yearsOfExperience || ''}
           placeholder="Select experience"
           onChange={(value: string) => handleChange('yearsOfExperience', value)}
+          open={isExperienceDropdownOpen}
+          onOpenChange={setIsExperienceDropdownOpen}
         />
         {validationErrors.yearsOfExperience && (
           <Text style={styles.errorText}>{validationErrors.yearsOfExperience}</Text>
@@ -754,7 +778,11 @@ export default function ServicesExperienceStep({
       </View>
     </ScrollView>
   );
-}
+});
+
+ServicesExperienceStep.displayName = 'ServicesExperienceStep';
+
+export default ServicesExperienceStep;
 
 const styles = StyleSheet.create({
   container: {
