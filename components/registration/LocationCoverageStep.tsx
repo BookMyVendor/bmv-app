@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useImperativeHandle, forwardRef } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,10 @@ interface LocationCoverageStepProps {
   data: any;
   onUpdate: (data: any) => void;
   validationErrors?: Record<string, string>;
+}
+
+export interface LocationCoverageStepRef {
+  focusNextEmptyField: () => void;
 }
 
 const INDIAN_STATES = [
@@ -50,11 +54,11 @@ const INDIAN_STATES = [
   'Puducherry',
 ];
 
-export default function LocationCoverageStep({
+const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverageStepProps>(({
   data,
   onUpdate,
   validationErrors = {},
-}: LocationCoverageStepProps) {
+}, ref) => {
   const [validatingPincode, setValidatingPincode] = useState(false);
   const [pincodeStatus, setPincodeStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
   const [pincodeError, setPincodeError] = useState<string | null>(null);
@@ -66,6 +70,25 @@ export default function LocationCoverageStep({
   const cityRef = useRef<TextInput>(null);
   const localityRef = useRef<TextInput>(null);
   const serviceRadiusRef = useRef<TextInput>(null);
+
+  // Expose method to focus next empty mandatory field
+  useImperativeHandle(ref, () => ({
+    focusNextEmptyField: () => {
+      if (!data.businessAddress || !data.businessAddress.trim()) {
+        businessAddressRef.current?.focus();
+      } else if (!data.pincode || !data.pincode.trim() || data.pincode.length !== 6) {
+        pincodeRef.current?.focus();
+      } else if (!data.city || !data.city.trim()) {
+        cityRef.current?.focus();
+      } else if (!data.state || !data.state.trim()) {
+        // State is a dropdown, can't focus directly
+        // Just focus city if it's empty
+        if (!data.city || !data.city.trim()) {
+          cityRef.current?.focus();
+        }
+      }
+    },
+  }));
 
   const handleChange = (field: string, value: string | number) => {
     onUpdate({ [field]: value });
@@ -302,7 +325,11 @@ export default function LocationCoverageStep({
       </View>
     </ScrollView>
   );
-}
+});
+
+LocationCoverageStep.displayName = 'LocationCoverageStep';
+
+export default LocationCoverageStep;
 
 const styles = StyleSheet.create({
   container: {

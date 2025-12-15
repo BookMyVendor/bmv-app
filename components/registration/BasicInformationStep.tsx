@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useImperativeHandle, forwardRef } from 'react';
 import {
   View,
   Text,
@@ -13,26 +13,47 @@ interface BasicInformationStepProps {
   validationErrors?: Record<string, string>;
 }
 
-export default function BasicInformationStep({
+export interface BasicInformationStepRef {
+  focusNextEmptyField: () => void;
+}
+
+const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformationStepProps>(({
   data,
   onUpdate,
   validationErrors = {},
-}: BasicInformationStepProps) {
+}, ref) => {
   const handleChange = (field: string, value: string) => {
     onUpdate({ [field]: value });
   };
 
   // Refs for keyboard navigation
+  const businessNameRef = useRef<TextInput>(null);
   const contactPersonNameRef = useRef<TextInput>(null);
   const contactPersonRoleRef = useRef<TextInput>(null);
   const emailRef = useRef<TextInput>(null);
   const phoneNumberRef = useRef<TextInput>(null);
+
+  // Expose method to focus next empty mandatory field
+  useImperativeHandle(ref, () => ({
+    focusNextEmptyField: () => {
+      if (!data.businessName || !data.businessName.trim()) {
+        businessNameRef.current?.focus();
+      } else if (!data.contactPersonName || !data.contactPersonName.trim()) {
+        contactPersonNameRef.current?.focus();
+      } else if (!data.email || !data.email.trim()) {
+        emailRef.current?.focus();
+      } else if (!data.phoneNumber || !data.phoneNumber.trim()) {
+        phoneNumberRef.current?.focus();
+      }
+    },
+  }));
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.field}>
         <Text style={styles.label}>Business Name *</Text>
         <TextInput
+          ref={businessNameRef}
           style={[
             styles.input,
             validationErrors.businessName && styles.inputError
@@ -126,7 +147,11 @@ export default function BasicInformationStep({
       </View>
     </ScrollView>
   );
-}
+});
+
+BasicInformationStep.displayName = 'BasicInformationStep';
+
+export default BasicInformationStep;
 
 const styles = StyleSheet.create({
   container: {

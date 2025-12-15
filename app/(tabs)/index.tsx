@@ -331,13 +331,6 @@ export default function DashboardScreen() {
         <View style={styles.businessSection}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>My Businesses</Text>
-            <TouchableOpacity
-              style={styles.addButton}
-              onPress={() => router.push('/business-registration')}
-            >
-              <Plus size={20} color={Colors.neutral.black} strokeWidth={2.5} />
-              <Text style={styles.addButtonText}>Add Businesses</Text>
-            </TouchableOpacity>
           </View>
 
           {businesses.length === 0 ? (
@@ -346,23 +339,6 @@ export default function DashboardScreen() {
               <Text style={styles.emptyStateText}>
                 Register your first business to start receiving leads
               </Text>
-              <TouchableOpacity
-                style={styles.primaryButton}
-                onPress={() => router.push('/business-registration')}
-                activeOpacity={0.8}
-              >
-                <LinearGradient
-                  colors={[Colors.primary.main, Colors.primary.light]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.primaryButtonGradient}
-                >
-                  <Plus size={20} color={Colors.neutral.white} strokeWidth={2.5} />
-                  <Text style={styles.primaryButtonText}>
-                    Register Business
-                  </Text>
-                </LinearGradient>
-              </TouchableOpacity>
             </View>
           ) : (
             <ScrollView
@@ -413,6 +389,27 @@ export default function DashboardScreen() {
               ))}
             </ScrollView>
           )}
+
+          {/* Always show Register Business button */}
+          <View style={styles.primaryButtonContainer}>
+            <TouchableOpacity
+              style={[styles.primaryButton, businesses.length > 0 && styles.primaryButtonWithMargin]}
+              onPress={() => router.push('/business-registration')}
+              activeOpacity={0.8}
+            >
+              <LinearGradient
+                colors={[Colors.purple.main, Colors.purple.light]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.primaryButtonGradient}
+              >
+                <Plus size={20} color={Colors.neutral.black} strokeWidth={2.5} />
+                <Text style={styles.primaryButtonText}>
+                  Register Business
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
         </View>
       </ScrollView>
     </View>
@@ -557,20 +554,29 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 24,
   },
+  primaryButtonContainer: {
+    alignItems: 'center',
+    width: '100%',
+  },
   primaryButton: {
     borderRadius: BorderRadius.md,
     overflow: 'hidden',
     ...Shadows.medium,
+    alignSelf: 'center',
+  },
+  primaryButtonWithMargin: {
+    marginTop: 16,
   },
   primaryButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: Spacing.sm,
     paddingVertical: Spacing.md,
     paddingHorizontal: Spacing.xxxl,
   },
   primaryButtonText: {
-    color: Colors.neutral.white,
+    color: Colors.neutral.black,
     fontSize: 16,
     fontWeight: '700',
   },

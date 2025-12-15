@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,10 @@ interface VerificationStepProps {
   validationErrors?: Record<string, string>;
 }
 
+export interface VerificationStepRef {
+  focusNextEmptyField: () => void;
+}
+
 interface DocumentType {
   id: string;
   type_code: string;
@@ -33,11 +37,11 @@ interface DocumentGroup {
   files: DocumentFile[];
 }
 
-export default function VerificationStep({
+const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(({
   data,
   onUpdate,
   validationErrors = {},
-}: VerificationStepProps) {
+}, ref) => {
   const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([]);
   const [loadingTypes, setLoadingTypes] = useState(true);
   const [uploading, setUploading] = useState<string | null>(null); // typeCode of document being uploaded
@@ -46,6 +50,18 @@ export default function VerificationStep({
   // Refs for keyboard navigation
   const panNumberRef = useRef<TextInput>(null);
   const gstNumberRef = useRef<TextInput>(null);
+
+  // Expose method to focus next empty mandatory field
+  useImperativeHandle(ref, () => ({
+    focusNextEmptyField: () => {
+      if (!data.panNumber || !data.panNumber.trim()) {
+        panNumberRef.current?.focus();
+      } else {
+        // PAN document upload - can't focus directly, but we can scroll to it
+        // For now, just focus PAN number if it's empty
+      }
+    },
+  }));
 
   // Document types we need to support (PAN is first and mandatory)
   const requiredDocumentTypeCodes = ['pan', 'gst', 'aadhaar', 'bank_statement', 'general', 'business_license'];
@@ -338,7 +354,11 @@ export default function VerificationStep({
       </View>
     </ScrollView>
   );
-}
+});
+
+VerificationStep.displayName = 'VerificationStep';
+
+export default VerificationStep;
 
 const styles = StyleSheet.create({
   container: {
