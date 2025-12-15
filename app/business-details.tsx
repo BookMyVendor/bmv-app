@@ -15,7 +15,7 @@ import {
   Dimensions,
   Pressable,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
@@ -34,6 +34,7 @@ import {
   Upload,
   FileText,
   AlertCircle,
+  Package,
 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore } from '@/lib/supabase';
@@ -63,6 +64,7 @@ import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '@/lib/docum
 import { validatePincode } from '@/lib/pincodeValidation';
 import Logo from '@/components/Logo';
 import Dropdown from '@/components/Dropdown';
+import PackageList from '@/components/packages/PackageList';
 import { Colors } from '@/constants/theme';
 
 const EXPERIENCE_OPTIONS = [
@@ -94,7 +96,7 @@ const parseExperienceToNumber = (experienceStr: string): number => {
   return 0;
 };
 
-type SectionType = 'offers' | 'gallery' | 'edit';
+type SectionType = 'offers' | 'gallery' | 'packages' | 'edit';
 
 export default function BusinessDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -129,6 +131,11 @@ export default function BusinessDetailsScreen() {
   const [verificationDocuments, setVerificationDocuments] = useState<VerificationDocument[]>([]);
   const [loadingDocuments, setLoadingDocuments] = useState(false);
   const [uploadingDocument, setUploadingDocument] = useState<string | null>(null); // document type code
+  const [packages, setPackages] = useState<any[]>([]);
+  const [loadingPackages, setLoadingPackages] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [packageToDelete, setPackageToDelete] = useState<any>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Category selection state
   const [allBusinessCategories, setAllBusinessCategories] = useState<any[]>([]);
@@ -174,6 +181,15 @@ export default function BusinessDetailsScreen() {
       loadData();
     }
   }, [id]);
+
+  // Reload packages when screen comes into focus (e.g., after adding a package)
+  useFocusEffect(
+    useCallback(() => {
+      if (id && activeSection === 'packages') {
+        loadPackages();
+      }
+    }, [id, activeSection])
+  );
 
   const loadData = async () => {
     try {
@@ -241,6 +257,9 @@ export default function BusinessDetailsScreen() {
 
       // Load verification documents
       await loadVerificationDocuments();
+      
+      // Load packages
+      await loadPackages();
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to load business details');
     } finally {
@@ -341,6 +360,87 @@ export default function BusinessDetailsScreen() {
   const onRefresh = () => {
     setRefreshing(true);
     loadData();
+  };
+
+  const loadPackages = async () => {
+    if (!id) return;
+    try {
+      setLoadingPackages(true);
+      const { getBusinessPackages } = await import('@/lib/packageApi');
+      const { data, error } = await getBusinessPackages(id);
+      if (error) throw error;
+      // Filter out inactive packages - only show active ones
+      const activePackages = (data || []).filter((pkg: any) => pkg.is_active !== false);
+      setPackages(activePackages);
+    } catch (error: any) {
+      console.error('Error loading packages:', error);
+    } finally {
+      setLoadingPackages(false);
+    }
+  };
+
+  const handleEditPackage = (pkg: any) => {
+    router.push({
+      pathname: '/package-form',
+      params: { id: pkg.id, businessId: id },
+    });
+  };
+
+  const handleDeletePackage = async (pkg: any) => {
+    if (!pkg || !pkg.id) {
+      Alert.alert('Error', 'Invalid package data');
+      return;
+    }
+
+    console.log('handleDeletePackage called with package:', pkg.id, pkg.package_name);
+    setPackageToDelete(pkg);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDeletePackage = async () => {
+    if (!packageToDelete || !packageToDelete.id) {
+      return;
+    }
+
+    try {
+      setDeleting(true);
+      console.log('Delete confirmed. Marking package as inactive:', packageToDelete.id);
+      const { togglePackageStatus } = await import('@/lib/packageApi');
+      console.log('Calling togglePackageStatus with:', packageToDelete.id, false);
+      const result = await togglePackageStatus(packageToDelete.id, false);
+      console.log('togglePackageStatus result:', result);
+      
+      if (result.error) {
+        console.error('Delete package error:', result.error);
+        Alert.alert('Error', result.error.message || 'Failed to delete package. Please try again.');
+        setShowDeleteModal(false);
+        setPackageToDelete(null);
+        return;
+      }
+      
+      console.log('Package marked as inactive successfully');
+      setShowDeleteModal(false);
+      setPackageToDelete(null);
+      await loadPackages();
+    } catch (error: any) {
+      console.error('Error deleting package (catch block):', error);
+      Alert.alert('Error', error.message || 'Failed to delete package. Please try again.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleTogglePackageStatus = async (pkg: any) => {
+    try {
+      const { togglePackageStatus } = await import('@/lib/packageApi');
+      const newStatus = !pkg.is_active;
+      const { error } = await togglePackageStatus(pkg.id, newStatus);
+      if (error) throw error;
+      await loadPackages();
+    } catch (error: any) {
+      console.error('Error toggling package status:', error);
+      Alert.alert('Error', error.message || 'Failed to update package status. Please try again.');
+    }
   };
 
   // Build hierarchical tree structure
@@ -1480,6 +1580,23 @@ export default function BusinessDetailsScreen() {
           <TouchableOpacity
             style={[
               styles.tab,
+              activeSection === 'packages' && styles.activeTab,
+            ]}
+            onPress={() => setActiveSection('packages')}
+          >
+            <Package size={20} color={activeSection === 'packages' ? '#fff' : 'rgba(255,255,255,0.7)'} />
+            <Text
+              style={[
+                styles.tabText,
+                activeSection === 'packages' && styles.activeTabText,
+              ]}
+            >
+              Packages
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.tab,
               activeSection === 'edit' && styles.activeTab,
             ]}
             onPress={() => setActiveSection('edit')}
@@ -1612,6 +1729,88 @@ export default function BusinessDetailsScreen() {
             )}
           </View>
         )}
+
+        {activeSection === 'packages' && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Pricing Packages</Text>
+              <TouchableOpacity
+                style={styles.addButton}
+                onPress={() => router.push({
+                  pathname: '/package-form',
+                  params: { businessId: id },
+                })}
+              >
+                <Plus size={20} color="#fff" />
+                <Text style={styles.addButtonText}>Add Package</Text>
+              </TouchableOpacity>
+            </View>
+            {loadingPackages ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color={Colors.primary.main} />
+              </View>
+            ) : packages.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Package size={48} color={Colors.text.tertiary} />
+                <Text style={styles.emptyStateText}>No packages yet</Text>
+                <Text style={styles.emptyStateSubtext}>
+                  Create your first pricing package to get started
+                </Text>
+              </View>
+            ) : (
+              <PackageList
+                packages={packages}
+                onEdit={handleEditPackage}
+                onDelete={handleDeletePackage}
+                onToggleStatus={() => {}} // Not used anymore, but required by interface
+                loading={loadingPackages}
+              />
+            )}
+          </View>
+        )}
+
+        {/* Delete Confirmation Modal */}
+        <Modal
+          visible={showDeleteModal}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => {
+            setShowDeleteModal(false);
+            setPackageToDelete(null);
+          }}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Delete Package</Text>
+              <Text style={styles.modalMessage}>
+                Are you sure you want to delete "{packageToDelete?.package_name || 'this package'}"? This will mark it as inactive and hide it from the list.
+              </Text>
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.modalButtonCancel]}
+                  onPress={() => {
+                    setShowDeleteModal(false);
+                    setPackageToDelete(null);
+                  }}
+                  disabled={deleting}
+                >
+                  <Text style={styles.modalButtonCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.modalButtonDelete]}
+                  onPress={confirmDeletePackage}
+                  disabled={deleting}
+                >
+                  {deleting ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.modalButtonDeleteText}>Delete</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         {activeSection === 'edit' && (
           <View style={styles.section}>
@@ -2645,6 +2844,12 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
   },
+  emptyStateSubtext: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 4,
+  },
   offersGrid: {
     gap: 16,
   },
@@ -3241,6 +3446,89 @@ const styles = StyleSheet.create({
     right: 12,
     height: '100%',
     justifyContent: 'center',
+  },
+  packagesCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    gap: 12,
+  },
+  packagesCardContent: {
+    flex: 1,
+  },
+  packagesCardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 4,
+  },
+  packagesCardText: {
+    fontSize: 14,
+    color: '#666',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 24,
+    width: '90%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    marginBottom: 12,
+  },
+  modalMessage: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+  },
+  modalButtonCancel: {
+    backgroundColor: '#f0f0f0',
+  },
+  modalButtonCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+  },
+  modalButtonDelete: {
+    backgroundColor: '#FF3B30',
+  },
+  modalButtonDeleteText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
   pincodeErrorText: {
     fontSize: 12,
