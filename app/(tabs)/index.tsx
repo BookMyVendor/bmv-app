@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Plus, TrendingUp, Calendar, Eye, X } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
@@ -62,6 +62,16 @@ export default function DashboardScreen() {
       fetchLeadStats();
     }
   }, [user?.id, selectedStatuses]);
+
+  // Refresh businesses when screen comes into focus (e.g., after editing)
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.id) {
+        fetchBusinesses();
+        fetchLeadStats();
+      }
+    }, [user?.id])
+  );
 
   const fetchBusinesses = async () => {
     if (!user?.id) {
