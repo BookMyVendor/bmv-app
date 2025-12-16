@@ -22,7 +22,7 @@ import ServicesExperienceStep, { ServicesExperienceStepRef } from '@/components/
 import LocationCoverageStep, { LocationCoverageStepRef } from '@/components/registration/LocationCoverageStep';
 import VerificationStep, { VerificationStepRef } from '@/components/registration/VerificationStep';
 import PortfolioSocialStep from '@/components/registration/PortfolioSocialStep';
-import { pickMultipleImages, uploadMultipleBusinessImages, uploadMultipleVerificationDocuments, UploadDocumentData } from '@/lib/businessApi';
+import { pickMultipleImages, uploadMultipleBusinessImages, uploadMultipleVerificationDocuments, UploadDocumentData, uploadBusinessImage, setCoverImage } from '@/lib/businessApi';
 import { INDIAN_STATES } from '@/constants/indianStates';
 import { TextInput } from '@/components/TextInput';
 import { Dropdown } from '@/components/Dropdown';
@@ -451,15 +451,7 @@ export default function BusinessRegistrationScreen() {
         return 0;
       };
 
-      // Step 1: Upload cover photo if provided
-      let coverPhotoUrl = null;
-      if (businessData.coverPhotoUri) {
-        // Upload cover photo to storage and get URL
-        // This should use the same logic as profile photo upload
-        // For now, we'll handle it after business creation
-      }
-
-      // Step 2: Create business with all fields
+      // Step 1: Create business with all fields (cover photo will be uploaded after)
       const { data: createdBusiness, error: businessError } = await supabaseCore
         .from('vendor_businesses')
         .insert({
@@ -483,7 +475,7 @@ export default function BusinessRegistrationScreen() {
           instagram_url: businessData.instagramUrl || null,
           facebook_url: businessData.facebookUrl || null,
           youtube_url: businessData.youtubeUrl || null,
-          cover_photo_url: coverPhotoUrl,
+          cover_photo_url: null, // Will be set after uploading cover image
           years_experience: parseYearsOfExperience(businessData.yearsOfExperience || '0'),
           gst_number: businessData.gstNumber || null,
           status: 'pending',
@@ -495,7 +487,30 @@ export default function BusinessRegistrationScreen() {
       if (businessError) throw businessError;
       if (!createdBusiness) throw new Error('Failed to create business');
 
-      // Step 3: Upload portfolio images if provided (after business is created)
+      // Step 3: Upload cover photo if provided (after business is created)
+      if (businessData.coverPhotoUri) {
+        try {
+          const { data: coverImageData, error: coverError } = await uploadBusinessImage(
+            createdBusiness.id,
+            businessData.coverPhotoUri
+          );
+          if (coverError) {
+            console.error('Error uploading cover photo:', coverError);
+            // Don't fail the entire registration if cover photo fails
+          } else if (coverImageData) {
+            // Set the uploaded image as cover
+            const { error: setCoverError } = await setCoverImage(createdBusiness.id, coverImageData.id);
+            if (setCoverError) {
+              console.error('Error setting cover image:', setCoverError);
+            }
+          }
+        } catch (coverError) {
+          console.error('Error uploading cover photo:', coverError);
+          // Don't fail the entire registration if cover photo fails
+        }
+      }
+
+      // Step 4: Upload portfolio images if provided (after business is created)
       if (businessData.portfolioImages && businessData.portfolioImages.length > 0) {
         try {
           await uploadMultipleBusinessImages(
@@ -511,7 +526,7 @@ export default function BusinessRegistrationScreen() {
         }
       }
 
-      // Step 3.5: Upload verification documents if provided
+      // Step 5: Upload verification documents if provided
       if (businessData.verificationDocuments) {
         try {
           const documentsToUpload: UploadDocumentData[] = [];
@@ -547,12 +562,18 @@ export default function BusinessRegistrationScreen() {
         }
       }
 
-      // Step 4: Insert category mappings
+      // Step 6: Insert category mappings
       const categoryMappings = [];
 
-      // Add selected business category IDs
-      if (businessData.selectedCategoryIds && businessData.selectedCategoryIds.length > 0) {
-        businessData.selectedCategoryIds.forEach((categoryId) => {
+      // Add selected business category IDs (including root categories)
+      const allSelectedCategoryIds = [...(businessData.selectedCategoryIds || [])];
+      // Include root category if selected and not already in the list
+      if (businessData.selectedRootCategoryId && !allSelectedCategoryIds.includes(businessData.selectedRootCategoryId)) {
+        allSelectedCategoryIds.push(businessData.selectedRootCategoryId);
+      }
+      
+      if (allSelectedCategoryIds.length > 0) {
+        allSelectedCategoryIds.forEach((categoryId) => {
           categoryMappings.push({
             vendor_id: user?.id,
             business_id: createdBusiness.id,

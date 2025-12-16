@@ -90,30 +90,30 @@ export default function ReplyModal({
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
-              <View style={styles.reviewSection}>
-                <Text style={styles.reviewLabel}>Review from {customerName}</Text>
-                <Text style={styles.reviewText} numberOfLines={3}>
-                  {reviewText}
-                </Text>
-              </View>
+            <View style={styles.reviewSection}>
+              <Text style={styles.reviewLabel}>Review from {customerName}</Text>
+              <Text style={styles.reviewText} numberOfLines={3}>
+                {reviewText}
+              </Text>
+            </View>
 
-              <View style={styles.inputSection}>
-                <Text style={styles.inputLabel}>Your Response</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="Write your response to this review..."
-                  placeholderTextColor="#999"
-                  multiline
-                  value={replyText}
-                  onChangeText={setReplyText}
-                  maxLength={maxLength}
-                  textAlignVertical="top"
-                  autoFocus
-                />
-                <Text style={styles.characterCount}>
-                  {replyText.length}/{maxLength}
-                </Text>
-              </View>
+            <View style={styles.inputSection}>
+              <Text style={styles.inputLabel}>Your Response</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Write your response to this review..."
+                placeholderTextColor="#999"
+                multiline
+                value={replyText}
+                onChangeText={setReplyText}
+                maxLength={maxLength}
+                textAlignVertical="top"
+                autoFocus
+              />
+              <Text style={styles.characterCount}>
+                {replyText.length}/{maxLength}
+              </Text>
+            </View>
             </ScrollView>
 
             <View style={styles.footer}>

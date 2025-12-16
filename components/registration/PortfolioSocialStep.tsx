@@ -10,8 +10,8 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { Globe, Instagram, Facebook, Youtube, Image, Plus, X } from 'lucide-react-native';
-import { pickMultipleImages, uploadMultipleBusinessImages } from '@/lib/businessApi';
+import { Globe, Instagram, Facebook, Youtube, Image, Plus, X, Star } from 'lucide-react-native';
+import { pickMultipleImages, uploadMultipleBusinessImages, pickImage } from '@/lib/businessApi';
 
 interface PortfolioSocialStepProps {
   data: any;
@@ -23,6 +23,7 @@ export default function PortfolioSocialStep({
   onUpdate,
 }: PortfolioSocialStepProps) {
   const [portfolioImages, setPortfolioImages] = useState<string[]>(data.portfolioImages || []);
+  const [coverPhotoUri, setCoverPhotoUri] = useState<string | null>(data.coverPhotoUri || null);
   const [uploading, setUploading] = useState(false);
 
   // Refs for keyboard navigation
@@ -71,6 +72,23 @@ export default function PortfolioSocialStep({
     newImages.splice(index, 1);
     setPortfolioImages(newImages);
     onUpdate({ portfolioImages: newImages });
+  };
+
+  const handlePickCoverImage = async () => {
+    const { uri, error } = await pickImage();
+    if (error) {
+      Alert.alert('Error', error.message);
+      return;
+    }
+    if (uri) {
+      setCoverPhotoUri(uri);
+      onUpdate({ coverPhotoUri: uri });
+    }
+  };
+
+  const handleRemoveCoverImage = () => {
+    setCoverPhotoUri(null);
+    onUpdate({ coverPhotoUri: undefined });
   };
 
   return (
@@ -156,6 +174,38 @@ export default function PortfolioSocialStep({
           keyboardType="url"
           returnKeyType="done"
         />
+      </View>
+
+      <View style={styles.field}>
+        <View style={styles.labelRow}>
+          <Star size={16} color="#666" />
+          <Text style={styles.label}>Cover Image</Text>
+        </View>
+        <Text style={styles.uploadHintTop}>
+          This image will be displayed as the main cover photo for your business on the dashboard.
+        </Text>
+        
+        {coverPhotoUri ? (
+          <View style={styles.coverImageContainer}>
+            <RNImage source={{ uri: coverPhotoUri }} style={styles.coverImage} />
+            <TouchableOpacity
+              style={styles.removeCoverButton}
+              onPress={handleRemoveCoverImage}
+            >
+              <X size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={styles.coverImagePlaceholder}
+            onPress={handlePickCoverImage}
+            activeOpacity={0.7}
+          >
+            <Image size={32} color="#999" />
+            <Text style={styles.coverImagePlaceholderText}>Select Cover Image</Text>
+            <Text style={styles.coverImagePlaceholderHint}>Recommended: 1200x600px</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.field}>
@@ -336,5 +386,51 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#996600',
     lineHeight: 20,
+  },
+  coverImageContainer: {
+    position: 'relative',
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  coverImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#f0f0f0',
+  },
+  removeCoverButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    backgroundColor: '#ff4444',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  coverImagePlaceholder: {
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    borderStyle: 'dashed',
+    backgroundColor: '#f8f8f8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  coverImagePlaceholderText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+  },
+  coverImagePlaceholderHint: {
+    fontSize: 12,
+    color: '#999',
   },
 });
