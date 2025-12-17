@@ -103,12 +103,27 @@ const getRequestBodyPreview = (body?: BodyInit | null) => {
 
 const getResponsePreview = async (response: Response) => {
   try {
-    const cloned = response.clone();
+    // Check if response body can be cloned
+    // Clone can fail if body is already consumed or response is a redirect
+    if (response.bodyUsed || response.type === 'opaque' || response.type === 'opaqueredirect') {
+      return undefined;
+    }
+    
+    // Try to clone - this can throw if body is already consumed
+    let cloned: Response;
+    try {
+      cloned = response.clone();
+    } catch (cloneError) {
+      // Body is already consumed or can't be cloned
+      return undefined;
+    }
+    
     const text = await cloned.text();
 
     if (!text) return undefined;
     return text.slice(0, 1000);
-  } catch {
+  } catch (error) {
+    // Silently fail - logging is optional and shouldn't break the app
     return undefined;
   }
 };

@@ -65,6 +65,7 @@ export default function LeadsScreen() {
   const [showCityModal, setShowCityModal] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
   const [showBulkActionsModal, setShowBulkActionsModal] = useState(false);
+  const [showFilterScrollIndicator, setShowFilterScrollIndicator] = useState(false);
 
   useEffect(() => {
     if (params.statuses && typeof params.statuses === 'string') {
@@ -517,11 +518,21 @@ export default function LeadsScreen() {
       </View>
 
       <View style={styles.filterBar}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterScrollContent}
-        >
+        <View style={styles.scrollContainer}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterScrollContent}
+            onContentSizeChange={(width) => {
+              setShowFilterScrollIndicator(width > 0);
+            }}
+            onScroll={(event) => {
+              const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+              const canScrollRight = contentOffset.x + layoutMeasurement.width < contentSize.width - 10;
+              setShowFilterScrollIndicator(canScrollRight);
+            }}
+            scrollEventThrottle={16}
+          >
           <FilterChip
             label={
               selectedEventTypes.length > 0
@@ -570,7 +581,20 @@ export default function LeadsScreen() {
               <Text style={styles.clearAllText}>Clear All</Text>
             </TouchableOpacity>
           )}
-        </ScrollView>
+          </ScrollView>
+          {showFilterScrollIndicator && (
+            <View style={styles.scrollIndicatorRight}>
+              <LinearGradient
+                colors={['transparent', 'rgba(255, 255, 255, 0.8)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.scrollGradient}
+              >
+                <ChevronRight size={20} color="#666" />
+              </LinearGradient>
+            </View>
+          )}
+        </View>
       </View>
 
       {loading ? (
@@ -815,9 +839,30 @@ const styles = StyleSheet.create({
     borderBottomColor: '#f0f0f0',
     paddingVertical: 12,
   },
+  scrollContainer: {
+    position: 'relative',
+  },
   filterScrollContent: {
     paddingHorizontal: 20,
     gap: 8,
+    paddingRight: 40, // Add padding for scroll indicator
+  },
+  scrollIndicatorRight: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 40,
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    pointerEvents: 'none',
+  },
+  scrollGradient: {
+    width: 40,
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingRight: 8,
   },
   clearAllButton: {
     paddingHorizontal: 16,
