@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { X, ChevronRight } from 'lucide-react-native';
@@ -17,6 +17,7 @@ export default function IncludedServicesInput({
 }: IncludedServicesInputProps) {
   const [inputValue, setInputValue] = useState('');
   const [showScrollIndicator, setShowScrollIndicator] = useState(false);
+  const suggestionsScrollViewRef = useRef<ScrollView>(null);
 
   const handleAddService = () => {
     const trimmed = inputValue.trim();
@@ -90,6 +91,7 @@ export default function IncludedServicesInput({
           <Text style={styles.suggestionsLabel}>Suggestions:</Text>
           <View style={styles.scrollContainer}>
             <ScrollView 
+              ref={suggestionsScrollViewRef}
               horizontal 
               showsHorizontalScrollIndicator={false} 
               style={styles.suggestions}
@@ -116,7 +118,16 @@ export default function IncludedServicesInput({
               ))}
             </ScrollView>
             {showScrollIndicator && (
-              <View style={styles.scrollIndicatorRight}>
+              <TouchableOpacity
+                style={styles.scrollIndicatorRight}
+                onPress={() => {
+                  suggestionsScrollViewRef.current?.scrollTo({
+                    x: 150,
+                    animated: true,
+                  });
+                }}
+                activeOpacity={0.7}
+              >
                 <LinearGradient
                   colors={['transparent', 'rgba(255, 255, 255, 0.8)']}
                   start={{ x: 0, y: 0 }}
@@ -125,7 +136,7 @@ export default function IncludedServicesInput({
                 >
                   <ChevronRight size={20} color="#666" />
                 </LinearGradient>
-              </View>
+              </TouchableOpacity>
             )}
           </View>
         </View>
@@ -225,7 +236,7 @@ const styles = StyleSheet.create({
     width: 40,
     justifyContent: 'center',
     alignItems: 'flex-end',
-    pointerEvents: 'none',
+    zIndex: 10,
   },
   scrollGradient: {
     width: 40,

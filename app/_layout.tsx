@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
@@ -21,25 +21,54 @@ function RootLayoutNav() {
   const router = useRouter();
   const [initialLoad, setInitialLoad] = useState(true);
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState<boolean | null>(null);
+  const [termsAccepted, setTermsAccepted] = useState<boolean | null>(null);
+  const [isCheckingTerms, setIsCheckingTerms] = useState(false);
 
-  // Check if user has seen onboarding
-  useEffect(() => {
-    const checkOnboarding = async () => {
-      try {
-        const value = await AsyncStorage.getItem(ONBOARDING_STORAGE_KEY);
-        setHasSeenOnboarding(value === 'true');
-      } catch (error) {
-        console.error('Error checking onboarding:', error);
-        setHasSeenOnboarding(false);
-      }
-    };
-    checkOnboarding();
+  // Function to check storage values
+  const checkStorage = useCallback(async () => {
+    try {
+      const [onboardingValue, termsValue] = await Promise.all([
+        AsyncStorage.getItem(ONBOARDING_STORAGE_KEY),
+        AsyncStorage.getItem(TERMS_ACCEPTANCE_KEY),
+      ]);
+      setHasSeenOnboarding(onboardingValue === 'true');
+      setTermsAccepted(termsValue === 'true');
+      console.log('[STORAGE] Terms accepted:', termsValue === 'true', 'Onboarding seen:', onboardingValue === 'true');
+    } catch (error) {
+      console.error('Error checking storage:', error);
+      setHasSeenOnboarding(false);
+      setTermsAccepted(false);
+    }
   }, []);
 
+  // Check storage on mount
   useEffect(() => {
-    // Don't navigate during initial load or while checking onboarding
+    checkStorage();
+  }, [checkStorage]);
+
+  // Refresh terms acceptance state when session/profile changes
+  // This ensures we get the latest value after user accepts terms
+  useEffect(() => {
+    if (session && profile) {
+      // Re-check storage when we have a session/profile
+      // This helps catch updates after terms acceptance
+      checkStorage();
+    }
+  }, [session?.id, profile?.id, checkStorage]);
+
+  // Also refresh when navigating away from terms screen
+  useEffect(() => {
+    if (segments[0] !== 'terms-and-conditions' && session && profile) {
+      // Refresh storage check when we're not on terms screen anymore
+      checkStorage();
+    }
+  }, [segments[0], session, profile, checkStorage]);
+
+  useEffect(() => {
+    // Don't navigate during initial load or while checking storage
     if (loading && initialLoad) return;
-    if (hasSeenOnboarding === null) return;
+    if (hasSeenOnboarding === null || termsAccepted === null) return;
+    if (isCheckingTerms) return;
 
     const inOnboarding = segments[0] === 'onboarding';
     const inAuthGroup = segments[0] === '(auth)';
@@ -93,40 +122,56 @@ function RootLayoutNav() {
 
       // If we have session and profile, handle navigation
       if (session && profile) {
-        // Don't redirect if user is on business-registration or terms screen
-        if (inBusinessReg || inTermsAndConditions) {
+        // Don't redirect if user is on business-registration screen
+        if (inBusinessReg) {
           return;
         }
-        // Check if T&C needs to be accepted (for new users without first_name)
-        // Check AsyncStorage directly to always get fresh value
-        (async () => {
+        
+        // Check AsyncStorage directly for fresh value (don't rely on state)
+        const checkAndNavigate = async () => {
           try {
-            const termsAccepted = await AsyncStorage.getItem(TERMS_ACCEPTANCE_KEY);
-            const needsTermsAcceptance = !profile?.first_name && termsAccepted !== 'true';
+            const termsAcceptedValue = await AsyncStorage.getItem(TERMS_ACCEPTANCE_KEY);
+            const isTermsAccepted = termsAcceptedValue === 'true';
+            
+            // Update state for future checks
+            if (isTermsAccepted !== termsAccepted) {
+              setTermsAccepted(isTermsAccepted);
+            }
+            
+            // If on terms screen, allow it to handle its own navigation
+            // Don't block navigation from terms screen
+            if (inTermsAndConditions) {
+              return;
+            }
+            
+            // Check if T&C needs to be accepted (for new users without first_name)
+            const needsTermsAcceptance = !profile?.first_name && !isTermsAccepted;
+            
             if (needsTermsAcceptance && !inTermsAndConditions) {
+              console.log('[NAV] Redirecting to terms and conditions');
               router.replace('/terms-and-conditions');
               return;
             }
-            if (!profile?.first_name && !inCompleteProfile) {
+            
+            // If terms accepted and no first_name, go to complete profile
+            if (!profile?.first_name && !inCompleteProfile && isTermsAccepted) {
+              console.log('[NAV] Redirecting to complete profile');
               router.replace('/complete-profile');
             } else if (profile?.first_name && (inAuthGroup || inCompleteProfile || inTermsAndConditions)) {
+              console.log('[NAV] Redirecting to tabs');
               router.replace('/(tabs)');
             }
           } catch (error) {
-            console.error('Error checking terms acceptance:', error);
-            // If error, proceed with normal flow
-            if (!profile?.first_name && !inCompleteProfile) {
-              router.replace('/complete-profile');
-            } else if (profile?.first_name && (inAuthGroup || inCompleteProfile || inTermsAndConditions)) {
-              router.replace('/(tabs)');
-            }
+            console.error('[NAV] Error checking terms acceptance:', error);
           }
-        })();
+        };
+        
+        checkAndNavigate();
       }
     };
 
     hideSplashAndNavigate();
-  }, [session, profile, loading, segments, hasSeenOnboarding, initialLoad]);
+  }, [session, profile, loading, segments, hasSeenOnboarding, termsAccepted, initialLoad, isCheckingTerms]);
 
   // Show gradient splash screen during initial load
   if (loading && initialLoad) {

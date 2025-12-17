@@ -1573,6 +1573,7 @@ export default function BusinessDetailsScreen() {
                 styles.tabText,
                 activeSection === 'gallery' && styles.activeTabText,
               ]}
+              numberOfLines={1}
             >
               Gallery
             </Text>
@@ -1590,6 +1591,7 @@ export default function BusinessDetailsScreen() {
                 styles.tabText,
                 activeSection === 'packages' && styles.activeTabText,
               ]}
+              numberOfLines={1}
             >
               Packages
             </Text>
@@ -1607,6 +1609,7 @@ export default function BusinessDetailsScreen() {
                 styles.tabText,
                 activeSection === 'edit' && styles.activeTabText,
               ]}
+              numberOfLines={1}
             >
               Edit Details
             </Text>
@@ -2732,6 +2735,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     backgroundColor: '#52aad9',
+    paddingHorizontal: 4,
   },
   tab: {
     flex: 1,
@@ -2739,8 +2743,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
-    paddingHorizontal: 12,
- 
+    paddingHorizontal: 8,
+    minWidth: 0, // Allow flex shrinking on iOS
     gap: 6,
   },
   activeTab: {
@@ -2750,6 +2754,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.7)',
+    flexShrink: 1, // Allow text to shrink on iOS if needed
   },
   activeTabText: {
     color: '#fff',
@@ -2765,11 +2770,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 20,
+    gap: 12,
+    flexWrap: 'wrap',
   },
   sectionTitle: {
     fontSize: 20,
     fontWeight: '700',
     color: '#1a1a1a',
+    flex: 1,
+    minWidth: 120,
+    marginRight: 8,
   },
   addButton: {
     flexDirection: 'row',
@@ -2788,6 +2798,7 @@ const styles = StyleSheet.create({
   buttonGroup: {
     flexDirection: 'row',
     gap: 8,
+    flexShrink: 0,
   },
   smallButton: {
     paddingVertical: 8,

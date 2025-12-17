@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -66,6 +66,7 @@ export default function LeadsScreen() {
   const [showSortModal, setShowSortModal] = useState(false);
   const [showBulkActionsModal, setShowBulkActionsModal] = useState(false);
   const [showFilterScrollIndicator, setShowFilterScrollIndicator] = useState(false);
+  const filterScrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     if (params.statuses && typeof params.statuses === 'string') {
@@ -520,6 +521,7 @@ export default function LeadsScreen() {
       <View style={styles.filterBar}>
         <View style={styles.scrollContainer}>
           <ScrollView
+            ref={filterScrollViewRef}
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.filterScrollContent}
@@ -583,7 +585,16 @@ export default function LeadsScreen() {
           )}
           </ScrollView>
           {showFilterScrollIndicator && (
-            <View style={styles.scrollIndicatorRight}>
+            <TouchableOpacity
+              style={styles.scrollIndicatorRight}
+              onPress={() => {
+                filterScrollViewRef.current?.scrollTo({
+                  x: 200,
+                  animated: true,
+                });
+              }}
+              activeOpacity={0.7}
+            >
               <LinearGradient
                 colors={['transparent', 'rgba(255, 255, 255, 0.8)']}
                 start={{ x: 0, y: 0 }}
@@ -592,7 +603,7 @@ export default function LeadsScreen() {
               >
                 <ChevronRight size={20} color="#666" />
               </LinearGradient>
-            </View>
+            </TouchableOpacity>
           )}
         </View>
       </View>
@@ -855,7 +866,7 @@ const styles = StyleSheet.create({
     width: 40,
     justifyContent: 'center',
     alignItems: 'flex-end',
-    pointerEvents: 'none',
+    zIndex: 10,
   },
   scrollGradient: {
     width: 40,

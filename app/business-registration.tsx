@@ -71,6 +71,7 @@ export default function BusinessRegistrationScreen() {
   const servicesStepRef = useRef<ServicesExperienceStepRef>(null);
   const locationStepRef = useRef<LocationCoverageStepRef>(null);
   const verificationStepRef = useRef<VerificationStepRef>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
 
   // Save form data to AsyncStorage whenever it changes
   useEffect(() => {
@@ -188,6 +189,12 @@ export default function BusinessRegistrationScreen() {
       verificationStepRef.current?.focusNextEmptyField();
     }
   };
+
+  // Reset scroll position when page changes
+  useEffect(() => {
+    // Scroll to top when page changes
+    scrollViewRef.current?.scrollTo({ y: 0, animated: false });
+  }, [currentPage]);
 
   const handleNext = () => {
     // Dismiss keyboard before validation
@@ -715,6 +722,7 @@ export default function BusinessRegistrationScreen() {
       </View>
 
       <ScrollView
+        ref={scrollViewRef}
         style={styles.pager}
         contentContainerStyle={styles.pagerContent}
         keyboardShouldPersistTaps="handled"
