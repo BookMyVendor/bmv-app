@@ -11,7 +11,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Plus, TrendingUp, Calendar, Eye, X } from 'lucide-react-native';
+import { Plus, TrendingUp, Calendar, Eye, X, ChevronRight } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore, supabaseCrm } from '@/lib/supabase';
 import { STATUS_OPTIONS, LeadStatus } from '@/types/leads';
@@ -52,6 +52,8 @@ export default function DashboardScreen() {
   });
   const [selectedStatuses, setSelectedStatuses] = useState<LeadStatus[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showFilterScrollIndicator, setShowFilterScrollIndicator] = useState(false);
+  const [showBusinessScrollIndicator, setShowBusinessScrollIndicator] = useState(false);
   const { user } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -231,37 +233,61 @@ export default function DashboardScreen() {
         <View style={styles.statsSection}>
           <Text style={styles.sectionTitle}>Lead Statistics</Text>
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.filterScrollContent}
-            style={styles.filterContainer}
-          >
-            {STATUS_OPTIONS.map((status) => (
-              <FilterChip
-                key={status.value}
-                label={`${status.label} (${leadStats.byStatus[status.value]})`}
-                active={selectedStatuses.includes(status.value)}
-                onPress={() => {
-                  setSelectedStatuses((prev) =>
-                    prev.includes(status.value)
-                      ? prev.filter((s) => s !== status.value)
-                      : [...prev, status.value]
-                  );
-                }}
-                showClear={false}
-              />
-            ))}
-            {selectedStatuses.length > 0 && (
-              <TouchableOpacity
-                style={styles.clearAllButton}
-                onPress={() => setSelectedStatuses([])}
-              >
-                <X size={16} color="#FF3B30" />
-                <Text style={styles.clearAllText}>Clear</Text>
-              </TouchableOpacity>
+          <View style={styles.scrollContainer}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterScrollContent}
+              style={styles.filterContainer}
+              onContentSizeChange={(width) => {
+                // Check if content is wider than container
+                setShowFilterScrollIndicator(width > 0);
+              }}
+              onScroll={(event) => {
+                const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+                const canScrollRight = contentOffset.x + layoutMeasurement.width < contentSize.width - 10;
+                setShowFilterScrollIndicator(canScrollRight);
+              }}
+              scrollEventThrottle={16}
+            >
+              {STATUS_OPTIONS.map((status) => (
+                <FilterChip
+                  key={status.value}
+                  label={`${status.label} (${leadStats.byStatus[status.value]})`}
+                  active={selectedStatuses.includes(status.value)}
+                  onPress={() => {
+                    setSelectedStatuses((prev) =>
+                      prev.includes(status.value)
+                        ? prev.filter((s) => s !== status.value)
+                        : [...prev, status.value]
+                    );
+                  }}
+                  showClear={false}
+                />
+              ))}
+              {selectedStatuses.length > 0 && (
+                <TouchableOpacity
+                  style={styles.clearAllButton}
+                  onPress={() => setSelectedStatuses([])}
+                >
+                  <X size={16} color="#FF3B30" />
+                  <Text style={styles.clearAllText}>Clear</Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+            {showFilterScrollIndicator && (
+              <View style={styles.scrollIndicatorRight}>
+                <LinearGradient
+                  colors={['transparent', 'rgba(255, 255, 255, 0.8)']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.scrollGradient}
+                >
+                  <ChevronRight size={20} color="#666" />
+                </LinearGradient>
+              </View>
             )}
-          </ScrollView>
+          </View>
 
           <View style={styles.statsGrid}>
             <TouchableOpacity
@@ -351,53 +377,76 @@ export default function DashboardScreen() {
               </Text>
             </View>
           ) : (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.businessList}
-            >
-              {businesses.map((business) => (
-                <TouchableOpacity
-                  key={business.id}
-                  style={styles.businessCard}
-                  onPress={() =>
-                    router.push(`/business-details?id=${business.id}`)
-                  }
-                >
-                  {business.cover_photo_url ? (
-                    <Image
-                      source={{ uri: business.cover_photo_url }}
-                      style={styles.businessImage}
-                    />
-                  ) : (
-                    <LinearGradient
-                      colors={[Colors.secondary.main, Colors.secondary.light]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={styles.businessImagePlaceholder}
-                    >
-                      <Text style={styles.businessImagePlaceholderText}>
-                        {business.business_name.charAt(0)}
+            <View style={styles.scrollContainer}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.businessList}
+                onContentSizeChange={(width) => {
+                  setShowBusinessScrollIndicator(width > 0);
+                }}
+                onScroll={(event) => {
+                  const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+                  const canScrollRight = contentOffset.x + layoutMeasurement.width < contentSize.width - 10;
+                  setShowBusinessScrollIndicator(canScrollRight);
+                }}
+                scrollEventThrottle={16}
+              >
+                {businesses.map((business) => (
+                  <TouchableOpacity
+                    key={business.id}
+                    style={styles.businessCard}
+                    onPress={() =>
+                      router.push(`/business-details?id=${business.id}`)
+                    }
+                  >
+                    {business.cover_photo_url ? (
+                      <Image
+                        source={{ uri: business.cover_photo_url }}
+                        style={styles.businessImage}
+                      />
+                    ) : (
+                      <LinearGradient
+                        colors={[Colors.secondary.main, Colors.secondary.light]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.businessImagePlaceholder}
+                      >
+                        <Text style={styles.businessImagePlaceholderText}>
+                          {business.business_name.charAt(0)}
+                        </Text>
+                      </LinearGradient>
+                    )}
+                    <View style={styles.businessInfo}>
+                      <Text style={styles.businessName} numberOfLines={1}>
+                        {business.business_name}
                       </Text>
-                    </LinearGradient>
-                  )}
-                  <View style={styles.businessInfo}>
-                    <Text style={styles.businessName} numberOfLines={1}>
-                      {business.business_name}
-                    </Text>
-                    <Text style={styles.businessCategory} numberOfLines={1}>
-                      {business.vendor_service_category}
-                    </Text>
-                    <Text style={styles.businessDescription} numberOfLines={2}>
-                      {business.business_description}
-                    </Text>
-                    <Text style={styles.businessLocation} numberOfLines={1}>
-                      {business.city}, {business.state}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+                      <Text style={styles.businessCategory} numberOfLines={1}>
+                        {business.vendor_service_category}
+                      </Text>
+                      <Text style={styles.businessDescription} numberOfLines={2}>
+                        {business.business_description}
+                      </Text>
+                      <Text style={styles.businessLocation} numberOfLines={1}>
+                        {business.city}, {business.state}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              {showBusinessScrollIndicator && (
+                <View style={styles.scrollIndicatorRight}>
+                  <LinearGradient
+                    colors={['transparent', 'rgba(255, 255, 255, 0.8)']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.scrollGradient}
+                  >
+                    <ChevronRight size={20} color="#666" />
+                  </LinearGradient>
+                </View>
+              )}
+            </View>
           )}
 
           {/* Always show Register Business button */}
@@ -504,12 +553,34 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     opacity: 0.9,
   },
-  filterContainer: {
+  scrollContainer: {
+    position: 'relative',
     marginBottom: 16,
+  },
+  filterContainer: {
+    marginBottom: 0,
   },
   filterScrollContent: {
     paddingVertical: 4,
     gap: 8,
+    paddingRight: 40, // Add padding for scroll indicator
+  },
+  scrollIndicatorRight: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 40,
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    pointerEvents: 'none',
+  },
+  scrollGradient: {
+    width: 40,
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingRight: 8,
   },
   clearAllButton: {
     flexDirection: 'row',
@@ -592,6 +663,7 @@ const styles = StyleSheet.create({
   },
   businessList: {
     gap: 16,
+    paddingRight: 40, // Add padding for scroll indicator
   },
   businessCard: {
     width: 280,

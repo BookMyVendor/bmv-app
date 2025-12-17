@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { ChevronRight } from 'lucide-react-native';
 import { PackageTemplate } from '@/lib/packageTemplates';
 import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
 
@@ -14,6 +16,8 @@ export default function TemplateSelector({
   onSelect,
   selectedTemplateId,
 }: TemplateSelectorProps) {
+  const [showScrollIndicator, setShowScrollIndicator] = useState(false);
+
   if (templates.length === 0) {
     return (
       <View style={styles.emptyState}>
@@ -29,12 +33,22 @@ export default function TemplateSelector({
         Start with a pre-configured template or create from scratch
       </Text>
 
-      <ScrollView 
-        horizontal 
-        showsHorizontalScrollIndicator={false}
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-      >
+      <View style={styles.scrollContainer}>
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          onContentSizeChange={(width) => {
+            setShowScrollIndicator(width > 0);
+          }}
+          onScroll={(event) => {
+            const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+            const canScrollRight = contentOffset.x + layoutMeasurement.width < contentSize.width - 10;
+            setShowScrollIndicator(canScrollRight);
+          }}
+          scrollEventThrottle={16}
+        >
         <TouchableOpacity
           style={[
             styles.templateCard,
@@ -71,7 +85,20 @@ export default function TemplateSelector({
             </TouchableOpacity>
           );
         })}
-      </ScrollView>
+        </ScrollView>
+        {showScrollIndicator && (
+          <View style={styles.scrollIndicatorRight}>
+            <LinearGradient
+              colors={['transparent', 'rgba(255, 255, 255, 0.8)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.scrollGradient}
+            >
+              <ChevronRight size={20} color="#666" />
+            </LinearGradient>
+          </View>
+        )}
+      </View>
     </View>
   );
 }
@@ -91,12 +118,33 @@ const styles = StyleSheet.create({
     color: Colors.text.secondary,
     marginBottom: Spacing.md,
   },
+  scrollContainer: {
+    position: 'relative',
+  },
   scrollView: {
     marginHorizontal: -Spacing.md,
   },
   scrollContent: {
     paddingHorizontal: Spacing.md,
     gap: Spacing.md,
+    paddingRight: 40, // Add padding for scroll indicator
+  },
+  scrollIndicatorRight: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 40,
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    pointerEvents: 'none',
+  },
+  scrollGradient: {
+    width: 40,
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingRight: 8,
   },
   emptyState: {
     padding: Spacing.lg,
