@@ -13,6 +13,7 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 SplashScreen.preventAutoHideAsync();
 
 const ONBOARDING_STORAGE_KEY = 'has_seen_onboarding';
+const TERMS_ACCEPTANCE_KEY = 'vendor_terms_accepted';
 
 function RootLayoutNav() {
   const { session, profile, loading } = useAuth();
@@ -43,6 +44,7 @@ function RootLayoutNav() {
     const inOnboarding = segments[0] === 'onboarding';
     const inAuthGroup = segments[0] === '(auth)';
     const inTabsGroup = segments[0] === '(tabs)';
+    const inTermsAndConditions = segments[0] === 'terms-and-conditions';
     const inCompleteProfile = segments[0] === 'complete-profile';
     const inBusinessReg = segments[0] === 'business-registration';
 
@@ -91,15 +93,35 @@ function RootLayoutNav() {
 
       // If we have session and profile, handle navigation
       if (session && profile) {
-        // Don't redirect if user is on business-registration screen
-        if (inBusinessReg) {
+        // Don't redirect if user is on business-registration or terms screen
+        if (inBusinessReg || inTermsAndConditions) {
           return;
         }
-        if (!profile?.first_name && !inCompleteProfile) {
-          router.replace('/complete-profile');
-        } else if (profile?.first_name && (inAuthGroup || inCompleteProfile)) {
-          router.replace('/(tabs)');
-        }
+        // Check if T&C needs to be accepted (for new users without first_name)
+        // Check AsyncStorage directly to always get fresh value
+        (async () => {
+          try {
+            const termsAccepted = await AsyncStorage.getItem(TERMS_ACCEPTANCE_KEY);
+            const needsTermsAcceptance = !profile?.first_name && termsAccepted !== 'true';
+            if (needsTermsAcceptance && !inTermsAndConditions) {
+              router.replace('/terms-and-conditions');
+              return;
+            }
+            if (!profile?.first_name && !inCompleteProfile) {
+              router.replace('/complete-profile');
+            } else if (profile?.first_name && (inAuthGroup || inCompleteProfile || inTermsAndConditions)) {
+              router.replace('/(tabs)');
+            }
+          } catch (error) {
+            console.error('Error checking terms acceptance:', error);
+            // If error, proceed with normal flow
+            if (!profile?.first_name && !inCompleteProfile) {
+              router.replace('/complete-profile');
+            } else if (profile?.first_name && (inAuthGroup || inCompleteProfile || inTermsAndConditions)) {
+              router.replace('/(tabs)');
+            }
+          }
+        })();
       }
     };
 
@@ -127,6 +149,7 @@ function RootLayoutNav() {
       <Stack.Screen name="onboarding" />
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="terms-and-conditions" />
       <Stack.Screen name="complete-profile" />
       <Stack.Screen name="business-registration" />
       <Stack.Screen name="+not-found" />

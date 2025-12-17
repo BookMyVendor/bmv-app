@@ -66,6 +66,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   const [eventSearchQuery, setEventSearchQuery] = useState('');
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [isExperienceDropdownOpen, setIsExperienceDropdownOpen] = useState(false);
+  const [expandedEventIds, setExpandedEventIds] = useState<Set<string>>(new Set());
 
   // Refs for keyboard navigation
   const businessDescriptionRef = useRef<TextInput>(null);
@@ -117,13 +118,12 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         setAllBusinessCategories(businessCats || []);
       }
 
-      // Fetch only root level event categories (category_level = 1 or parent_category_id is null)
+      // Fetch all event categories with hierarchy info
       const { data: eventCats, error: eventError } = await supabaseCore
         .from('categories')
         .select('id, name, icon, parent_category_id, category_level, sort_order')
         .eq('category_type', 'event')
         .eq('visible', true)
-        .or('parent_category_id.is.null,category_level.eq.1')
         .order('sort_order', { ascending: true });
 
       if (eventError) {
@@ -250,20 +250,30 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     );
   }, [allBusinessCategories]);
 
-  // Handle root category selection
+  // Handle root category selection (kept for backward compatibility)
   const handleRootSelection = (categoryId: string) => {
     setSelectedRootCategoryId(categoryId);
-    // Don't clear child selections when root changes - allow independent selection
+    // Also add to selectedCategoryIds if not already there
+    if (!selectedCategoryIds.includes(categoryId)) {
+      setSelectedCategoryIds((prev) => [...prev, categoryId]);
+    }
     // Expand the selected root to show children
     setExpandedCategoryIds((expanded) => new Set([...expanded, categoryId]));
   };
 
-  // Handle child category selection
+  // Handle category selection (both root and child categories)
   const toggleCategorySelection = (categoryId: string) => {
     setSelectedCategoryIds((prev) => {
       if (prev.includes(categoryId)) {
-        return prev.filter((id) => id !== categoryId);
+        // Remove from selection
+        const newIds = prev.filter((id) => id !== categoryId);
+        // Also clear root selection if this was the selected root
+        if (selectedRootCategoryId === categoryId) {
+          setSelectedRootCategoryId(null);
+        }
+        return newIds;
       } else {
+        // Add to selection
         // Find the category and expand parent chain so it's visible
         const category = allBusinessCategories.find((c) => c.id === categoryId);
         if (category) {
@@ -314,7 +324,13 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       const newExpanded = new Set(currentExpanded);
       let changed = false;
       
-      selectedCategoryIds.forEach((categoryId) => {
+      // Include root category in selectedCategoryIds if it's selected
+      const allSelectedIds = [...selectedCategoryIds];
+      if (selectedRootCategoryId && !allSelectedIds.includes(selectedRootCategoryId)) {
+        allSelectedIds.push(selectedRootCategoryId);
+      }
+      
+      allSelectedIds.forEach((categoryId) => {
         // Expand the category itself if it has children
         const hasChildren = allBusinessCategories.some(
           (c) => c.parent_category_id === categoryId
@@ -341,7 +357,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       
       return changed ? newExpanded : currentExpanded;
     });
-  }, [selectedCategoryIds, allBusinessCategories]);
+  }, [selectedCategoryIds, selectedRootCategoryId, allBusinessCategories]);
 
   // Render category tree recursively
   const renderCategoryTree = (nodes: CategoryNode[], level: number = 0): React.ReactNode => {
@@ -357,10 +373,11 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           <TouchableOpacity
             style={[styles.categoryRow, { paddingLeft: level * 20 + 12 }]}
             onPress={() => {
+              // Allow selecting root categories as checkboxes
+              toggleCategorySelection(node.id);
+              // Also update root selection for backward compatibility
               if (isRoot) {
-                handleRootSelection(node.id);
-              } else {
-                toggleCategorySelection(node.id);
+                setSelectedRootCategoryId(node.id);
               }
             }}
             activeOpacity={0.7}
@@ -382,27 +399,16 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
             )}
             {!hasChildren && <View style={styles.expandButton} />}
 
-            {isRoot ? (
-              <View style={styles.radioButton}>
-                {isRootSelected ? (
-                  <View style={styles.radioButtonSelected}>
-                    <View style={styles.radioButtonInner} />
-                  </View>
-                ) : (
-                  <View style={styles.radioButtonOuter} />
-                )}
-              </View>
-            ) : (
-              <View style={styles.checkbox}>
-                {isSelected ? (
-                  <View style={styles.checkboxSelected}>
-                    <Check size={14} color="#fff" strokeWidth={3} />
-                  </View>
-                ) : (
-                  <View style={styles.checkboxUnselected} />
-                )}
-              </View>
-            )}
+            {/* Use checkbox for all categories, including root */}
+            <View style={styles.checkbox}>
+              {(isSelected || (isRoot && isRootSelected)) ? (
+                <View style={styles.checkboxSelected}>
+                  <Check size={14} color="#fff" strokeWidth={3} />
+                </View>
+              ) : (
+                <View style={styles.checkboxUnselected} />
+              )}
+            </View>
 
             {node.icon && <Text style={styles.categoryIcon}>{node.icon}</Text>}
             <Text
@@ -425,13 +431,19 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     });
   };
 
-  // Get selected categories with full paths
+  // Get selected categories with full paths (including root if selected)
   const selectedCategoriesWithPaths = useMemo(() => {
-    return selectedCategoryIds.map((id) => ({
+    // Combine selectedCategoryIds with root category if selected
+    const allSelectedIds = [...selectedCategoryIds];
+    if (selectedRootCategoryId && !allSelectedIds.includes(selectedRootCategoryId)) {
+      allSelectedIds.push(selectedRootCategoryId);
+    }
+    
+    return allSelectedIds.map((id) => ({
       id,
       path: getCategoryPath(id, allBusinessCategories),
     }));
-  }, [selectedCategoryIds, allBusinessCategories]);
+  }, [selectedCategoryIds, selectedRootCategoryId, allBusinessCategories]);
 
   const handleChange = (field: string, value: any) => {
     onUpdate({ [field]: value });
@@ -445,7 +457,147 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     handleChange('selectedEventIds', newIds);
   };
 
-  // Get selected event names for display
+  // Toggle event expansion
+  const toggleEventExpansion = (eventId: string) => {
+    setExpandedEventIds((expanded) => {
+      const newExpanded = new Set(expanded);
+      if (newExpanded.has(eventId)) {
+        newExpanded.delete(eventId);
+      } else {
+        newExpanded.add(eventId);
+      }
+      return newExpanded;
+    });
+  };
+
+  // Render event category tree recursively
+  const renderEventCategoryTree = (nodes: CategoryNode[], level: number = 0): React.ReactNode => {
+    return nodes.map((node) => {
+      const isSelected = (data.selectedEventIds || []).includes(node.id);
+      const isExpanded = expandedEventIds.has(node.id);
+      const hasChildren = node.children.length > 0;
+
+      return (
+        <View key={node.id} style={styles.categoryItem}>
+          <TouchableOpacity
+            style={[styles.categoryRow, { paddingLeft: level * 20 + 12 }]}
+            onPress={() => toggleEventType(node.id)}
+            activeOpacity={0.7}
+          >
+            {hasChildren && (
+              <TouchableOpacity
+                style={styles.expandButton}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  toggleEventExpansion(node.id);
+                }}
+              >
+                {isExpanded ? (
+                  <ChevronDown size={16} color="#666" />
+                ) : (
+                  <ChevronRight size={16} color="#666" />
+                )}
+              </TouchableOpacity>
+            )}
+            {!hasChildren && <View style={styles.expandButton} />}
+
+            <View style={styles.checkbox}>
+              {isSelected ? (
+                <View style={styles.checkboxSelected}>
+                  <Check size={14} color="#fff" strokeWidth={3} />
+                </View>
+              ) : (
+                <View style={styles.checkboxUnselected} />
+              )}
+            </View>
+            {node.icon && (
+              <Text style={styles.categoryIcon}>{node.icon}</Text>
+            )}
+            <Text
+              style={[
+                styles.eventOptionText,
+                isSelected && styles.eventOptionTextSelected,
+              ]}
+            >
+              {node.name}
+            </Text>
+          </TouchableOpacity>
+          {hasChildren && isExpanded && (
+            <View style={styles.childrenContainer}>
+              {renderEventCategoryTree(node.children, level + 1)}
+            </View>
+          )}
+        </View>
+      );
+    });
+  };
+
+  // Auto-expand selected event categories with children and their parent chains
+  useEffect(() => {
+    setExpandedEventIds((currentExpanded) => {
+      const newExpanded = new Set(currentExpanded);
+      let changed = false;
+      
+      (data.selectedEventIds || []).forEach((eventId) => {
+        // Expand the category itself if it has children
+        const hasChildren = eventCategories.some(
+          (c) => c.parent_category_id === eventId
+        );
+        if (hasChildren && !newExpanded.has(eventId)) {
+          newExpanded.add(eventId);
+          changed = true;
+        }
+        
+        // Expand parent chain so selected child categories are visible
+        const category = eventCategories.find((c) => c.id === eventId);
+        if (category) {
+          let currentParentId: string | null = category.parent_category_id;
+          while (currentParentId) {
+            if (!newExpanded.has(currentParentId)) {
+              newExpanded.add(currentParentId);
+              changed = true;
+            }
+            const parent = eventCategories.find((c) => c.id === currentParentId);
+            currentParentId = parent?.parent_category_id || null;
+          }
+        }
+      });
+      
+      return changed ? newExpanded : currentExpanded;
+    });
+  }, [data.selectedEventIds, eventCategories]);
+
+  // Get event category path (similar to getCategoryPath)
+  const getEventPath = (eventId: string, events: Category[]): string => {
+    const event = events.find((e) => e.id === eventId);
+    if (!event) return '';
+    
+    const path: string[] = [event.name];
+    let currentId: string | null = event.parent_category_id;
+    
+    while (currentId) {
+      const parent = events.find((e) => e.id === currentId);
+      if (parent) {
+        path.unshift(parent.name);
+        currentId = parent.parent_category_id;
+      } else {
+        currentId = null;
+      }
+    }
+    
+    return path.join(' > ');
+  };
+
+  // Get selected events with paths for display
+  const selectedEventsWithPaths = useMemo(() => {
+    const selectedIds = data.selectedEventIds || [];
+    return selectedIds.map((id) => ({
+      id,
+      path: getEventPath(id, eventCategories),
+    }));
+  }, [data.selectedEventIds, eventCategories]);
+
+  // Get selected event names for display (for dropdown text)
   const selectedEventNames = useMemo(() => {
     const selectedIds = data.selectedEventIds || [];
     return eventCategories
@@ -453,24 +605,25 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       .map((cat) => cat.name);
   }, [data.selectedEventIds, eventCategories]);
 
-  // Filter event categories based on search
-  const filteredEventCategories = useMemo(() => {
-    if (!eventSearchQuery.trim()) return eventCategories;
-    const lowerQuery = eventSearchQuery.toLowerCase();
-    return eventCategories.filter((cat) =>
-      cat.name.toLowerCase().includes(lowerQuery)
-    );
-  }, [eventCategories, eventSearchQuery]);
+  // Build event category tree
+  const eventCategoryTree = useMemo(() => {
+    return buildCategoryTree(eventCategories);
+  }, [eventCategories]);
+
+  // Filter event tree based on search
+  const filteredEventTree = useMemo(() => {
+    return filterCategories(eventCategoryTree, eventSearchQuery);
+  }, [eventCategoryTree, eventSearchQuery]);
 
   // Get display text for event dropdown
   const getEventDropdownDisplayText = (): string => {
-    if (selectedEventNames.length === 0) {
+    if (selectedEventsWithPaths.length === 0) {
       return 'Select event types';
     }
-    if (selectedEventNames.length === 1) {
-      return selectedEventNames[0];
+    if (selectedEventsWithPaths.length === 1) {
+      return selectedEventsWithPaths[0].path;
     }
-    return `${selectedEventNames.length} events selected`;
+    return `${selectedEventsWithPaths.length} events selected`;
   };
 
   if (loading) {
@@ -620,27 +773,28 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         )}
 
         {/* Selected Events Display */}
-        {selectedEventNames.length > 0 && (
+        {selectedEventsWithPaths.length > 0 && (
           <View style={styles.selectedContainer}>
             <Text style={styles.selectedLabel}>
-              Selected Events ({selectedEventNames.length}):
+              Selected Events ({selectedEventsWithPaths.length}):
             </Text>
-            {eventCategories
-              .filter((cat) => (data.selectedEventIds || []).includes(cat.id))
-              .map((eventCategory) => (
-                <View key={eventCategory.id} style={styles.selectedChip}>
+            {selectedEventsWithPaths.map((item) => {
+              const eventCategory = eventCategories.find((cat) => cat.id === item.id);
+              return (
+                <View key={item.id} style={styles.selectedChip}>
                   <Text style={styles.selectedChipText}>
-                    {eventCategory.icon ? `${eventCategory.icon} ` : ''}
-                    {eventCategory.name}
+                    {eventCategory?.icon ? `${eventCategory.icon} ` : ''}
+                    {item.path}
                   </Text>
                   <TouchableOpacity
-                    onPress={() => toggleEventType(eventCategory.id)}
+                    onPress={() => toggleEventType(item.id)}
                     style={styles.removeButton}
                   >
                     <X size={16} color="#fff" />
                   </TouchableOpacity>
                 </View>
-              ))}
+              );
+            })}
           </View>
         )}
 
@@ -678,47 +832,16 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
                 onChangeText={setEventSearchQuery}
               />
 
-              {/* Event List */}
+              {/* Event Category Tree */}
               <ScrollView 
                 style={styles.modalCategoryTree}
                 nestedScrollEnabled={true}
                 showsVerticalScrollIndicator={true}
               >
-                {filteredEventCategories.length === 0 ? (
+                {filteredEventTree.length === 0 ? (
                   <Text style={styles.emptyText}>No events found</Text>
                 ) : (
-                  filteredEventCategories.map((eventCategory) => {
-                    const isSelected = (data.selectedEventIds || []).includes(eventCategory.id);
-                    return (
-                      <TouchableOpacity
-                        key={eventCategory.id}
-                        style={styles.eventOption}
-                        onPress={() => toggleEventType(eventCategory.id)}
-                        activeOpacity={0.7}
-                      >
-                        <View style={styles.checkbox}>
-                          {isSelected ? (
-                            <View style={styles.checkboxSelected}>
-                              <Check size={14} color="#fff" strokeWidth={3} />
-                            </View>
-                          ) : (
-                            <View style={styles.checkboxUnselected} />
-                          )}
-                        </View>
-                        {eventCategory.icon && (
-                          <Text style={styles.categoryIcon}>{eventCategory.icon}</Text>
-                        )}
-                        <Text
-                          style={[
-                            styles.eventOptionText,
-                            isSelected && styles.eventOptionTextSelected,
-                          ]}
-                        >
-                          {eventCategory.name}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })
+                  renderEventCategoryTree(filteredEventTree)
                 )}
               </ScrollView>
 
