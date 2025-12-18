@@ -13,7 +13,7 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, Phone, Mail, Calendar, MapPin, Users, DollarSign, Building2, CreditCard as Edit, Trash2, Clock, Tag, FileText, MessageSquare, CircleCheck as CheckCircle, Circle as XCircle } from 'lucide-react-native';
+import { ArrowLeft, Phone, Mail, Calendar, MapPin, Users, DollarSign, Building2, CreditCard as Edit, Clock, Tag, FileText, MessageSquare, CircleCheck as CheckCircle, Circle as XCircle } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore, supabaseCrm } from '@/lib/supabase';
 import Logo from '@/components/Logo';
@@ -222,33 +222,7 @@ export default function LeadDetailScreen() {
     }
   };
 
-  const handleDeleteLead = () => {
-    Alert.alert(
-      'Delete Lead',
-      'Are you sure you want to delete this lead? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { error } = await supabaseCrm.from('customer_leads').delete().eq('id', id);
-
-              if (error) throw error;
-
-              Alert.alert('Success', 'Lead deleted successfully');
-              router.back();
-            } catch (error) {
-              console.error('Error deleting lead:', error);
-              Alert.alert('Error', 'Failed to delete lead');
-            }
-          },
-        },
-      ]
-    );
-  };
-
+ 
   const startEditing = (field: string, currentValue: string) => {
     setEditingField(field);
     setEditValue(currentValue || '');
@@ -358,9 +332,6 @@ export default function LeadDetailScreen() {
         </TouchableOpacity>
         <Logo size={38} style={styles.headerLogo} />
         <Text style={styles.headerTitle}>Lead Details</Text>
-        <TouchableOpacity onPress={handleDeleteLead} style={styles.deleteBtn}>
-          <Trash2 size={20} color="#FF3B30" strokeWidth={2} />
-        </TouchableOpacity>
       </View>
 
       <View style={styles.heroCard}>
@@ -733,9 +704,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1a1a1a',
     flex: 1,
-  },
-  deleteBtn: {
-    padding: 4,
   },
   heroCard: {
     backgroundColor: '#fff',
