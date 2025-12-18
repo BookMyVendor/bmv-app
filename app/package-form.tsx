@@ -251,7 +251,12 @@ export default function PackageFormScreen() {
     }
 
     if (currentStep < STEPS.length - 1) {
-      setCurrentStep(currentStep + 1);
+      // Calculate next step, skipping "Category Fields" when there are no fields
+      let nextStep = currentStep + 1;
+      if (nextStep === 5 && categoryFormFields.length === 0) {
+        nextStep = 6;
+      }
+      setCurrentStep(nextStep);
     } else {
       handleSave();
     }
@@ -259,7 +264,12 @@ export default function PackageFormScreen() {
 
   const handlePrevious = () => {
     if (currentStep > 1) {
-      setCurrentStep(currentStep - 1);
+      // Calculate previous step, skipping "Category Fields" when there are no fields
+      let previousStep = currentStep - 1;
+      if (previousStep === 5 && categoryFormFields.length === 0) {
+        previousStep = 4;
+      }
+      setCurrentStep(previousStep);
     }
   };
 

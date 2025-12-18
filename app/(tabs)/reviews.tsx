@@ -586,7 +586,7 @@ export default function ReviewsScreen() {
           <Logo size={38} style={styles.headerLogo} />
           <Text style={styles.headerTitle}>Reviews</Text>
         </View>
-      </View>
+        </View>
 
       {loading ? (
         <View style={styles.loadingContainer}>

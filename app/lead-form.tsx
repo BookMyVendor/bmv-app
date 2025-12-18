@@ -13,6 +13,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Save } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { supabaseCore, supabaseCrm } from '@/lib/supabase';
 import {
   BUDGET_RANGES,
@@ -62,6 +63,8 @@ export default function LeadFormScreen() {
   const eventLocationRef = useRef<TextInput>(null);
   const guestCountRef = useRef<TextInput>(null);
   const eventDurationRef = useRef<TextInput>(null);
+
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   useEffect(() => {
     if (user?.id) {
@@ -177,7 +180,7 @@ export default function LeadFormScreen() {
       const eventDate = new Date(formData.event_date);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      
+
       if (isNaN(eventDate.getTime())) {
         newErrors.event_date = 'Please enter a valid date (YYYY-MM-DD)';
       } else if (eventDate < today) {
@@ -223,7 +226,7 @@ export default function LeadFormScreen() {
       if (isEditMode) {
         // Don't update vendor_id on edit - it should remain the same
         const { vendor_id, ...updateData } = leadData;
-        
+
         const { error } = await supabaseCrm
           .from('customer_leads')
           .update(updateData)
@@ -278,6 +281,32 @@ export default function LeadFormScreen() {
       </View>
     );
   }
+  const formatDateInput = (text: string) => {
+    // remove everything except numbers
+    let cleaned = text.replace(/[^0-9]/g, '');
+
+    // limit to YYYYMMDD (8 digits)
+    cleaned = cleaned.slice(0, 8);
+
+    // format as YYYY-MM-DD
+    let formatted = cleaned;
+    if (cleaned.length >= 5) {
+      formatted = `${cleaned.slice(0, 4)}-${cleaned.slice(4)}`;
+    }
+    if (cleaned.length >= 7) {
+      formatted = `${cleaned.slice(0, 4)}-${cleaned.slice(4, 6)}-${cleaned.slice(6)}`;
+    }
+
+    return formatted;
+  };
+
+  const formatPhoneInput = (text: string) => {
+    // remove non-numeric characters
+    const digitsOnly = text.replace(/[^0-9]/g, '');
+
+    // limit to 10 digits
+    return digitsOnly.slice(0, 10);
+  };
 
   return (
     <View style={styles.container}>
@@ -344,14 +373,18 @@ export default function LeadFormScreen() {
             <TextInput
               ref={customerPhoneRef}
               style={[styles.input, errors.customer_phone && styles.inputError]}
-              placeholder="Enter phone number"
+              placeholder="Enter 10-digit mobile number"
               placeholderTextColor="#999"
               value={formData.customer_phone}
-              onChangeText={(text) => updateFormData('customer_phone', text)}
-              keyboardType="phone-pad"
+              onChangeText={(text) =>
+                updateFormData('customer_phone', formatPhoneInput(text))
+              }
+              keyboardType="number-pad"
+              maxLength={10}
               returnKeyType="next"
               onSubmitEditing={() => customerEmailRef.current?.focus()}
             />
+
             {errors.customer_phone && (
               <Text style={styles.errorText}>{errors.customer_phone}</Text>
             )}
@@ -394,20 +427,61 @@ export default function LeadFormScreen() {
             <Text style={styles.label}>
               Event Date <Text style={styles.required}>*</Text>
             </Text>
-            <TextInput
-              ref={eventDateRef}
-              style={[styles.input, errors.event_date && styles.inputError]}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor="#999"
-              value={formData.event_date}
-              onChangeText={(text) => updateFormData('event_date', text)}
-              returnKeyType="next"
-              onSubmitEditing={() => eventLocationRef.current?.focus()}
-            />
+
+            {Platform.OS === 'web' ? (
+              <TextInput
+                ref={eventDateRef}
+                style={[styles.input, errors.event_date && styles.inputError]}
+                placeholder="YYYY-MM-DD"
+                value={formData.event_date}
+                keyboardType="numeric"
+                maxLength={10}
+                onChangeText={(text) =>
+                  updateFormData('event_date', formatDateInput(text))
+                }
+              />
+            ) : (
+              <TouchableOpacity onPress={() => setShowDatePicker(true)}>
+                <TextInput
+                  ref={eventDateRef}
+                  style={[styles.input, errors.event_date && styles.inputError]}
+                  placeholder="Select event date"
+                  value={formData.event_date}
+                  editable={false}
+                  pointerEvents="none"
+                />
+              </TouchableOpacity>
+            )}
+
+
             {errors.event_date && (
               <Text style={styles.errorText}>{errors.event_date}</Text>
             )}
           </View>
+
+          {showDatePicker && Platform.OS !== 'web' && (
+            <DateTimePicker
+              value={
+                formData.event_date
+                  ? new Date(formData.event_date)
+                  : new Date()
+              }
+              mode="date"
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              minimumDate={new Date()}
+              onChange={(event, selectedDate) => {
+                setShowDatePicker(false);
+
+                if (selectedDate) {
+                  const formattedDate = selectedDate
+                    .toISOString()
+                    .split('T')[0];
+
+                  updateFormData('event_date', formattedDate);
+                }
+              }}
+            />
+          )}
 
           <View style={styles.formGroup}>
             <Text style={styles.label}>Event Location</Text>
