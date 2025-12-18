@@ -430,27 +430,19 @@ export default function LeadsScreen() {
 
   return (
     <View style={styles.container}>
-            <View style={[styles.header, { backgroundColor: 'rgba(138, 151, 209, 0.02)' }, { paddingTop: insets.top + 20, paddingLeft: insets.top + 15, backgroundColor: '#fff' }]}>
-
-      {/* <LinearGradient
-        colors={[Colors.secondary.main, Colors.secondary.light]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={[styles.header, { paddingTop: insets.top + 20 }]}
-      > */}
-        <View style={styles.headerTitleContainer}>
-        <Logo
-         size={48}
-         style={{ ...styles.headerLogo, transform: [{ scale: 1.2}] }}
-/>
-          <Text style={styles.headerTitle}>Leads</Text>
-          {timeFilter !== 'all' && (
-            <View style={styles.timeFilterBadge}>
-              <Text style={styles.timeFilterBadgeText}>
-                {timeFilter === 'month' ? 'This Month' : 'Today'}
-              </Text>
-            </View>
-          )}
+      <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+        <View style={styles.headerLeft}>
+          <Logo size={38} style={styles.headerLogo} />
+          <View style={styles.headerTitleRow}>
+            <Text style={styles.headerTitle}>Leads</Text>
+            {timeFilter !== 'all' && (
+              <View style={styles.timeFilterBadge}>
+                <Text style={styles.timeFilterBadgeText}>
+                  {timeFilter === 'month' ? 'This Month' : 'Today'}
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
         <View style={styles.headerActions}>
           {bulkSelectMode ? (
@@ -461,24 +453,23 @@ export default function LeadsScreen() {
                 setSelectedLeads([]);
               }}
             >
-              <X size={20} color={Colors.neutral.white} strokeWidth={2} />
+              <X size={20} color="#007AFF" strokeWidth={2} />
             </TouchableOpacity>
           ) : (
             <>
               <TouchableOpacity style={styles.headerButton} onPress={exportLeads}>
-                <Download size={20} color={Colors.neutral.white} strokeWidth={2} />
+                <Download size={20} color="#007AFF" strokeWidth={2} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.headerButton}
                 onPress={() => setShowSortModal(true)}
               >
-                <ArrowUpDown size={20} color={Colors.neutral.white} strokeWidth={2} />
+                <ArrowUpDown size={20} color="#007AFF" strokeWidth={2} />
               </TouchableOpacity>
             </>
           )}
         </View>
-        </View>
-      {/* </LinearGradient> */}
+      </View>
 
       {bulkSelectMode && selectedLeads.length > 0 && (
         <View style={styles.bulkActionsBar}>
@@ -749,38 +740,44 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Spacing.xxxl,
-    paddingBottom: Spacing.lg,
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
-  headerTitleContainer: {
+  headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
+    gap: 12,
+    flex: 1,
   },
   headerLogo: {
-    marginRight: Spacing.sm,
+    marginRight: 8,
     marginVertical: 0,
   },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   headerTitle: {
-    fontSize: 28,
+    fontSize: 18,
     fontWeight: '700',
-    textAlignVertical: 'center',
-    height: '100%',
-    color: Colors.neutral.black,
+    color: '#1a1a1a',
   },
   timeFilterBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    backgroundColor: '#E8F1FF',
     paddingHorizontal: Spacing.md,
     paddingVertical: 6,
     borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.neutral.white,
   },
   timeFilterBadgeText: {
     fontSize: 11,
     fontWeight: '700',
-    color: Colors.neutral.white,
+    color: '#1a1a1a',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -792,7 +789,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    backgroundColor: '#f5f5f5',
     justifyContent: 'center',
     alignItems: 'center',
   },

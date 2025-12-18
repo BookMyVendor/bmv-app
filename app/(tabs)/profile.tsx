@@ -381,32 +381,20 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: insets.top + 20, paddingLeft: insets.top + 15, backgroundColor: '#fff' }]}>
-
-        {/* <LinearGradient
-        colors={[Colors.info.main, Colors.info.light]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={[styles.header, { paddingTop: insets.top + 20 }]}
-      > */}
-        <View style={styles.headerContent}>
-          <Logo
-            size={48}
-            style={{ ...styles.headerLogo, transform: [{ scale: 1.2 }] }}
-          />
+      <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+        <View style={styles.headerLeft}>
+          <Logo size={38} style={styles.headerLogo} />
           <Text style={styles.headerTitle}>Profile</Text>
         </View>
         <TouchableOpacity
           style={styles.signOutButton}
           onPress={() => handleSignOut()}
-          activeOpacity={0.7} // This will help you see if press is registering
+          activeOpacity={0.7}
           disabled={false}
         >
-
           <LogOut size={20} color={Colors.neutral.black} strokeWidth={2} />
         </TouchableOpacity>
       </View>
-      {/* </LinearGradient> */}
 
       <KeyboardAvoidingView
         style={styles.keyboardView}
@@ -559,31 +547,32 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(138, 151, 209, 0.02)',
   },
   header: {
-    paddingHorizontal: Spacing.xxxl,
-    paddingBottom: Spacing.xl,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-   
-  },
-  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   headerLogo: {
-    marginRight: Spacing.sm,
+    marginRight: 8,
     marginVertical: 0,
   },
   headerTitle: {
-    fontSize: 28,
+    fontSize: 18,
     fontWeight: '700',
-    textAlignVertical: 'center',
-    height: '100%',
-    color: Colors.neutral.black,
+    color: '#1a1a1a',
   },
   signOutButton: {
     padding: Spacing.sm,
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    backgroundColor: '#f5f5f5',
     borderRadius: 20,
     width: 40,
     height: 40,
