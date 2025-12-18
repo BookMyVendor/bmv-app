@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -54,6 +54,8 @@ export default function DashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [showFilterScrollIndicator, setShowFilterScrollIndicator] = useState(false);
   const [showBusinessScrollIndicator, setShowBusinessScrollIndicator] = useState(false);
+  const filterScrollViewRef = useRef<ScrollView>(null);
+  const businessScrollViewRef = useRef<ScrollView>(null);
   const { user } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -235,6 +237,7 @@ export default function DashboardScreen() {
 
           <View style={styles.scrollContainer}>
             <ScrollView
+              ref={filterScrollViewRef}
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.filterScrollContent}
@@ -276,7 +279,16 @@ export default function DashboardScreen() {
               )}
             </ScrollView>
             {showFilterScrollIndicator && (
-              <View style={styles.scrollIndicatorRight}>
+              <TouchableOpacity
+                style={styles.scrollIndicatorRight}
+                onPress={() => {
+                  filterScrollViewRef.current?.scrollTo({
+                    x: 200,
+                    animated: true,
+                  });
+                }}
+                activeOpacity={0.7}
+              >
                 <LinearGradient
                   colors={['transparent', 'rgba(255, 255, 255, 0.8)']}
                   start={{ x: 0, y: 0 }}
@@ -285,7 +297,7 @@ export default function DashboardScreen() {
                 >
                   <ChevronRight size={20} color="#666" />
                 </LinearGradient>
-              </View>
+              </TouchableOpacity>
             )}
           </View>
 
@@ -379,6 +391,7 @@ export default function DashboardScreen() {
           ) : (
             <View style={styles.scrollContainer}>
               <ScrollView
+                ref={businessScrollViewRef}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.businessList}
@@ -435,7 +448,16 @@ export default function DashboardScreen() {
                 ))}
               </ScrollView>
               {showBusinessScrollIndicator && (
-                <View style={styles.scrollIndicatorRight}>
+                <TouchableOpacity
+                  style={styles.scrollIndicatorRight}
+                  onPress={() => {
+                    businessScrollViewRef.current?.scrollTo({
+                      x: 300,
+                      animated: true,
+                    });
+                  }}
+                  activeOpacity={0.7}
+                >
                   <LinearGradient
                     colors={['transparent', 'rgba(255, 255, 255, 0.8)']}
                     start={{ x: 0, y: 0 }}
@@ -444,7 +466,7 @@ export default function DashboardScreen() {
                   >
                     <ChevronRight size={20} color="#666" />
                   </LinearGradient>
-                </View>
+                </TouchableOpacity>
               )}
             </View>
           )}
@@ -573,7 +595,7 @@ const styles = StyleSheet.create({
     width: 40,
     justifyContent: 'center',
     alignItems: 'flex-end',
-    pointerEvents: 'none',
+    zIndex: 10,
   },
   scrollGradient: {
     width: 40,
