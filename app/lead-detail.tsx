@@ -13,7 +13,7 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, Phone, Mail, Calendar, MapPin, Users, DollarSign, Building2, CreditCard as Edit, Clock, Tag, FileText, MessageSquare, CircleCheck as CheckCircle, Circle as XCircle } from 'lucide-react-native';
+import { ArrowLeft, Phone, Mail, Calendar, MapPin, Users, Building2, CreditCard as Edit, Clock, Tag, FileText, MessageSquare, CircleCheck as CheckCircle, Circle as XCircle } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore, supabaseCrm } from '@/lib/supabase';
 import Logo from '@/components/Logo';
@@ -96,7 +96,7 @@ export default function LeadDetailScreen() {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      
+
       // Map lead_communications to LeadActivity format
       const mappedActivities = (data || []).map((comm) => ({
         id: comm.id,
@@ -108,7 +108,7 @@ export default function LeadDetailScreen() {
         created_at: comm.created_at,
         metadata: comm.attachment_file_id ? { attachment_file_id: comm.attachment_file_id } : null,
       }));
-      
+
       setActivities(mappedActivities);
     } catch (error) {
       console.error('Error fetching activities:', error);
@@ -222,7 +222,7 @@ export default function LeadDetailScreen() {
     }
   };
 
- 
+
   const startEditing = (field: string, currentValue: string) => {
     setEditingField(field);
     setEditValue(currentValue || '');
@@ -246,7 +246,7 @@ export default function LeadDetailScreen() {
         const eventDate = new Date(editValue);
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
+
         if (isNaN(eventDate.getTime())) {
           Alert.alert('Error', 'Please enter a valid date (YYYY-MM-DD)');
           return;
@@ -255,7 +255,7 @@ export default function LeadDetailScreen() {
           return;
         }
       }
-      
+
       const { error } = await supabaseCrm
         .from('customer_leads')
         .update(updateData)
@@ -495,13 +495,14 @@ export default function LeadDetailScreen() {
 
               {lead.budget_range && (
                 <View style={styles.infoRow}>
-                  <DollarSign size={20} color="#666" />
+                  <Text style={{ fontSize: 20, color: '#666', fontWeight: '600' }}>₹</Text>
                   <View style={styles.infoContent}>
                     <Text style={styles.infoLabel}>Budget Range</Text>
-                    <Text style={styles.infoValue}>{lead.budget_range}</Text>
+                    <Text style={styles.infoValue}>₹ {lead.budget_range}</Text>
                   </View>
                 </View>
               )}
+
             </View>
 
             {lead.requirements && (
