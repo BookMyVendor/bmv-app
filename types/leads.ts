@@ -123,13 +123,13 @@ export const PRIORITY_OPTIONS: { value: LeadPriority; label: string; color: stri
 ];
 
 export const BUDGET_RANGES = [
-  'Under $1,000',
-  '$1,000 - $2,500',
-  '$2,500 - $5,000',
-  '$5,000 - $10,000',
-  '$10,000 - $25,000',
-  '$25,000 - $50,000',
-  '$50,000+',
+  'Under ₹1,000',
+  '₹1,000 - ₹2,500',
+  '₹2,500 - ₹5,000',
+  '₹5,000 - ₹10,000',
+  '₹10,000 - ₹25,000',
+  '₹25,000 - ₹50,000',
+  '₹50,000+',
   'Not specified',
 ] as const;
 

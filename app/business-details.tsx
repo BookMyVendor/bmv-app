@@ -19,7 +19,7 @@ import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
-  ChevronLeft,
+  ArrowLeft,
   Plus,
   Edit,
   Trash2,
@@ -1506,40 +1506,32 @@ export default function BusinessDetailsScreen() {
 
   return (
     <View style={styles.container}>
-      {/* <LinearGradient
-        colors={[Colors.neutral.white, Colors.neutral.white]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.header, { paddingTop: insets.top + 16 }]}
-      > */}
-                  <View style={[styles.header, { backgroundColor: 'rgba(138, 151, 209, 0.02)' }, { paddingTop: insets.top + 20,backgroundColor: '#fff' }]}>
-
-        <View style={styles.headerContent}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => {
-              if (router.canGoBack()) {
-                router.back();
-              } else {
-                router.replace('/(tabs)');
-              }
-            }}
-          >
-            <ChevronLeft size={24} color="#000" />
-          </TouchableOpacity>
-          <Logo size={48} style={{ ...styles.headerLogo, transform: [{ scale: 1.3}] }} />
+      <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => {
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.replace('/(tabs)');
+            }
+          }}
+        >
+          <ArrowLeft size={24} color="#007AFF" strokeWidth={2} />
+        </TouchableOpacity>
+        <View style={styles.headerCenter}>
+          <Logo size={38} style={styles.headerLogo} />
           <View style={styles.headerTitleContainer}>
             <Text style={styles.headerTitle} numberOfLines={1}>
               {business.business_name}
             </Text>
-            <Text style={styles.headerSubtitle}>
+            <Text style={styles.headerSubtitle} numberOfLines={1}>
               {business.vendor_service_category}
             </Text>
           </View>
         </View>
-        {/* </LinearGradient> */}
-        </View>
-        <View style={styles.tabContainer}>
+      </View>
+      <View style={styles.tabContainer}>
           {/*
           <TouchableOpacity
             style={[
@@ -1573,6 +1565,7 @@ export default function BusinessDetailsScreen() {
                 styles.tabText,
                 activeSection === 'gallery' && styles.activeTabText,
               ]}
+              numberOfLines={1}
             >
               Gallery
             </Text>
@@ -1590,6 +1583,7 @@ export default function BusinessDetailsScreen() {
                 styles.tabText,
                 activeSection === 'packages' && styles.activeTabText,
               ]}
+              numberOfLines={1}
             >
               Packages
             </Text>
@@ -1607,6 +1601,7 @@ export default function BusinessDetailsScreen() {
                 styles.tabText,
                 activeSection === 'edit' && styles.activeTabText,
               ]}
+              numberOfLines={1}
             >
               Edit Details
             </Text>
@@ -2693,45 +2688,47 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   header: {
-    paddingBottom: 16,
-    paddingHorizontal: 20,
-  },
-  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
- 
+    justifyContent: 'flex-start',
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  backBtn: {
+    padding: 4,
+    marginRight: 8,
+  },
+  headerCenter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
     gap: 12,
   },
   headerLogo: {
-    marginLeft: 2,
+    marginRight: 8,
     marginVertical: 0,
-  },
-  backButton: {
-    width: 15,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
   },
   headerTitleContainer: {
     flex: 1,
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: '700',
-    color: '#000',
-    marginBottom: 4,
+    color: '#1a1a1a',
+    marginBottom: 2,
   },
   headerSubtitle: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.9)',
+    fontSize: 13,
+    color: '#666',
   },
   tabContainer: {
     flexDirection: 'row',
     gap: 8,
     backgroundColor: '#52aad9',
+    paddingHorizontal: 4,
   },
   tab: {
     flex: 1,
@@ -2739,8 +2736,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
-    paddingHorizontal: 12,
- 
+    paddingHorizontal: 8,
+    minWidth: 0, // Allow flex shrinking on iOS
     gap: 6,
   },
   activeTab: {
@@ -2750,6 +2747,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.7)',
+    flexShrink: 1, // Allow text to shrink on iOS if needed
   },
   activeTabText: {
     color: '#fff',
@@ -2765,11 +2763,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 20,
+    gap: 12,
+    flexWrap: 'wrap',
   },
   sectionTitle: {
     fontSize: 20,
     fontWeight: '700',
     color: '#1a1a1a',
+    flex: 1,
+    minWidth: 120,
+    marginRight: 8,
   },
   addButton: {
     flexDirection: 'row',
@@ -2788,6 +2791,7 @@ const styles = StyleSheet.create({
   buttonGroup: {
     flexDirection: 'row',
     gap: 8,
+    flexShrink: 0,
   },
   smallButton: {
     paddingVertical: 8,

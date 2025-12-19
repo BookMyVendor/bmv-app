@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ChevronRight } from 'lucide-react-native';
@@ -17,6 +17,7 @@ export default function TemplateSelector({
   selectedTemplateId,
 }: TemplateSelectorProps) {
   const [showScrollIndicator, setShowScrollIndicator] = useState(false);
+  const templateScrollViewRef = useRef<ScrollView>(null);
 
   if (templates.length === 0) {
     return (
@@ -35,6 +36,7 @@ export default function TemplateSelector({
 
       <View style={styles.scrollContainer}>
         <ScrollView 
+          ref={templateScrollViewRef}
           horizontal 
           showsHorizontalScrollIndicator={false}
           style={styles.scrollView}
@@ -87,7 +89,16 @@ export default function TemplateSelector({
         })}
         </ScrollView>
         {showScrollIndicator && (
-          <View style={styles.scrollIndicatorRight}>
+          <TouchableOpacity
+            style={styles.scrollIndicatorRight}
+            onPress={() => {
+              templateScrollViewRef.current?.scrollTo({
+                x: 200,
+                animated: true,
+              });
+            }}
+            activeOpacity={0.7}
+          >
             <LinearGradient
               colors={['transparent', 'rgba(255, 255, 255, 0.8)']}
               start={{ x: 0, y: 0 }}
@@ -96,7 +107,7 @@ export default function TemplateSelector({
             >
               <ChevronRight size={20} color="#666" />
             </LinearGradient>
-          </View>
+          </TouchableOpacity>
         )}
       </View>
     </View>
@@ -137,7 +148,7 @@ const styles = StyleSheet.create({
     width: 40,
     justifyContent: 'center',
     alignItems: 'flex-end',
-    pointerEvents: 'none',
+    zIndex: 10,
   },
   scrollGradient: {
     width: 40,

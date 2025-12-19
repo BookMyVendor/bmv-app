@@ -13,7 +13,7 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, Phone, Mail, Calendar, MapPin, Users, DollarSign, Building2, CreditCard as Edit, Trash2, Clock, Tag, FileText, MessageSquare, CircleCheck as CheckCircle, Circle as XCircle } from 'lucide-react-native';
+import { ArrowLeft, Phone, Mail, Calendar, MapPin, Users, Building2, CreditCard as Edit, Clock, Tag, FileText, MessageSquare, CircleCheck as CheckCircle, Circle as XCircle } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore, supabaseCrm } from '@/lib/supabase';
 import Logo from '@/components/Logo';
@@ -96,7 +96,7 @@ export default function LeadDetailScreen() {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      
+
       // Map lead_communications to LeadActivity format
       const mappedActivities = (data || []).map((comm) => ({
         id: comm.id,
@@ -108,7 +108,7 @@ export default function LeadDetailScreen() {
         created_at: comm.created_at,
         metadata: comm.attachment_file_id ? { attachment_file_id: comm.attachment_file_id } : null,
       }));
-      
+
       setActivities(mappedActivities);
     } catch (error) {
       console.error('Error fetching activities:', error);
@@ -222,32 +222,6 @@ export default function LeadDetailScreen() {
     }
   };
 
-  const handleDeleteLead = () => {
-    Alert.alert(
-      'Delete Lead',
-      'Are you sure you want to delete this lead? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { error } = await supabaseCrm.from('customer_leads').delete().eq('id', id);
-
-              if (error) throw error;
-
-              Alert.alert('Success', 'Lead deleted successfully');
-              router.back();
-            } catch (error) {
-              console.error('Error deleting lead:', error);
-              Alert.alert('Error', 'Failed to delete lead');
-            }
-          },
-        },
-      ]
-    );
-  };
 
   const startEditing = (field: string, currentValue: string) => {
     setEditingField(field);
@@ -272,7 +246,7 @@ export default function LeadDetailScreen() {
         const eventDate = new Date(editValue);
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
+
         if (isNaN(eventDate.getTime())) {
           Alert.alert('Error', 'Please enter a valid date (YYYY-MM-DD)');
           return;
@@ -281,7 +255,7 @@ export default function LeadDetailScreen() {
           return;
         }
       }
-      
+
       const { error } = await supabaseCrm
         .from('customer_leads')
         .update(updateData)
@@ -358,9 +332,6 @@ export default function LeadDetailScreen() {
         </TouchableOpacity>
         <Logo size={38} style={styles.headerLogo} />
         <Text style={styles.headerTitle}>Lead Details</Text>
-        <TouchableOpacity onPress={handleDeleteLead} style={styles.deleteBtn}>
-          <Trash2 size={20} color="#FF3B30" strokeWidth={2} />
-        </TouchableOpacity>
       </View>
 
       <View style={styles.heroCard}>
@@ -524,13 +495,14 @@ export default function LeadDetailScreen() {
 
               {lead.budget_range && (
                 <View style={styles.infoRow}>
-                  <DollarSign size={20} color="#666" />
+                  <Text style={{ fontSize: 20, color: '#666', fontWeight: '600' }}>₹</Text>
                   <View style={styles.infoContent}>
                     <Text style={styles.infoLabel}>Budget Range</Text>
-                    <Text style={styles.infoValue}>{lead.budget_range}</Text>
+                    <Text style={styles.infoValue}>₹ {lead.budget_range}</Text>
                   </View>
                 </View>
               )}
+
             </View>
 
             {lead.requirements && (
@@ -733,9 +705,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1a1a1a',
     flex: 1,
-  },
-  deleteBtn: {
-    padding: 4,
   },
   heroCard: {
     backgroundColor: '#fff',

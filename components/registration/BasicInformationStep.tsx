@@ -135,12 +135,22 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
             validationErrors.phoneNumber && styles.inputError
           ]}
           value={data.phoneNumber || ''}
-          onChangeText={(text) => handleChange('phoneNumber', text)}
-          placeholder="+91 XXXXX XXXXX"
+          placeholder="Enter 10-digit mobile number"
           placeholderTextColor="#999"
-          keyboardType="phone-pad"
+          keyboardType="number-pad"
+          maxLength={10}
           returnKeyType="done"
+          onChangeText={(text) => {
+            // remove non-numeric characters
+            const numericText = text.replace(/[^0-9]/g, '');
+
+            // allow only 10 digits
+            if (numericText.length <= 10) {
+              handleChange('phoneNumber', numericText);
+            }
+          }}
         />
+
         {validationErrors.phoneNumber && (
           <Text style={styles.errorText}>{validationErrors.phoneNumber}</Text>
         )}

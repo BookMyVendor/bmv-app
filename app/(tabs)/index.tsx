@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -54,6 +54,8 @@ export default function DashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [showFilterScrollIndicator, setShowFilterScrollIndicator] = useState(false);
   const [showBusinessScrollIndicator, setShowBusinessScrollIndicator] = useState(false);
+  const filterScrollViewRef = useRef<ScrollView>(null);
+  const businessScrollViewRef = useRef<ScrollView>(null);
   const { user } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -207,26 +209,12 @@ export default function DashboardScreen() {
 
   return (
     <View style={styles.container}>
-      {/* <LinearGradient
-        colors={[Colors.primary.main, Colors.primary.light]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={[styles.header, { paddingTop: insets.top + 20 }]}
-      >
-        <View style={styles.headerContent}>
-        <Logo
-         size={48}
-         style={{ ...styles.headerLogo, transform: [{ scale: 1.3}] }}
-/>
+      <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+        <View style={styles.headerLeft}>
+          <Logo size={38} style={styles.headerLogo} />
           <Text style={styles.headerTitle}>Dashboard</Text>
         </View>
-      </LinearGradient> */}
-      <View style={[styles.header, { paddingTop: insets.top + 20,  backgroundColor: '#fff' }]}>
-  <View style={styles.headerContent}>
-    <Logo size={48} style={{ ...styles.headerLogo, transform: [{ scale: 1.2 }] }} />
-    <Text style={[styles.headerTitle, { color: Colors.neutral.black }]}>Dashboard</Text>
-  </View>
-</View>
+      </View>
 
 
       <ScrollView contentContainerStyle={[styles.content, { backgroundColor: 'rgba(138, 151, 209, 0.02)' }]}>
@@ -235,6 +223,7 @@ export default function DashboardScreen() {
 
           <View style={styles.scrollContainer}>
             <ScrollView
+              ref={filterScrollViewRef}
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.filterScrollContent}
@@ -276,7 +265,16 @@ export default function DashboardScreen() {
               )}
             </ScrollView>
             {showFilterScrollIndicator && (
-              <View style={styles.scrollIndicatorRight}>
+              <TouchableOpacity
+                style={styles.scrollIndicatorRight}
+                onPress={() => {
+                  filterScrollViewRef.current?.scrollTo({
+                    x: 200,
+                    animated: true,
+                  });
+                }}
+                activeOpacity={0.7}
+              >
                 <LinearGradient
                   colors={['transparent', 'rgba(255, 255, 255, 0.8)']}
                   start={{ x: 0, y: 0 }}
@@ -285,7 +283,7 @@ export default function DashboardScreen() {
                 >
                   <ChevronRight size={20} color="#666" />
                 </LinearGradient>
-              </View>
+              </TouchableOpacity>
             )}
           </View>
 
@@ -379,6 +377,7 @@ export default function DashboardScreen() {
           ) : (
             <View style={styles.scrollContainer}>
               <ScrollView
+                ref={businessScrollViewRef}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.businessList}
@@ -435,7 +434,16 @@ export default function DashboardScreen() {
                 ))}
               </ScrollView>
               {showBusinessScrollIndicator && (
-                <View style={styles.scrollIndicatorRight}>
+                <TouchableOpacity
+                  style={styles.scrollIndicatorRight}
+                  onPress={() => {
+                    businessScrollViewRef.current?.scrollTo({
+                      x: 300,
+                      animated: true,
+                    });
+                  }}
+                  activeOpacity={0.7}
+                >
                   <LinearGradient
                     colors={['transparent', 'rgba(255, 255, 255, 0.8)']}
                     start={{ x: 0, y: 0 }}
@@ -444,7 +452,7 @@ export default function DashboardScreen() {
                   >
                     <ChevronRight size={20} color="#666" />
                   </LinearGradient>
-                </View>
+                </TouchableOpacity>
               )}
             </View>
           )}
@@ -486,24 +494,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   header: {
-    paddingHorizontal: Spacing.xxxl,
-    paddingBottom: Spacing.lg,
-  },
-  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   headerLogo: {
-    marginRight: Spacing.sm,
+    marginRight: 8,
     marginVertical: 0,
   },
   headerTitle: {
-    fontSize: 28,
+    fontSize: 18,
     fontWeight: '700',
-    textAlignVertical: 'center',
-    height: '100%',
-    color: Colors.neutral.black,
+    color: '#1a1a1a',
   },
   content: {
     padding: 20,
@@ -573,7 +585,7 @@ const styles = StyleSheet.create({
     width: 40,
     justifyContent: 'center',
     alignItems: 'flex-end',
-    pointerEvents: 'none',
+    zIndex: 10,
   },
   scrollGradient: {
     width: 40,

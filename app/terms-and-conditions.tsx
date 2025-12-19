@@ -24,6 +24,7 @@ export default function TermsAndConditionsScreen() {
   const { user } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false);
 
   const handleAccept = async () => {
     if (!accepted) return;
@@ -31,8 +32,14 @@ export default function TermsAndConditionsScreen() {
     setLoading(true);
     try {
       // Store T&C acceptance in AsyncStorage
+      // Use setItem with await to ensure it's written before navigation
       await AsyncStorage.setItem(TERMS_ACCEPTANCE_KEY, 'true');
-      
+      console.log('[T&C] Terms acceptance saved to AsyncStorage');
+
+      // Add a small delay to ensure AsyncStorage write completes on Android
+      // This is especially important for Android builds
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       // If user exists, also try to store in database (optional - for future use)
       if (user?.id) {
         try {
@@ -40,20 +47,26 @@ export default function TermsAndConditionsScreen() {
           // This will fail silently if field doesn't exist, which is fine
           await supabaseCore
             .from('vendors')
-            .update({ 
+            .update({
               terms_accepted: true,
               terms_accepted_at: new Date().toISOString(),
             })
             .eq('id', user.id);
+          console.log('[T&C] Terms acceptance saved to database');
         } catch (dbError) {
           // Ignore DB errors - AsyncStorage is the primary storage
-          console.log('DB update optional - field may not exist yet');
+          console.log('[T&C] DB update optional - field may not exist yet');
         }
       }
 
+      // Verify the value was saved before navigating
+      const saved = await AsyncStorage.getItem(TERMS_ACCEPTANCE_KEY);
+      console.log('[T&C] Verification - Terms accepted value:', saved);
+
+      // Navigate to complete profile screen
       router.replace('/complete-profile');
     } catch (error) {
-      console.error('Error accepting terms:', error);
+      console.error('[T&C] Error accepting terms:', error);
       // Still proceed even if save fails
       router.replace('/complete-profile');
     } finally {
@@ -62,12 +75,18 @@ export default function TermsAndConditionsScreen() {
   };
 
   const handleScroll = (event: any) => {
+    if (hasScrolledToBottom) return; // already unlocked
+
     const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-    const isAtBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 50;
-    if (isAtBottom && !accepted) {
-      setAccepted(true);
+
+    const isAtBottom =
+      layoutMeasurement.height + contentOffset.y >= contentSize.height - 20;
+
+    if (isAtBottom) {
+      setHasScrolledToBottom(true);
     }
   };
+
 
   return (
     <View style={styles.container}>
@@ -77,7 +96,7 @@ export default function TermsAndConditionsScreen() {
         <Text style={styles.subtitle}>Please read and accept to continue</Text>
       </View>
 
-      <ScrollView 
+      <ScrollView
         ref={scrollViewRef}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -85,7 +104,7 @@ export default function TermsAndConditionsScreen() {
         scrollEventThrottle={400}
       >
         <View style={styles.content}>
-          <Text style={styles.lastUpdated}>Last Updated: November 2024</Text>
+          <Text style={styles.lastUpdated}>Last Updated: December 2025</Text>
 
           <Text style={styles.sectionTitle}>1. Acceptance of Terms</Text>
           <Text style={styles.sectionText}>
@@ -195,17 +214,20 @@ export default function TermsAndConditionsScreen() {
             <View style={styles.checkboxContainer}>
               <TouchableOpacity
                 style={[styles.checkbox, accepted && styles.checkboxChecked]}
-                onPress={() => setAccepted(!accepted)}
-                disabled={!accepted && true} // Only allow unchecking, not checking manually
+                onPress={() => setAccepted(prev => !prev)}
+                disabled={!hasScrolledToBottom}
               >
                 {accepted && <Check size={16} color="#fff" strokeWidth={3} />}
               </TouchableOpacity>
+
               <Text style={styles.acceptanceText}>
                 I have read and agree to the Terms & Conditions
               </Text>
             </View>
             <Text style={styles.scrollHint}>
-              Please scroll to the bottom to enable acceptance
+              {hasScrolledToBottom
+                ? 'You can now accept the Terms & Conditions'
+                : 'Please scroll to the bottom to enable acceptance'}
             </Text>
           </View>
         </View>
