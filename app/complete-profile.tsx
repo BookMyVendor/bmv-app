@@ -21,6 +21,7 @@ import * as Yup from 'yup';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore, supabaseCms } from '@/lib/supabase';
 
+
 const profileSchema = Yup.object().shape({
   firstName: Yup.string().required('First name is required'),
   lastName: Yup.string().required('Last name is required'),
@@ -33,7 +34,7 @@ export default function CompleteProfileScreen() {
   const [photoError, setPhotoError] = useState<string>('');
   const { user, refreshProfile } = useAuth();
   const router = useRouter();
-  
+
   // Refs for keyboard navigation
   const lastNameRef = useRef<TextInput>(null);
   const emailRef = useRef<TextInput>(null);
@@ -116,7 +117,7 @@ export default function CompleteProfileScreen() {
 
   const showImageOptions = () => {
     console.log('showImageOptions called, Platform:', Platform.OS);
-    
+
     if (Platform.OS === 'web') {
       // On web, directly open file picker
       console.log('Web platform - opening image picker directly');
@@ -137,14 +138,14 @@ export default function CompleteProfileScreen() {
     lastName: string;
     email: string;
   }) => {
-    console.log('handleSubmit called', { 
-      values, 
-      photoUri, 
+    console.log('handleSubmit called', {
+      values,
+      photoUri,
       userId: user?.id,
       hasPhoto: !!photoUri,
       hasUser: !!user?.id
     });
-    
+
     if (!user?.id) {
       console.log('❌ No user ID - returning early');
       Alert.alert('Error', 'User not found. Please try logging in again.');
@@ -158,19 +159,19 @@ export default function CompleteProfileScreen() {
       return;
     }
 
-      console.log('✅ Starting submission process');
-      setUploading(true);
+    console.log('✅ Starting submission process');
+    setUploading(true);
 
-      try {
-        let fileDataId: string;
+    try {
+      let fileDataId: string;
 
       // Step 1: Upload image to storage bucket (photo is required)
       console.log('📤 Step 1: Processing image from URI:', photoUri);
-      
+
       let fileBytes: Uint8Array;
       let fileExt: string;
       let mimeType: string;
-      
+
       if (Platform.OS === 'web') {
         // On web, fetch and convert to blob
         const response = await fetch(photoUri!);
@@ -179,7 +180,7 @@ export default function CompleteProfileScreen() {
           throw new Error('Failed to load image');
         }
         console.log('✅ Image fetched successfully');
-        
+
         const blob = await response.blob();
         console.log('✅ Blob created, size:', blob.size);
         fileBytes = new Uint8Array(await blob.arrayBuffer());
@@ -196,11 +197,11 @@ export default function CompleteProfileScreen() {
             base64: true,
           }
         );
-        
+
         if (!manipResult.base64) {
           throw new Error('Failed to process image');
         }
-        
+
         // Convert base64 to Uint8Array
         const base64Data = manipResult.base64;
         const byteCharacters = atob(base64Data);
@@ -212,7 +213,7 @@ export default function CompleteProfileScreen() {
         fileExt = 'jpg';
         mimeType = 'image/jpeg';
       }
-      
+
       const fileName = `${user.id}-${Date.now()}.${fileExt}`;
       const filePath = `profile-photos/${fileName}`;
       console.log('📤 Step 2: Uploading to storage:', filePath);
@@ -304,10 +305,10 @@ export default function CompleteProfileScreen() {
 
       console.log('📤 Step 5: Refreshing profile');
       await refreshProfile();
-      
+
       // Wait longer to ensure profile state is updated in AuthContext
       await new Promise(resolve => setTimeout(resolve, 500));
-      
+
       console.log('✅ All steps completed, navigating to business-registration');
       // Use push instead of replace to avoid navigation conflicts
       router.push('/business-registration');
@@ -321,7 +322,7 @@ export default function CompleteProfileScreen() {
         fullError: error
       });
       Alert.alert(
-        'Error', 
+        'Error',
         error.message || error.details || error.hint || 'Failed to save profile. Please try again.'
       );
     } finally {
@@ -332,156 +333,152 @@ export default function CompleteProfileScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={80}
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
     >
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-      >
+      <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>Complete Your Profile</Text>
         <Text style={styles.subtitle}>
           Please provide your details to continue
         </Text>
 
-      <Formik
-        initialValues={{ firstName: '', lastName: '', email: '' }}
-        validationSchema={profileSchema}
-        onSubmit={handleSubmit}
-      >
-        {({
-          handleChange,
-          handleBlur,
-          handleSubmit: formikHandleSubmit,
-          values,
-          errors,
-          touched,
-          isValid,
-        }) => (
-          <>
-            <View style={styles.photoSection}>
-              <Text style={styles.label}>
-                Profile Photo <Text style={styles.required}>*</Text>
-              </Text>
+        <Formik
+          initialValues={{ firstName: '', lastName: '', email: '' }}
+          validationSchema={profileSchema}
+          onSubmit={handleSubmit}
+        >
+          {({
+            handleChange,
+            handleBlur,
+            handleSubmit: formikHandleSubmit,
+            values,
+            errors,
+            touched,
+            isValid,
+          }) => (
+            <>
+              <View style={styles.photoSection}>
+                <Text style={styles.label}>
+                  Profile Photo <Text style={styles.required}>*</Text>
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.photoContainer,
+                    photoError && styles.photoContainerError
+                  ]}
+                  onPress={() => {
+                    console.log('Photo container pressed');
+                    showImageOptions();
+                  }}
+                  activeOpacity={0.7}
+                >
+                  {photoUri ? (
+                    <Image source={{ uri: photoUri }} style={styles.photo} />
+                  ) : (
+                    <View style={[
+                      styles.photoPlaceholder,
+                      photoError && styles.photoPlaceholderError
+                    ]}>
+                      <Camera size={32} color={photoError ? "#FF3B30" : "#999"} />
+                      <Text style={[
+                        styles.photoPlaceholderText,
+                        photoError && styles.photoPlaceholderTextError
+                      ]}>Add Photo</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+                {photoError ? (
+                  <Text style={styles.errorText}>{photoError}</Text>
+                ) : null}
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>
+                  First Name <Text style={styles.required}>*</Text>
+                </Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter first name"
+                  value={values.firstName}
+                  onChangeText={handleChange('firstName')}
+                  onBlur={handleBlur('firstName')}
+                  returnKeyType="next"
+                  onSubmitEditing={() => lastNameRef.current?.focus()}
+                />
+                {touched.firstName && errors.firstName ? (
+                  <Text style={styles.errorText}>{errors.firstName}</Text>
+                ) : null}
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>
+                  Last Name <Text style={styles.required}>*</Text>
+                </Text>
+                <TextInput
+                  ref={lastNameRef}
+                  style={styles.input}
+                  placeholder="Enter last name"
+                  value={values.lastName}
+                  onChangeText={handleChange('lastName')}
+                  onBlur={handleBlur('lastName')}
+                  returnKeyType="next"
+                  onSubmitEditing={() => emailRef.current?.focus()}
+                />
+                {touched.lastName && errors.lastName ? (
+                  <Text style={styles.errorText}>{errors.lastName}</Text>
+                ) : null}
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>
+                  Email Address <Text style={styles.required}>*</Text>
+                </Text>
+                <TextInput
+                  ref={emailRef}
+                  style={styles.input}
+                  placeholder="Enter email address"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  value={values.email}
+                  onChangeText={handleChange('email')}
+                  onBlur={handleBlur('email')}
+                  returnKeyType="done"
+                  onSubmitEditing={() => formikHandleSubmit()}
+                />
+                {touched.email && errors.email ? (
+                  <Text style={styles.errorText}>{errors.email}</Text>
+                ) : null}
+              </View>
+
               <TouchableOpacity
-                style={[
-                  styles.photoContainer,
-                  photoError && styles.photoContainerError
-                ]}
-                onPress={() => {
-                  console.log('Photo container pressed');
-                  showImageOptions();
+                style={[styles.button, uploading && styles.buttonDisabled]}
+                onPress={(e) => {
+                  console.log('Continue button pressed', {
+                    uploading,
+                    values,
+                    errors,
+                    touched,
+                    isValid,
+                    hasErrors: Object.keys(errors).length > 0
+                  });
+                  e?.preventDefault?.();
+                  e?.stopPropagation?.();
+                  // Trigger Formik validation and submit
+                  formikHandleSubmit();
                 }}
-                activeOpacity={0.7}
+                disabled={uploading}
+                activeOpacity={0.8}
               >
-                {photoUri ? (
-                  <Image source={{ uri: photoUri }} style={styles.photo} />
+                {uploading ? (
+                  <ActivityIndicator color="#fff" />
                 ) : (
-                  <View style={[
-                    styles.photoPlaceholder,
-                    photoError && styles.photoPlaceholderError
-                  ]}>
-                    <Camera size={32} color={photoError ? "#FF3B30" : "#999"} />
-                    <Text style={[
-                      styles.photoPlaceholderText,
-                      photoError && styles.photoPlaceholderTextError
-                    ]}>Add Photo</Text>
-                  </View>
+                  <Text style={styles.buttonText}>Continue</Text>
                 )}
               </TouchableOpacity>
-              {photoError ? (
-                <Text style={styles.errorText}>{photoError}</Text>
-              ) : null}
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>
-                First Name <Text style={styles.required}>*</Text>
-              </Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter first name"
-                value={values.firstName}
-                onChangeText={handleChange('firstName')}
-                onBlur={handleBlur('firstName')}
-                returnKeyType="next"
-                onSubmitEditing={() => lastNameRef.current?.focus()}
-              />
-              {touched.firstName && errors.firstName ? (
-                <Text style={styles.errorText}>{errors.firstName}</Text>
-              ) : null}
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>
-                Last Name <Text style={styles.required}>*</Text>
-              </Text>
-              <TextInput
-                ref={lastNameRef}
-                style={styles.input}
-                placeholder="Enter last name"
-                value={values.lastName}
-                onChangeText={handleChange('lastName')}
-                onBlur={handleBlur('lastName')}
-                returnKeyType="next"
-                onSubmitEditing={() => emailRef.current?.focus()}
-              />
-              {touched.lastName && errors.lastName ? (
-                <Text style={styles.errorText}>{errors.lastName}</Text>
-              ) : null}
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>
-                Email Address <Text style={styles.required}>*</Text>
-              </Text>
-              <TextInput
-                ref={emailRef}
-                style={styles.input}
-                placeholder="Enter email address"
-                keyboardType="email-address"
-                autoCapitalize="none"
-                value={values.email}
-                onChangeText={handleChange('email')}
-                onBlur={handleBlur('email')}
-                returnKeyType="done"
-                onSubmitEditing={() => formikHandleSubmit()}
-              />
-              {touched.email && errors.email ? (
-                <Text style={styles.errorText}>{errors.email}</Text>
-              ) : null}
-            </View>
-
-            <TouchableOpacity
-              style={[styles.button, uploading && styles.buttonDisabled]}
-              onPress={(e) => {
-                console.log('Continue button pressed', { 
-                  uploading, 
-                  values, 
-                  errors, 
-                  touched, 
-                  isValid,
-                  hasErrors: Object.keys(errors).length > 0
-                });
-                e?.preventDefault?.();
-                e?.stopPropagation?.();
-                // Trigger Formik validation and submit
-                formikHandleSubmit();
-              }}
-              disabled={uploading}
-              activeOpacity={0.8}
-            >
-              {uploading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.buttonText}>Continue</Text>
-              )}
-            </TouchableOpacity>
-          </>
-        )}
-      </Formik>
+            </>
+          )}
+        </Formik>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -495,7 +492,6 @@ const styles = StyleSheet.create({
   content: {
     padding: 24,
     paddingTop: 60,
-    flexGrow: 1,
   },
   title: {
     fontSize: 28,
