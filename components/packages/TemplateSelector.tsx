@@ -1,7 +1,5 @@
-import React, { useState, useRef } from 'react';
+import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { ChevronRight } from 'lucide-react-native';
 import { PackageTemplate } from '@/lib/packageTemplates';
 import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
 
@@ -16,9 +14,6 @@ export default function TemplateSelector({
   onSelect,
   selectedTemplateId,
 }: TemplateSelectorProps) {
-  const [showScrollIndicator, setShowScrollIndicator] = useState(false);
-  const templateScrollViewRef = useRef<ScrollView>(null);
-
   if (templates.length === 0) {
     return (
       <View style={styles.emptyState}>
@@ -27,6 +22,63 @@ export default function TemplateSelector({
     );
   }
 
+  const renderCard = (
+    cardTemplate: PackageTemplate | null,
+    isSelected: boolean,
+    extraStyles: object[] = []
+  ) => (
+    <TouchableOpacity
+      key={cardTemplate?.id || 'start-from-scratch'}
+      style={[
+        styles.templateCard,
+        ...extraStyles,
+        isSelected && styles.templateCardSelected,
+      ]}
+      onPress={() => onSelect(cardTemplate ?? null!)}
+      activeOpacity={0.7}
+    >
+      <Text style={styles.templateIcon}>{cardTemplate?.icon || '✨'}</Text>
+      <Text
+        style={[
+          styles.templateName,
+          isSelected && styles.templateNameSelected,
+        ]}
+      >
+        {cardTemplate?.name || 'Start from Scratch'}
+      </Text>
+      {cardTemplate && (
+        <Text
+          style={[
+            styles.templateDescription,
+            isSelected && styles.templateDescriptionSelected,
+          ]}
+        >
+          {cardTemplate.description}
+        </Text>
+      )}
+    </TouchableOpacity>
+  );
+
+  const renderGridLayout = () => (
+    <ScrollView
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={styles.gridContent}
+    >
+      <View style={styles.gridRow}>
+        <View style={styles.gridItem}>
+          {renderCard(null, !selectedTemplateId, [styles.templateCardFullWidth])}
+        </View>
+        {templates.map((template) => (
+          <View key={template.id} style={styles.gridItem}>
+            {renderCard(template, selectedTemplateId === template.id, [
+              styles.templateCardFullWidth,
+            ])}
+          </View>
+        ))}
+      </View>
+    </ScrollView>
+  );
+
   return (
     <View style={styles.container}>
       <Text style={styles.label}>Choose a Template (Optional)</Text>
@@ -34,82 +86,7 @@ export default function TemplateSelector({
         Start with a pre-configured template or create from scratch
       </Text>
 
-      <View style={styles.scrollContainer}>
-        <ScrollView 
-          ref={templateScrollViewRef}
-          horizontal 
-          showsHorizontalScrollIndicator={false}
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-          onContentSizeChange={(width) => {
-            setShowScrollIndicator(width > 0);
-          }}
-          onScroll={(event) => {
-            const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-            const canScrollRight = contentOffset.x + layoutMeasurement.width < contentSize.width - 10;
-            setShowScrollIndicator(canScrollRight);
-          }}
-          scrollEventThrottle={16}
-        >
-        <TouchableOpacity
-          style={[
-            styles.templateCard,
-            !selectedTemplateId && styles.templateCardSelected,
-          ]}
-          onPress={() => onSelect(null!)}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.templateIcon}>✨</Text>
-          <Text style={[styles.templateName, !selectedTemplateId && styles.templateNameSelected]}>
-            Start from Scratch
-          </Text>
-        </TouchableOpacity>
-
-        {templates.map((template) => {
-          const isSelected = selectedTemplateId === template.id;
-          return (
-            <TouchableOpacity
-              key={template.id}
-              style={[
-                styles.templateCard,
-                isSelected && styles.templateCardSelected,
-              ]}
-              onPress={() => onSelect(template)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.templateIcon}>{template.icon || '📦'}</Text>
-              <Text style={[styles.templateName, isSelected && styles.templateNameSelected]}>
-                {template.name}
-              </Text>
-              <Text style={[styles.templateDescription, isSelected && styles.templateDescriptionSelected]}>
-                {template.description}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-        </ScrollView>
-        {showScrollIndicator && (
-          <TouchableOpacity
-            style={styles.scrollIndicatorRight}
-            onPress={() => {
-              templateScrollViewRef.current?.scrollTo({
-                x: 200,
-                animated: true,
-              });
-            }}
-            activeOpacity={0.7}
-          >
-            <LinearGradient
-              colors={['transparent', 'rgba(255, 255, 255, 0.8)']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.scrollGradient}
-            >
-              <ChevronRight size={20} color="#666" />
-            </LinearGradient>
-          </TouchableOpacity>
-        )}
-      </View>
+      {renderGridLayout()}
     </View>
   );
 }
@@ -129,33 +106,18 @@ const styles = StyleSheet.create({
     color: Colors.text.secondary,
     marginBottom: Spacing.md,
   },
-  scrollContainer: {
-    position: 'relative',
-  },
-  scrollView: {
-    marginHorizontal: -Spacing.md,
-  },
-  scrollContent: {
+  gridContent: {
     paddingHorizontal: Spacing.md,
-    gap: Spacing.md,
-    paddingRight: 40, // Add padding for scroll indicator
+    paddingBottom: Spacing.md,
   },
-  scrollIndicatorRight: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
-    width: 40,
-    justifyContent: 'center',
-    alignItems: 'flex-end',
-    zIndex: 10,
+  gridRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
   },
-  scrollGradient: {
-    width: 40,
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingRight: 8,
+  gridItem: {
+    width: '48%',
+    marginBottom: Spacing.md,
   },
   emptyState: {
     padding: Spacing.lg,
@@ -173,11 +135,14 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: Colors.neutral.lighter,
     alignItems: 'center',
-    ...Shadows.sm,
+    ...Shadows.small,
   },
   templateCardSelected: {
     borderColor: Colors.primary.main,
     backgroundColor: Colors.primary.light + '10',
+  },
+  templateCardFullWidth: {
+    width: '100%',
   },
   templateIcon: {
     fontSize: 32,

@@ -38,4 +38,3 @@ android/local.properties
 *.tsbuildinfo
 
 android/.kotlin/
-android/.kotlin/
