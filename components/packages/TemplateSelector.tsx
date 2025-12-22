@@ -5,7 +5,7 @@ import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
 
 interface TemplateSelectorProps {
   templates: PackageTemplate[];
-  onSelect: (template: PackageTemplate) => void;
+  onSelect: (template: PackageTemplate | null) => void;
   selectedTemplateId?: string | null;
 }
 
@@ -34,7 +34,7 @@ export default function TemplateSelector({
         ...extraStyles,
         isSelected && styles.templateCardSelected,
       ]}
-      onPress={() => onSelect(cardTemplate ?? null!)}
+      onPress={() => onSelect(cardTemplate)}
       activeOpacity={0.7}
     >
       <Text style={styles.templateIcon}>{cardTemplate?.icon || '✨'}</Text>
@@ -139,7 +139,7 @@ const styles = StyleSheet.create({
   },
   templateCardSelected: {
     borderColor: Colors.primary.main,
-    backgroundColor: Colors.primary.light + '10',
+    backgroundColor: Colors.neutral.white,
   },
   templateCardFullWidth: {
     width: '100%',
