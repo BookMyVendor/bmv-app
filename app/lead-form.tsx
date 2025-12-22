@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -331,295 +332,308 @@ export default function LeadFormScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Business</Text>
-          <View style={styles.formGroup}>
-            <Dropdown
-              label="Select Business"
-              value={formData.business_id}
-              options={businesses.map((b) => ({ label: b.business_name, value: b.id }))}
-              onChange={(value) => updateFormData('business_id', value)}
-              error={errors.business_id}
-            />
-          </View>
-        </View>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+      >
+        <ScrollView
+          style={styles.content}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Contact Information</Text>
-
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>
-              Customer Name <Text style={styles.required}>*</Text>
-            </Text>
-            <TextInput
-              style={[styles.input, errors.customer_name && styles.inputError]}
-              placeholder="Enter customer name"
-              placeholderTextColor="#999"
-              value={formData.customer_name}
-              onChangeText={(text) => updateFormData('customer_name', text)}
-              returnKeyType="next"
-              onSubmitEditing={() => customerPhoneRef.current?.focus()}
-            />
-            {errors.customer_name && (
-              <Text style={styles.errorText}>{errors.customer_name}</Text>
-            )}
-          </View>
-
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>
-              Phone Number <Text style={styles.required}>*</Text>
-            </Text>
-            <TextInput
-              ref={customerPhoneRef}
-              style={[styles.input, errors.customer_phone && styles.inputError]}
-              placeholder="Enter 10-digit mobile number"
-              placeholderTextColor="#999"
-              value={formData.customer_phone}
-              onChangeText={(text) =>
-                updateFormData('customer_phone', formatPhoneInput(text))
-              }
-              keyboardType="number-pad"
-              maxLength={10}
-              returnKeyType="next"
-              onSubmitEditing={() => customerEmailRef.current?.focus()}
-            />
-
-            {errors.customer_phone && (
-              <Text style={styles.errorText}>{errors.customer_phone}</Text>
-            )}
-          </View>
-
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>Email Address</Text>
-            <TextInput
-              ref={customerEmailRef}
-              style={[styles.input, errors.customer_email && styles.inputError]}
-              placeholder="Enter email address"
-              placeholderTextColor="#999"
-              value={formData.customer_email}
-              onChangeText={(text) => updateFormData('customer_email', text)}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              returnKeyType="next"
-              onSubmitEditing={() => eventDateRef.current?.focus()}
-            />
-            {errors.customer_email && (
-              <Text style={styles.errorText}>{errors.customer_email}</Text>
-            )}
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Event Details</Text>
-
-          <View style={styles.formGroup}>
-            <Dropdown
-              label="Event Type *"
-              value={formData.category_id}
-              options={eventCategories.map((cat) => ({ label: cat.name, value: cat.id }))}
-              onChange={(value) => updateFormData('category_id', value)}
-              error={errors.category_id}
-            />
-          </View>
-
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>
-              Event Date <Text style={styles.required}>*</Text>
-            </Text>
-
-            {Platform.OS === 'web' ? (
-              <TextInput
-                ref={eventDateRef}
-                style={[styles.input, errors.event_date && styles.inputError]}
-                placeholder="YYYY-MM-DD"
-                value={formData.event_date}
-                keyboardType="numeric"
-                maxLength={10}
-                onChangeText={(text) =>
-                  updateFormData('event_date', formatDateInput(text))
-                }
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Business</Text>
+            <View style={styles.formGroup}>
+              <Dropdown
+                label="Select Business"
+                value={formData.business_id}
+                options={businesses.map((b) => ({ label: b.business_name, value: b.id }))}
+                onChange={(value) => updateFormData('business_id', value)}
+                error={errors.business_id}
               />
-            ) : (
-              <TouchableOpacity onPress={() => setShowDatePicker(true)}>
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Contact Information</Text>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>
+                Customer Name <Text style={styles.required}>*</Text>
+              </Text>
+              <TextInput
+                style={[styles.input, errors.customer_name && styles.inputError]}
+                placeholder="Enter customer name"
+                placeholderTextColor="#999"
+                value={formData.customer_name}
+                onChangeText={(text) => updateFormData('customer_name', text)}
+                returnKeyType="next"
+                onSubmitEditing={() => customerPhoneRef.current?.focus()}
+              />
+              {errors.customer_name && (
+                <Text style={styles.errorText}>{errors.customer_name}</Text>
+              )}
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>
+                Phone Number <Text style={styles.required}>*</Text>
+              </Text>
+              <TextInput
+                ref={customerPhoneRef}
+                style={[styles.input, errors.customer_phone && styles.inputError]}
+                placeholder="Enter 10-digit mobile number"
+                placeholderTextColor="#999"
+                value={formData.customer_phone}
+                onChangeText={(text) =>
+                  updateFormData('customer_phone', formatPhoneInput(text))
+                }
+                keyboardType="number-pad"
+                maxLength={10}
+                returnKeyType="next"
+                onSubmitEditing={() => customerEmailRef.current?.focus()}
+              />
+
+              {errors.customer_phone && (
+                <Text style={styles.errorText}>{errors.customer_phone}</Text>
+              )}
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Email Address</Text>
+              <TextInput
+                ref={customerEmailRef}
+                style={[styles.input, errors.customer_email && styles.inputError]}
+                placeholder="Enter email address"
+                placeholderTextColor="#999"
+                value={formData.customer_email}
+                onChangeText={(text) => updateFormData('customer_email', text)}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                returnKeyType="next"
+                onSubmitEditing={() => eventDateRef.current?.focus()}
+              />
+              {errors.customer_email && (
+                <Text style={styles.errorText}>{errors.customer_email}</Text>
+              )}
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Event Details</Text>
+
+            <View style={styles.formGroup}>
+              <Dropdown
+                label="Event Type *"
+                value={formData.category_id}
+                options={eventCategories.map((cat) => ({ label: cat.name, value: cat.id }))}
+                onChange={(value) => updateFormData('category_id', value)}
+                error={errors.category_id}
+              />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>
+                Event Date <Text style={styles.required}>*</Text>
+              </Text>
+
+              {Platform.OS === 'web' ? (
                 <TextInput
                   ref={eventDateRef}
                   style={[styles.input, errors.event_date && styles.inputError]}
-                  placeholder="Select event date"
+                  placeholder="YYYY-MM-DD"
                   value={formData.event_date}
-                  editable={false}
-                  pointerEvents="none"
+                  keyboardType="numeric"
+                  maxLength={10}
+                  onChangeText={(text) =>
+                    updateFormData('event_date', formatDateInput(text))
+                  }
                 />
-              </TouchableOpacity>
-            )}
+              ) : (
+                <TouchableOpacity onPress={() => setShowDatePicker(true)}>
+                  <TextInput
+                    ref={eventDateRef}
+                    style={[styles.input, errors.event_date && styles.inputError]}
+                    placeholder="Select event date"
+                    value={formData.event_date}
+                    editable={false}
+                    pointerEvents="none"
+                  />
+                </TouchableOpacity>
+              )}
 
 
-            {errors.event_date && (
-              <Text style={styles.errorText}>{errors.event_date}</Text>
-            )}
-          </View>
+              {errors.event_date && (
+                <Text style={styles.errorText}>{errors.event_date}</Text>
+              )}
+            </View>
 
-          {showDatePicker && Platform.OS !== 'web' && (
-            <DateTimePicker
-              value={
-                formData.event_date
-                  ? new Date(formData.event_date)
-                  : new Date()
-              }
-              mode="date"
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              minimumDate={new Date()}
-              onChange={(event, selectedDate) => {
-                setShowDatePicker(false);
-
-                if (selectedDate) {
-                  const formattedDate = selectedDate
-                    .toISOString()
-                    .split('T')[0];
-
-                  updateFormData('event_date', formattedDate);
+            {showDatePicker && Platform.OS !== 'web' && (
+              <DateTimePicker
+                value={
+                  formData.event_date
+                    ? new Date(formData.event_date)
+                    : new Date()
                 }
-              }}
-            />
-          )}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                minimumDate={new Date()}
+                onChange={(event, selectedDate) => {
+                  setShowDatePicker(false);
 
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>Event Location</Text>
-            <TextInput
-              ref={eventLocationRef}
-              style={styles.input}
-              placeholder="Enter event location (e.g., Hotel, Pune)"
-              placeholderTextColor="#999"
-              value={formData.event_location}
-              onChangeText={(text) => updateFormData('event_location', text)}
-              returnKeyType="next"
-              onSubmitEditing={() => guestCountRef.current?.focus()}
-            />
-          </View>
+                  if (selectedDate) {
+                    const formattedDate = selectedDate
+                      .toISOString()
+                      .split('T')[0];
 
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>Guest Count</Text>
-            <TextInput
-              ref={guestCountRef}
-              style={styles.input}
-              placeholder="Number of guests"
-              placeholderTextColor="#999"
-              value={formData.guest_count}
-              onChangeText={(text) => updateFormData('guest_count', text)}
-              keyboardType="number-pad"
-              returnKeyType="next"
-              onSubmitEditing={() => eventDurationRef.current?.focus()}
-            />
-          </View>
-
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>Event Duration (hours)</Text>
-            <TextInput
-              ref={eventDurationRef}
-              style={styles.input}
-              placeholder="Duration in hours"
-              placeholderTextColor="#999"
-              value={formData.event_duration_hours}
-              onChangeText={(text) => updateFormData('event_duration_hours', text)}
-              keyboardType="number-pad"
-              returnKeyType="done"
-            />
-          </View>
-
-          <View style={styles.formGroup}>
-            <Dropdown
-              label="Budget Range"
-              value={formData.budget_range}
-              options={BUDGET_RANGES.map((range) => ({ label: range, value: range }))}
-              onChange={(value) => updateFormData('budget_range', value)}
-            />
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Lead Management</Text>
-
-          <View style={styles.formGroup}>
-            <Dropdown
-              label="Status"
-              value={formData.lead_status}
-              options={STATUS_OPTIONS.map((s) => ({ label: s.label, value: s.value }))}
-              onChange={(value) => updateFormData('lead_status', value)}
-            />
-          </View>
-
-          <View style={styles.formGroup}>
-            <Dropdown
-              label="Lead Type"
-              value={formData.lead_type}
-              options={[
-                { label: 'Inquiry', value: 'inquiry' },
-                { label: 'Quote Request', value: 'quote_request' },
-                { label: 'Booking Interest', value: 'booking_interest' },
-              ]}
-              onChange={(value) => updateFormData('lead_type', value)}
-            />
-          </View>
-
-          <View style={styles.formGroup}>
-            <Dropdown
-              label="Lead Source"
-              value={formData.lead_source}
-              options={[
-                { label: 'Website', value: 'website' },
-                { label: 'Mobile App', value: 'mobile' },
-                { label: 'Referral', value: 'referral' },
-                { label: 'Direct', value: 'direct' },
-              ]}
-              onChange={(value) => updateFormData('lead_source', value)}
-            />
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Requirements</Text>
-
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>Customer Requirements</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Enter customer requirements or message"
-              placeholderTextColor="#999"
-              value={formData.requirements}
-              onChangeText={(text) => updateFormData('requirements', text)}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <TouchableOpacity
-            style={[styles.submitButton, saving && styles.disabledButton]}
-            onPress={handleSubmit}
-            disabled={saving}
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={styles.submitButtonText}>
-                {isEditMode ? 'Update Lead' : 'Create Lead'}
-              </Text>
+                    updateFormData('event_date', formattedDate);
+                  }
+                }}
+              />
             )}
-          </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.cancelButton}
-            onPress={() => router.back()}
-            disabled={saving}
-          >
-            <Text style={styles.cancelButtonText}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Event Location</Text>
+              <TextInput
+                ref={eventLocationRef}
+                style={styles.input}
+                placeholder="Enter event location (e.g., Hotel, Pune)"
+                placeholderTextColor="#999"
+                value={formData.event_location}
+                onChangeText={(text) => updateFormData('event_location', text)}
+                returnKeyType="next"
+                onSubmitEditing={() => guestCountRef.current?.focus()}
+              />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Guest Count</Text>
+              <TextInput
+                ref={guestCountRef}
+                style={styles.input}
+                placeholder="Number of guests"
+                placeholderTextColor="#999"
+                value={formData.guest_count}
+                onChangeText={(text) => updateFormData('guest_count', text)}
+                keyboardType="number-pad"
+                returnKeyType="next"
+                onSubmitEditing={() => eventDurationRef.current?.focus()}
+              />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Event Duration (hours)</Text>
+              <TextInput
+                ref={eventDurationRef}
+                style={styles.input}
+                placeholder="Duration in hours"
+                placeholderTextColor="#999"
+                value={formData.event_duration_hours}
+                onChangeText={(text) => updateFormData('event_duration_hours', text)}
+                keyboardType="number-pad"
+                returnKeyType="done"
+              />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Dropdown
+                label="Budget Range"
+                value={formData.budget_range}
+                options={BUDGET_RANGES.map((range) => ({ label: range, value: range }))}
+                onChange={(value) => updateFormData('budget_range', value)}
+              />
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Lead Management</Text>
+
+            <View style={styles.formGroup}>
+              <Dropdown
+                label="Status"
+                value={formData.lead_status}
+                options={STATUS_OPTIONS.map((s) => ({ label: s.label, value: s.value }))}
+                onChange={(value) => updateFormData('lead_status', value)}
+              />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Dropdown
+                label="Lead Type"
+                value={formData.lead_type}
+                options={[
+                  { label: 'Inquiry', value: 'inquiry' },
+                  { label: 'Quote Request', value: 'quote_request' },
+                  { label: 'Booking Interest', value: 'booking_interest' },
+                ]}
+                onChange={(value) => updateFormData('lead_type', value)}
+              />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Dropdown
+                label="Lead Source"
+                value={formData.lead_source}
+                options={[
+                  { label: 'Website', value: 'website' },
+                  { label: 'Mobile App', value: 'mobile' },
+                  { label: 'Referral', value: 'referral' },
+                  { label: 'Direct', value: 'direct' },
+                ]}
+                onChange={(value) => updateFormData('lead_source', value)}
+              />
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Requirements</Text>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Customer Requirements</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Enter customer requirements or message"
+                placeholderTextColor="#999"
+                value={formData.requirements}
+                onChangeText={(text) => updateFormData('requirements', text)}
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+                scrollEnabled = {true}
+              />
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <TouchableOpacity
+              style={[styles.submitButton, saving && styles.disabledButton]}
+              onPress={handleSubmit}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.submitButtonText}>
+                  {isEditMode ? 'Update Lead' : 'Create Lead'}
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => router.back()}
+              disabled={saving}
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
+
 }
 
 const styles = StyleSheet.create({

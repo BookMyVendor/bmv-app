@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Calendar, MapPin, Clock, ArrowUpDown, ChevronRight, Search, Plus, X, Download, MoveVertical as MoreVertical, SquareCheck as CheckSquare, Square } from 'lucide-react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore, supabaseCrm } from '@/lib/supabase';
 import { getTimeAgo, formatEventDate } from '@/lib/timeUtils';
@@ -83,6 +83,15 @@ export default function LeadsScreen() {
       fetchLeads();
     }
   }, [user?.id]);
+
+  // Refresh leads whenever the screen comes into focus (e.g., after creating/editing a lead)
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.id) {
+        fetchLeads();
+      }
+    }, [user?.id])
+  );
 
   const fetchLeads = async () => {
     try {

@@ -176,24 +176,16 @@ export default function PackageFormScreen() {
 
   const handleTemplateSelect = (template: PackageTemplate | null) => {
     setSelectedTemplate(template);
-    
+
     if (template) {
-      // Apply template to form data
+      // Apply template to form data but keep navigation controlled by Next button
       const templateData = applyTemplate(template);
       setFormData(prev => ({
         ...prev,
         ...templateData,
         categorySpecificFields: prev.categorySpecificFields || {},
       }));
-      // If template has a package type, we can auto-advance
-      if (template.packageType) {
-        // Type is already set by template, move to details
-        setCurrentStep(3);
-        return;
-      }
     }
-    
-    setCurrentStep(2); // Move to type selection
   };
 
   const handleTypeSelect = (type: PackageType) => {
@@ -247,6 +239,13 @@ export default function PackageFormScreen() {
 
   const handleNext = () => {
     if (!validateStep(currentStep)) {
+      return;
+    }
+
+    // Control navigation from template step based on selection, but only via Next
+    if (currentStep === 1) {
+      const nextStep = selectedTemplate?.packageType ? 3 : 2;
+      setCurrentStep(nextStep);
       return;
     }
 
