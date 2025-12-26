@@ -101,7 +101,9 @@ export default function TermsAndConditionsScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         onScroll={handleScroll}
-        scrollEventThrottle={400}
+        onScrollEndDrag={handleScroll}
+        onMomentumScrollEnd={handleScroll}
+        scrollEventThrottle={16}
       >
         <View style={styles.content}>
           <Text style={styles.lastUpdated}>Last Updated: December 2025</Text>
