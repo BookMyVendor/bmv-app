@@ -67,6 +67,13 @@ export default function DashboardScreen() {
     }
   }, [user?.id, selectedStatuses]);
 
+  // Hide business scroll hint when there's only one business
+  useEffect(() => {
+    if (businesses.length <= 1) {
+      setShowBusinessScrollIndicator(false);
+    }
+  }, [businesses.length]);
+
   // Refresh businesses when screen comes into focus (e.g., after editing)
   useFocusEffect(
     useCallback(() => {
@@ -382,12 +389,12 @@ export default function DashboardScreen() {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.businessList}
                 onContentSizeChange={(width) => {
-                  setShowBusinessScrollIndicator(width > 0);
+                  setShowBusinessScrollIndicator(businesses.length > 1 && width > 0);
                 }}
                 onScroll={(event) => {
                   const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
                   const canScrollRight = contentOffset.x + layoutMeasurement.width < contentSize.width - 10;
-                  setShowBusinessScrollIndicator(canScrollRight);
+                  setShowBusinessScrollIndicator(businesses.length > 1 && canScrollRight);
                 }}
                 scrollEventThrottle={16}
               >
@@ -433,7 +440,7 @@ export default function DashboardScreen() {
                   </TouchableOpacity>
                 ))}
               </ScrollView>
-              {showBusinessScrollIndicator && (
+              {businesses.length > 1 && showBusinessScrollIndicator && (
                 <TouchableOpacity
                   style={styles.scrollIndicatorRight}
                   onPress={() => {
