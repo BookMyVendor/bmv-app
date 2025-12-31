@@ -170,6 +170,33 @@ const loggingFetch: typeof fetch = async (input, init) => {
   }
 };
 
+// Helper to manually set authorization header with custom JWT
+// This ensures the token is used for database queries
+export async function setAuthorizationToken(token: string) {
+  try {
+    // Create a session object with the custom token
+    const session = {
+      access_token: token,
+      refresh_token: '',
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+      expires_in: 3600,
+      token_type: 'bearer',
+      user: { id: '', aud: 'authenticated', role: 'authenticated' }
+    };
+    
+    // Set session on all clients
+    await Promise.all([
+      supabaseCore.auth.setSession(session as any),
+      supabaseCms.auth.setSession(session as any),
+      supabaseCrm.auth.setSession(session as any),
+    ]);
+    
+    console.log('[SUPABASE] Authorization token set on all clients');
+  } catch (error) {
+    console.error('[SUPABASE] Failed to set authorization token:', error);
+  }
+}
+
 const clientConfig = {
   auth: sharedAuthConfig,
   global: {
