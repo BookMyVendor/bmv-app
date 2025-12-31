@@ -1,6 +1,9 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { Session, User } from '@supabase/supabase-js';
-import { supabaseCore, supabaseUrl } from '@/lib/supabase';
+import { supabaseCore, supabaseCms, supabaseCrm } from '@/lib/supabase';
+import { sendOTP, verifyOTP as verifyOTPApi, type VerifyOTPResponse } from '@/lib/otpAuthApi';
+import { getAccessToken, hasTokens, clearTokens, isTokenExpiredOrExpiringSoon } from '@/lib/tokenStorage';
+import { refreshAccessToken } from '@/lib/otpAuthApi';
 
 interface UserProfile {
   id: string;
@@ -16,12 +19,14 @@ interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
+  isNewUser: boolean;
   signInWithOTP: (phone: string) => Promise<{ error: Error | null }>;
   verifyOTP: (phone: string, token: string) => Promise<{ error: Error | null }>;
   devSignIn: (phone: string) => Promise<{ error: Error | null }>;
   dummyLogin: () => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  refreshToken: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -31,6 +36,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isNewUser, setIsNewUser] = useState(false);
   const userRef = useRef<User | null>(null);
   const isLoggingOutRef = useRef<boolean>(false);
 
@@ -55,53 +61,95 @@ const fetchProfile = async (userId: string) => {
   }
 };
 
+// Helper to set session on all Supabase clients
+const setSessionOnAllClients = async (session: Session) => {
+  try {
+    // Set session on all clients to ensure they use the custom JWT for RLS
+    await Promise.all([
+      supabaseCore.auth.setSession(session),
+      supabaseCms.auth.setSession(session),
+      supabaseCrm.auth.setSession(session),
+    ]);
+    console.log('[AUTH] Session set on all Supabase clients');
+  } catch (error) {
+    console.error('[AUTH] Failed to set session on all clients:', error);
+  }
+};
+
+  // Check for stored tokens on mount and restore session
   useEffect(() => {
-    supabaseCore.auth.getSession().then(async ({ data: { session } }) => {
-      // Don't process session if we're in the middle of logging out
-      if (isLoggingOutRef.current) {
-        setSession(null);
-        setUser(null);
-        setProfile(null);
-        setLoading(false);
-        return;
-      }
-
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user?.id) {
-        await fetchProfile(session.user.id);
-      } else {
-        setProfile(null);
-      }
-      setLoading(false);
-    });
-
-    const { data: { subscription } } = supabaseCore.auth.onAuthStateChange((event, session) => {
-      (async () => {
-        // On SIGNED_OUT event, ensure all state is cleared
-        if (event === 'SIGNED_OUT' || !session) {
-          isLoggingOutRef.current = false; // Reset logout flag
-          setSession(null);
-          setUser(null);
-          userRef.current = null; // Clear ref as well
-          setProfile(null);
+    const checkStoredTokens = async () => {
+      try {
+        if (isLoggingOutRef.current) {
           setLoading(false);
           return;
         }
-        
-        // Don't process session if we're logging out
+
+        const hasStoredTokens = await hasTokens();
+        if (hasStoredTokens) {
+          // Check if token needs refresh
+          if (await isTokenExpiredOrExpiringSoon()) {
+            const refreshResult = await refreshAccessToken();
+            if (!refreshResult.data) {
+              // Refresh failed, clear tokens
+              await clearTokens();
+              setLoading(false);
+              return;
+            }
+          }
+
+          // Get user info from token (we'll need to decode or fetch from API)
+          // For now, try to get from Supabase session if available
+          const { data: { session } } = await supabaseCore.auth.getSession();
+          if (session?.user) {
+            setSession(session);
+            setUser(session.user);
+            await fetchProfile(session.user.id);
+          } else {
+            // If no Supabase session but we have tokens, we need to fetch user info
+            // This would require an API endpoint to get user from token
+            // For now, we'll rely on verifyOTP to set the user
+          }
+        } else {
+          // Check Supabase session as fallback
+          const { data: { session } } = await supabaseCore.auth.getSession();
+          if (session) {
+            setSession(session);
+            setUser(session.user);
+            if (session.user?.id) {
+              await fetchProfile(session.user.id);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error checking stored tokens:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    checkStoredTokens();
+
+    // Also listen to Supabase auth changes for backward compatibility
+    const { data: { subscription } } = supabaseCore.auth.onAuthStateChange((event, session) => {
+      (async () => {
         if (isLoggingOutRef.current) {
           return;
         }
-        
-        setSession(session);
-        setUser(session?.user ?? null);
-        if (session?.user?.id) {
-          await fetchProfile(session.user.id);
-        } else {
+
+        if (event === 'SIGNED_OUT' || !session) {
+          setSession(null);
+          setUser(null);
+          userRef.current = null;
           setProfile(null);
+          return;
         }
-        setLoading(false);
+
+        setSession(session);
+        setUser(session.user);
+        if (session.user?.id) {
+          await fetchProfile(session.user.id);
+        }
       })();
     });
 
@@ -137,94 +185,116 @@ const fetchProfile = async (userId: string) => {
     };
   }, [user?.id]);
 
+  // Auto-refresh token before expiration (check every 5 minutes)
+  useEffect(() => {
+    if (!user?.id) {
+      return;
+    }
+
+    const checkAndRefreshToken = async () => {
+      if (await isTokenExpiredOrExpiringSoon()) {
+        await refreshToken();
+      }
+    };
+
+    // Check immediately
+    checkAndRefreshToken();
+
+    // Then check every 5 minutes
+    const tokenRefreshInterval = setInterval(() => {
+      checkAndRefreshToken();
+    }, 5 * 60 * 1000);
+
+    return () => {
+      clearInterval(tokenRefreshInterval);
+    };
+  }, [user?.id]);
+
   const signInWithOTP = async (phone: string) => {
-  try {
-    // Use phone as-is (no country code prepending)
-    const formattedPhone = phone;
-    
-    // In development, just return success since we'll use hardcoded OTP
-    if (process.env.EXPO_PUBLIC_NODE_ENV === 'development') {
-      console.log('Development mode: Use OTP code: 123456');
+    try {
+      const result = await sendOTP(phone);
+      
+      if (result.error) {
+        return { error: new Error(result.error.message) };
+      }
+
       return { error: null };
+    } catch (error) {
+      return { error: error as Error };
     }
+  };
 
-    // In production, this will trigger real SMS
-    const { error } = await supabaseCore.auth.signInWithOtp({
-      phone: formattedPhone,
-      options: {
-        shouldCreateUser: true,
+
+  const verifyOTP = async (phone: string, token: string) => {
+    try {
+      const result = await verifyOTPApi(phone, token);
+
+      if (result.error) {
+        return { error: new Error(result.error.message) };
       }
-    });
 
-    return { error };
-  } catch (error) {
-    return { error: error as Error };
-  }
-};
+      if (result.data) {
+        const { user: userData, newUser } = result.data;
 
+        // Create a User-like object from the API response
+        const user: User = {
+          id: userData.id,
+          phone: userData.phone,
+          email: userData.email || null,
+          created_at: userData.created_at || new Date().toISOString(),
+          app_metadata: userData.app_metadata || {},
+          user_metadata: userData.user_metadata || {},
+          aud: 'authenticated',
+          confirmation_sent_at: undefined,
+          recovery_sent_at: undefined,
+          email_confirmed_at: userData.email_confirmed_at || undefined,
+          phone_confirmed_at: userData.phone_confirmed_at || new Date().toISOString(),
+          last_sign_in_at: new Date().toISOString(),
+          role: 'authenticated',
+          updated_at: new Date().toISOString(),
+        };
 
-const verifyOTP = async (phone: string, token: string) => {
-  try {
-    // Use the edge function for session creation to avoid duplicate vendor creation
-    // Use manual fetch() instead of functions.invoke() for better CORS handling in React Native/Expo
-    const edgeFunctionUrl = `${supabaseUrl}/functions/v1/create-dev-session`;
-    const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
-    
-    console.log(`[LOG] Calling Edge Function: ${edgeFunctionUrl}`);
-    
-    const response = await fetch(edgeFunctionUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${supabaseAnonKey}`,
-        'apikey': supabaseAnonKey,
-      },
-      body: JSON.stringify({ phone, otp: token }),
-    });
+        // Create a Session-like object
+        const accessToken = await getAccessToken();
+        const session: Session = {
+          access_token: accessToken || result.data.accessToken,
+          refresh_token: result.data.refreshToken,
+          expires_at: Math.floor(Date.now() / 1000) + result.data.expiresIn,
+          expires_in: result.data.expiresIn,
+          token_type: 'bearer',
+          user,
+        };
 
-    if (!response.ok) {
-      let errorData;
-      try {
-        errorData = await response.json();
-      } catch (e) {
-        errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
+        // CRITICAL: Set the session on ALL Supabase clients so they use the custom JWT
+        // This ensures RLS policies can verify auth.uid() from the JWT claims
+        await setSessionOnAllClients(session);
+
+        setSession(session);
+        setUser(user);
+        setIsNewUser(newUser);
+        userRef.current = user;
+        
+        console.log('[AUTH] OTP Verification successful:', { 
+          userId: user.id, 
+          newUser,
+          tokenSet: true,
+          message: 'Auth complete. Dashboard/profile page will fetch data on load.'
+        });
+        
+        // NOTE: Profile data is NOT fetched here
+        // The dashboard or profile-completion page will fetch it when the page loads
+        // This keeps auth function focused on authentication only
+        setProfile(null);
+
+        return { error: null };
       }
-      console.error(`[LOG] Edge Function error (${response.status}):`, errorData);
-      return { 
-        error: new Error(errorData.error || errorData.details || `HTTP ${response.status}: Failed to create session`) 
-      };
+
+      return { error: new Error('No data received from verification') };
+    } catch (error) {
+      console.error('Verification error:', error);
+      return { error: error as Error };
     }
-
-    const data = await response.json();
-
-    if (data && data.success && data.session) {
-      // Set the session in Supabase client first (this triggers onAuthStateChange)
-      const { error: sessionError } = await supabaseCore.auth.setSession({
-        access_token: data.session.access_token,
-        refresh_token: data.session.refresh_token,
-      });
-
-      if (sessionError) {
-        console.error('Error setting session:', sessionError);
-        return { error: sessionError };
-      }
-
-      // The onAuthStateChange listener will update session/user/profile automatically
-      // But we can also set it directly for immediate UI update
-      setSession(data.session);
-      if (data.session.user) {
-        setUser(data.session.user);
-        await fetchProfile(data.session.user.id);
-      }
-      return { error: null };
-    }
-
-    return { error: new Error(data?.error || data?.details || 'Failed to create session') };
-  } catch (error) {
-    console.error('[LOG] Verification error:', error);
-    return { error: error as Error };
-  }
-};
+  };
 
 
 
@@ -356,36 +426,54 @@ const verifyOTP = async (phone: string, token: string) => {
     try {
       // Set logout flag to prevent any profile fetches
       isLoggingOutRef.current = true;
-      
-      // First, clear local state immediately for immediate UI feedback
+
+      // Clear tokens from secure storage
+      await clearTokens();
+
+      // Clear local state immediately for immediate UI feedback
       setSession(null);
       setUser(null);
-      userRef.current = null; // Clear ref to prevent polling
+      userRef.current = null;
       setProfile(null);
       setLoading(false);
 
-      // Then call Supabase signOut to clear local storage
-      // Use 'local' scope instead of 'global' to avoid API call that might fail
-      // 'local' scope clears the session from local storage without making API call
-      const { error } = await supabaseCore.auth.signOut({ scope: 'local' });
-      if (error) {
-        console.warn('Error signing out from Supabase (continuing anyway):', error);
-        // Don't throw - we've already cleared local state
-      }
-      
-      // Reset logout flag after a short delay to allow any pending operations to complete
+      // Also clear Supabase session for backward compatibility
+      await supabaseCore.auth.signOut({ scope: 'local' });
+
+      // Reset logout flag after a short delay
       setTimeout(() => {
         isLoggingOutRef.current = false;
       }, 1000);
     } catch (error) {
       console.error('Sign out failed:', error);
-      // Even on error, ensure local state is cleared
+      // Even on error, ensure everything is cleared
+      await clearTokens();
       setSession(null);
       setUser(null);
-      userRef.current = null; // Clear ref as well
+      userRef.current = null;
       setProfile(null);
       setLoading(false);
-      isLoggingOutRef.current = false; // Reset flag
+      isLoggingOutRef.current = false;
+    }
+  };
+
+  const refreshToken = async () => {
+    try {
+      const result = await refreshAccessToken();
+      if (result.data && session) {
+        // Update session with new expiry
+        const updatedSession: Session = {
+          ...session,
+          access_token: result.data.accessToken,
+          expires_at: Math.floor(Date.now() / 1000) + result.data.expiresIn,
+          expires_in: result.data.expiresIn,
+        };
+        setSession(updatedSession);
+      }
+    } catch (error) {
+      console.error('Token refresh failed:', error);
+      // If refresh fails, sign out
+      await signOut();
     }
   };
 
@@ -402,12 +490,14 @@ const verifyOTP = async (phone: string, token: string) => {
         user,
         profile,
         loading,
+        isNewUser,
         signInWithOTP,
         verifyOTP,
         devSignIn,
         dummyLogin,
         signOut,
         refreshProfile,
+        refreshToken,
       }}
     >
       {children}

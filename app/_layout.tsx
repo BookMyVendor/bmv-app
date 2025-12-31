@@ -132,85 +132,48 @@ function RootLayoutNav() {
         return;
       }
 
-      // NEW USER - just authenticated, needs to complete profile
-      if (session && isNewUser) {
-        console.log('[NAV] New user detected - needs to complete profile');
-        if (!inOnboarding) {
-          const termsAcceptedValue = await AsyncStorage.getItem(TERMS_ACCEPTANCE_KEY);
-          const isTermsAccepted = termsAcceptedValue === 'true';
-          
-          if (!isTermsAccepted && !inTermsAndConditions) {
-            console.log('[NAV] New user: redirecting to terms and conditions');
+      // Check if profile is complete (has first_name and last_name)
+      const isProfileComplete = profile?.first_name && profile?.last_name;
+
+      // NEW USER FLOW - if authenticated but profile NOT complete
+      if (session && !isProfileComplete) {
+        console.log('[NAV] User has no complete profile - needs to complete profile');
+        
+        const termsAcceptedValue = await AsyncStorage.getItem(TERMS_ACCEPTANCE_KEY);
+        const isTermsAccepted = termsAcceptedValue === 'true';
+
+        // Step 1: T&C must be accepted first
+        if (!isTermsAccepted) {
+          if (!inTermsAndConditions && !inOnboarding) {
+            console.log('[NAV] T&C not accepted - redirecting to terms and conditions');
             router.replace('/terms-and-conditions');
-          } else if (!inCompleteProfile) {
-            console.log('[NAV] New user: redirecting to complete profile');
-            router.replace('/complete-profile');
           }
-        }
-        return;
-      }
-
-      // EXISTING USER with profile - route to dashboard
-      if (session && profile && !isNewUser) {
-        console.log('[NAV] Existing user with profile - navigating to dashboard');
-        if (inAuthGroup || inCompleteProfile || inTermsAndConditions) {
-          console.log('[NAV] Existing user - redirecting to dashboard');
-          router.replace('/(tabs)');
-        }
-        return;
-      }
-
-      // NEW USER with profile - needs to complete onboarding flow
-      if (session && profile && isNewUser) {
-        console.log('[NAV] New user with profile created - checking onboarding status');
-        // Don't redirect if user is on business-registration screen
-        if (inBusinessReg) {
           return;
         }
+
+        // Step 2: After T&C, complete profile
+        if (!inCompleteProfile && !inOnboarding && !inBusinessReg) {
+          console.log('[NAV] T&C accepted but profile incomplete - redirecting to complete profile');
+          router.replace('/complete-profile');
+        }
+        return;
+      }
+
+      // EXISTING USER or PROFILE COMPLETE - route to dashboard
+      if (session && isProfileComplete) {
+        console.log('[NAV] User has complete profile - navigating to dashboard');
         
-        // Check AsyncStorage directly for fresh value
-        const checkAndNavigate = async () => {
-          try {
-            const termsAcceptedValue = await AsyncStorage.getItem(TERMS_ACCEPTANCE_KEY);
-            const isTermsAccepted = termsAcceptedValue === 'true';
-            
-            if (isTermsAccepted !== termsAccepted) {
-              setTermsAccepted(isTermsAccepted);
-            }
-            
-            if (inTermsAndConditions) {
-              return;
-            }
-            
-            // Check if T&C still needs to be accepted
-            const needsTermsAcceptance = !profile?.first_name && !isTermsAccepted;
-            
-            if (needsTermsAcceptance && !inTermsAndConditions) {
-              console.log('[NAV] New user: redirecting to terms and conditions');
-              router.replace('/terms-and-conditions');
-              return;
-            }
-            
-            // If profile not yet complete, stay on complete-profile
-            if (!profile?.first_name && !inCompleteProfile && isTermsAccepted) {
-              console.log('[NAV] New user: redirecting to complete profile');
-              router.replace('/complete-profile');
-            } else if (profile?.first_name && (inAuthGroup || inCompleteProfile || inTermsAndConditions)) {
-              console.log('[NAV] New user profile complete - redirecting to dashboard');
-              router.replace('/(tabs)');
-            }
-          } catch (error) {
-            console.error('[NAV] Error checking terms:', error);
-          }
-        };
-        
-        checkAndNavigate();
+        // Don't redirect if already on appropriate screen
+        if (inAuthGroup || inTermsAndConditions || inCompleteProfile) {
+          console.log('[NAV] User profile complete - redirecting to dashboard');
+          router.replace('/(tabs)');
+        }
         return;
       }
     };
 
     hideSplashAndNavigate();
-  }, [session, profile, loading, isNewUser, segments, hasSeenOnboarding, termsAccepted, initialLoad, isCheckingTerms]);
+  }, [session, profile?.id, profile?.first_name, profile?.last_name, loading, segments, hasSeenOnboarding, termsAccepted, initialLoad]);
 
   // Show gradient splash screen during initial load
   if (loading && initialLoad) {
