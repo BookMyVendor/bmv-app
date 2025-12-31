@@ -38,7 +38,7 @@ export default function ProfileScreen() {
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const router = useRouter();
-  
+
   // Refs for keyboard navigation
   const lastNameRef = useRef<TextInput>(null);
   const emailRef = useRef<TextInput>(null);
@@ -100,7 +100,7 @@ export default function ProfileScreen() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 1.0, // Use full quality initially, we'll compress after resize
@@ -171,39 +171,62 @@ export default function ProfileScreen() {
       // If a new photo was selected (local URI or blob URL, not a remote URL), upload it and create file_storage record
       // Check if it's a local/blob URI (not an http/https URL from storage)
       const isLocalImage = photoUri && !photoUri.startsWith('http://') && !photoUri.startsWith('https://');
-      
+
       if (isLocalImage) {
         console.log('📤 Uploading new profile photo:', photoUri);
-        
-        // Step 1: Upload image to storage bucket
-        const response = await fetch(photoUri);
-        if (!response.ok) {
-          throw new Error('Failed to load image');
-        }
-        
-        const blob = await response.blob();
-        console.log('✅ Image blob created, size:', blob.size);
-        
-        // Determine file extension from blob type or URI
+
+        let blob: Blob | undefined;
         let fileExt = 'jpg';
-        if (blob.type) {
-          if (blob.type.includes('png')) fileExt = 'png';
-          else if (blob.type.includes('jpeg') || blob.type.includes('jpg')) fileExt = 'jpg';
-          else if (blob.type.includes('webp')) fileExt = 'webp';
+        let fileName: string;
+        let filePath: string;
+        let file: any;
+        if (Platform.OS === 'web') {
+          // Web: fetch as before
+          const response = await fetch(photoUri as string);
+          if (!response.ok) {
+            throw new Error('Failed to load image');
+          }
+          blob = await response.blob();
+          if (blob.type) {
+            if (blob.type.includes('png')) fileExt = 'png';
+            else if (blob.type.includes('jpeg') || blob.type.includes('jpg')) fileExt = 'jpg';
+            else if (blob.type.includes('webp')) fileExt = 'webp';
+          } else {
+            fileExt = (photoUri as string).split('.').pop() || 'jpg';
+          }
+          fileName = `${user?.id}-${Date.now()}.${fileExt}`;
+          filePath = `profile-photos/${fileName}`;
+          file = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
         } else {
-          fileExt = photoUri.split('.').pop() || 'jpg';
+          // React Native: use expo-file-system (legacy API for compatibility)
+          const fs = await import('expo-file-system/legacy');
+          const fileInfo = await fs.getInfoAsync(photoUri as string);
+          if (!fileInfo.exists) throw new Error('File does not exist');
+          fileExt = (photoUri as string).split('.').pop() || 'jpg';
+          fileName = `${user?.id}-${Date.now()}.${fileExt}`;
+          filePath = `profile-photos/${fileName}`;
+          // Read as base64
+          const base64Data = await fs.readAsStringAsync(photoUri as string, { encoding: 'base64' });
+          // Turn base64 into buffer for upload
+          let BufferClass = (global as any).Buffer || require('buffer').Buffer;
+          file = BufferClass.from(base64Data, 'base64');
         }
-        
-        const fileName = `${user?.id}-${Date.now()}.${fileExt}`;
-        const filePath = `profile-photos/${fileName}`;
+
         console.log('📤 Uploading to storage:', filePath);
 
-        // Upload to storage bucket
+        let blobObj: { size: number; type: string };
+        if (Platform.OS === 'web') {
+          blobObj = blob ? { size: blob.size, type: blob.type } : { size: 0, type: 'image/jpeg' };
+        } else {
+          blobObj = { size: file.length, type: `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}` };
+        }
+
         const { error: uploadError } = await supabaseCore.storage
           .from('vendor-media')
-          .upload(filePath, blob, {
-            contentType: blob.type || `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`,
+          .upload(filePath, file, {
+            contentType: blobObj.type || 'image/jpeg',
           });
+
 
         if (uploadError) {
           console.error('❌ Storage upload error:', uploadError);
@@ -219,8 +242,8 @@ export default function ProfileScreen() {
             original_filename: fileName,
             stored_filename: fileName,
             file_path: filePath,
-            file_size: blob.size,
-            mime_type: blob.type || `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`,
+            file_size: blobObj.size,
+            mime_type: blobObj.type,
             file_extension: fileExt,
             storage_provider: 'supabase',
             storage_bucket: 'vendor-media',
@@ -262,6 +285,7 @@ export default function ProfileScreen() {
             console.warn('Failed to create verification document entry:', verificationDocError);
           }
         }
+        // no-op
       }
 
       // Step 4: Update vendors table
@@ -275,20 +299,20 @@ export default function ProfileScreen() {
         email: values.email,
         image_file_id: imageFileId || null,
       });
-      
+
       const updateData: any = {
         first_name: values.firstName,
         last_name: values.lastName,
         email: values.email,
       };
-      
+
       // Only include image_file_id if we have a value (either new or existing)
       if (imageFileId) {
         updateData.image_file_id = imageFileId;
       }
-      
+
       console.log('  - Final update data:', updateData);
-      
+
       const { data: updateResult, error } = await supabaseCore
         .from('vendors')
         .update(updateData)
@@ -300,17 +324,17 @@ export default function ProfileScreen() {
         console.error('  - Error details:', JSON.stringify(error, null, 2));
         throw error;
       }
-      
+
       console.log('✅ Vendor record updated');
       console.log('  - Update result:', updateResult);
-      
+
       // Verify the update by fetching the record
       const { data: verifyData, error: verifyError } = await supabaseCore
         .from('vendors')
         .select('image_file_id')
         .eq('id', user?.id)
         .single();
-      
+
       if (verifyError) {
         console.warn('⚠️ Could not verify update:', verifyError);
       } else {
@@ -319,10 +343,10 @@ export default function ProfileScreen() {
 
       // Small delay to ensure database update is committed
       await new Promise(resolve => setTimeout(resolve, 100));
-      
+
       // Refresh profile to get updated data
       await refreshProfile();
-      
+
       // If we uploaded a new image, update the photoUri to show the uploaded image
       if (isLocalImage && imageFileId) {
         // Fetch the public URL for the uploaded image
@@ -340,7 +364,7 @@ export default function ProfileScreen() {
           console.log('✅ Updated photoUri to:', urlData.publicUrl);
         }
       }
-      
+
       Alert.alert('Success', 'Profile updated successfully');
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to save profile');
@@ -406,135 +430,135 @@ export default function ProfileScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-        <Formik
-          initialValues={{
-            firstName: profile?.first_name || '',
-            lastName: profile?.last_name || '',
-            email: profile?.email || '',
-          }}
-          validationSchema={profileSchema}
-          onSubmit={handleSubmit}
-          enableReinitialize
-        >
-          {({
-            handleChange,
-            handleBlur,
-            handleSubmit,
-            values,
-            errors,
-            touched,
-          }) => (
-            <>
-              <TouchableOpacity
-                style={styles.photoContainer}
-                onPress={showImageOptions}
-              >
-                {photoUri ? (
-                  <Image source={{ uri: photoUri }} style={styles.photo} />
-                ) : (
-                  <View style={styles.photoPlaceholder}>
-                    <Camera size={32} color={Colors.text.tertiary} />
-                  </View>
-                )}
-                <LinearGradient
-                  colors={[Colors.primary.main, Colors.primary.light]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.photoOverlay}
+          <Formik
+            initialValues={{
+              firstName: profile?.first_name || '',
+              lastName: profile?.last_name || '',
+              email: profile?.email || '',
+            }}
+            validationSchema={profileSchema}
+            onSubmit={handleSubmit}
+            enableReinitialize
+          >
+            {({
+              handleChange,
+              handleBlur,
+              handleSubmit,
+              values,
+              errors,
+              touched,
+            }) => (
+              <>
+                <TouchableOpacity
+                  style={styles.photoContainer}
+                  onPress={showImageOptions}
                 >
-                  <Camera size={20} color={Colors.neutral.white} />
-                </LinearGradient>
-              </TouchableOpacity>
-
-              <View style={styles.infoCard}>
-                <Text style={styles.infoLabel}>Phone Number</Text>
-                <Text style={styles.infoValue}>{profile?.phone}</Text>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>
-                  First Name <Text style={styles.required}>*</Text>
-                </Text>
-                <TextInput
-                  ref={null}
-                  style={styles.input}
-                  placeholder="Enter first name"
-                  value={values.firstName}
-                  onChangeText={handleChange('firstName')}
-                  onBlur={handleBlur('firstName')}
-                  returnKeyType="next"
-                  onSubmitEditing={() => lastNameRef.current?.focus()}
-                />
-                {touched.firstName && errors.firstName && (
-                  <Text style={styles.errorText}>{errors.firstName}</Text>
-                )}
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>
-                  Last Name <Text style={styles.required}>*</Text>
-                </Text>
-                <TextInput
-                  ref={lastNameRef}
-                  style={styles.input}
-                  placeholder="Enter last name"
-                  value={values.lastName}
-                  onChangeText={handleChange('lastName')}
-                  onBlur={handleBlur('lastName')}
-                  returnKeyType="next"
-                  onSubmitEditing={() => emailRef.current?.focus()}
-                />
-                {touched.lastName && errors.lastName && (
-                  <Text style={styles.errorText}>{errors.lastName}</Text>
-                )}
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>
-                  Email Address <Text style={styles.required}>*</Text>
-                </Text>
-                <TextInput
-                  ref={emailRef}
-                  style={styles.input}
-                  placeholder="Enter email address"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  value={values.email}
-                  onChangeText={handleChange('email')}
-                  onBlur={handleBlur('email')}
-                  returnKeyType="done"
-                  onSubmitEditing={() => handleSubmit()}
-                />
-                {touched.email && errors.email && (
-                  <Text style={styles.errorText}>{errors.email}</Text>
-                )}
-              </View>
-
-              <TouchableOpacity
-                style={[styles.saveButton, uploading && styles.buttonDisabled]}
-                onPress={() => handleSubmit()}
-                disabled={uploading}
-                activeOpacity={0.8}
-              >
-                <LinearGradient
-                  colors={[Colors.success.main, Colors.success.light]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.saveButtonGradient}
-                >
-                  {uploading ? (
-                    <ActivityIndicator color={Colors.neutral.white} />
+                  {photoUri ? (
+                    <Image source={{ uri: photoUri }} style={styles.photo} />
                   ) : (
-                    <>
-                      <Save size={20} color={Colors.neutral.white} strokeWidth={2.5} />
-                      <Text style={styles.saveButtonText}>Save Changes</Text>
-                    </>
+                    <View style={styles.photoPlaceholder}>
+                      <Camera size={32} color={Colors.text.tertiary} />
+                    </View>
                   )}
-                </LinearGradient>
-              </TouchableOpacity>
-            </>
-          )}
-        </Formik>
+                  <LinearGradient
+                    colors={[Colors.primary.main, Colors.primary.light]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.photoOverlay}
+                  >
+                    <Camera size={20} color={Colors.neutral.white} />
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                <View style={styles.infoCard}>
+                  <Text style={styles.infoLabel}>Phone Number</Text>
+                  <Text style={styles.infoValue}>{profile?.phone}</Text>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>
+                    First Name <Text style={styles.required}>*</Text>
+                  </Text>
+                  <TextInput
+                    ref={null}
+                    style={styles.input}
+                    placeholder="Enter first name"
+                    value={values.firstName}
+                    onChangeText={handleChange('firstName')}
+                    onBlur={handleBlur('firstName')}
+                    returnKeyType="next"
+                    onSubmitEditing={() => lastNameRef.current?.focus()}
+                  />
+                  {touched.firstName && errors.firstName && (
+                    <Text style={styles.errorText}>{errors.firstName}</Text>
+                  )}
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>
+                    Last Name <Text style={styles.required}>*</Text>
+                  </Text>
+                  <TextInput
+                    ref={lastNameRef}
+                    style={styles.input}
+                    placeholder="Enter last name"
+                    value={values.lastName}
+                    onChangeText={handleChange('lastName')}
+                    onBlur={handleBlur('lastName')}
+                    returnKeyType="next"
+                    onSubmitEditing={() => emailRef.current?.focus()}
+                  />
+                  {touched.lastName && errors.lastName && (
+                    <Text style={styles.errorText}>{errors.lastName}</Text>
+                  )}
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>
+                    Email Address <Text style={styles.required}>*</Text>
+                  </Text>
+                  <TextInput
+                    ref={emailRef}
+                    style={styles.input}
+                    placeholder="Enter email address"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    value={values.email}
+                    onChangeText={handleChange('email')}
+                    onBlur={handleBlur('email')}
+                    returnKeyType="done"
+                    onSubmitEditing={() => handleSubmit()}
+                  />
+                  {touched.email && errors.email && (
+                    <Text style={styles.errorText}>{errors.email}</Text>
+                  )}
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.saveButton, uploading && styles.buttonDisabled]}
+                  onPress={() => handleSubmit()}
+                  disabled={uploading}
+                  activeOpacity={0.8}
+                >
+                  <LinearGradient
+                    colors={[Colors.success.main, Colors.success.light]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.saveButtonGradient}
+                  >
+                    {uploading ? (
+                      <ActivityIndicator color={Colors.neutral.white} />
+                    ) : (
+                      <>
+                        <Save size={20} color={Colors.neutral.white} strokeWidth={2.5} />
+                        <Text style={styles.saveButtonText}>Save Changes</Text>
+                      </>
+                    )}
+                  </LinearGradient>
+                </TouchableOpacity>
+              </>
+            )}
+          </Formik>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>

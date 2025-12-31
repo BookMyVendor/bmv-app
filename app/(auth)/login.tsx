@@ -16,7 +16,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
 import ExternalLogo from '@/components/ExternalLogo';
-import { sendOTP } from '@/lib/otpAuthApi';
+import { sendOTP, resendOTP } from '@/lib/otpAuthApi';
 
 
 
@@ -27,11 +27,22 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [rateLimitCountdown, setRateLimitCountdown] = useState(0);
+  const [resendCountdown, setResendCountdown] = useState(0);
   const [otpAttemptsRemaining, setOtpAttemptsRemaining] = useState<number | null>(null);
 
   const isVerifyingRef = useRef(false);
   const { verifyOTP: authVerifyOTP } = useAuth();
   const router = useRouter();
+
+  useEffect(() => {
+    let timer: any;
+    if (resendCountdown > 0) {
+      timer = setInterval(() => {
+        setResendCountdown((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [resendCountdown]);
 
   /* -------------------- Helpers -------------------- */
 
@@ -74,61 +85,83 @@ export default function LoginScreen() {
     }
 
     setStep('otp');
+    setResendCountdown(30); // Initial 30s countdown
+  };
+
+  /* -------------------- OTP RESEND -------------------- */
+
+  const handleResendOTP = async () => {
+    if (resendCountdown > 0 || loading) return;
+
+    setLoading(true);
+    setError('');
+    setOtp('');
+
+    const formattedPhone = formatPhoneNumber(phone);
+    const result = await resendOTP(formattedPhone);
+    setLoading(false);
+
+    if (result?.error) {
+      setError(result.error.message);
+      return;
+    }
+
+    setResendCountdown(60); // Set to 60s for subsequent resends
   };
 
   /* -------------------- OTP VERIFY -------------------- */
 
   const handleVerifyOTP = async () => {
     if (isVerifyingRef.current) return;
-  
+
     if (otp.length !== 6) {
       setError('Please enter a 6-digit OTP');
       return;
     }
-  
+
     isVerifyingRef.current = true;
     setLoading(true);
     setError('');
-  
+
     const formattedPhone = formatPhoneNumber(phone);
     let hasError = false;
-  
+
     try {
       const result = await authVerifyOTP(formattedPhone, otp);
-  
+
       if (result?.error) {
         hasError = true;
-        const code = result.error.code;
-  
+        const code = (result.error as any).code;
+
         if (code === 'OTP_EXPIRED' || code === 'OTP_NOT_FOUND') {
           setError('OTP expired. Please request a new one.');
           setStep('phone');
           setOtp('');
           return;
         }
-  
+
         if (code === 'MAX_ATTEMPTS_EXCEEDED') {
           setError('Maximum attempts exceeded.');
           setStep('phone');
           setOtp('');
           return;
         }
-  
+
         if (code === 'INVALID_OTP') {
           setError('Invalid OTP. Try again.');
           setOtp('');
           return;
         }
-  
+
         setError(result.error.message);
         return;
       }
-  
+
       // ✅ SUCCESS — user is logged in
       // AuthContext now has session + profile loaded
       // The navigation logic in _layout.tsx will automatically route the user
       // Keep loading true so user sees spinner while navigation happens
-      
+
     } catch (error) {
       console.error('Unexpected error during OTP verification:', error);
       setError('An unexpected error occurred. Please try again.');
@@ -141,7 +174,7 @@ export default function LoginScreen() {
       }
     }
   };
-  
+
 
   /* -------------------- UI -------------------- */
 
@@ -165,9 +198,17 @@ export default function LoginScreen() {
                     placeholder="Mobile Number"
                     keyboardType="phone-pad"
                     value={phone}
-                    onChangeText={setPhone}
-                    maxLength={13}
+                    onChangeText={(text) => {
+                      const digitsOnly = text.replace(/\D/g, '');
+                      if (digitsOnly.length <= 10) {
+                        setPhone(digitsOnly);
+                      }
+                    }}
+                    maxLength={10}
+                    returnKeyType="send"
+                    onSubmitEditing={handleSendOTP}
                   />
+
                 </View>
 
                 <TouchableOpacity
@@ -182,7 +223,10 @@ export default function LoginScreen() {
               </>
             ) : (
               <>
-                <Text style={styles.otpLabel}>Enter 6-digit OTP</Text>
+                <View style={styles.otpHeader}>
+                  <Text style={styles.otpLabel}>Enter 6-digit OTP sent to</Text>
+                  <Text style={styles.phoneNumberDisplay}>{formatPhoneNumber(phone)}</Text>
+                </View>
 
                 <TextInput
                   style={styles.otpInput}
@@ -191,6 +235,9 @@ export default function LoginScreen() {
                   value={otp}
                   onChangeText={(val) => setOtp(val.replace(/\D/g, ''))}
                   textAlign="center"
+                  autoFocus={true}
+                  returnKeyType="done"
+                  onSubmitEditing={handleVerifyOTP}
                 />
 
                 {otpAttemptsRemaining !== null && (
@@ -209,21 +256,30 @@ export default function LoginScreen() {
                   </LinearGradient>
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={styles.button}
-                  onPress={() => {
-                    setStep('phone');
-                    setOtp('');
-                    setError('');
-                  }}
-                >
-                  <LinearGradient
-                    colors={[Colors.secondary.main, Colors.secondary.light]}
-                    style={styles.buttonGradient}
+                <View style={styles.otpFooter}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setStep('phone');
+                      setOtp('');
+                      setError('');
+                    }}
+                    disabled={loading}
                   >
-                    <Text style={styles.buttonText}>Change Phone Number</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
+                    <Text style={[styles.footerLink, loading && styles.disabledLink]}>Change Phone Number</Text>
+                  </TouchableOpacity>
+
+                  <View>
+                    {resendCountdown > 0 ? (
+                      <Text style={styles.resendText}>
+                        Resend in <Text style={styles.countdownText}>{resendCountdown}s</Text>
+                      </Text>
+                    ) : (
+                      <TouchableOpacity onPress={handleResendOTP} disabled={loading}>
+                        <Text style={[styles.footerLink, loading && styles.disabledLink]}>Resend OTP</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
               </>
             )}
 
@@ -267,8 +323,39 @@ const styles = StyleSheet.create({
 
   otpLabel: {
     textAlign: 'center',
-    marginBottom: 10,
     fontSize: 14,
+    color: '#666',
+  },
+
+  otpHeader: {
+    alignItems: 'center',
+    marginBottom: Spacing.xl,
+  },
+
+  phoneDisplayContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+
+  phoneNumberDisplay: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.text.primary,
+  },
+
+  editButton: {
+    marginLeft: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    backgroundColor: Colors.primary.light + '20',
+    borderRadius: 4,
+  },
+
+  editText: {
+    fontSize: 12,
+    color: Colors.primary.main,
+    fontWeight: '600',
   },
 
   otpInput: {
@@ -279,7 +366,36 @@ const styles = StyleSheet.create({
     fontSize: 24,
     letterSpacing: 12,
     borderColor: Colors.primary.main,
-    marginBottom: 16,
+    marginBottom: 24,
+  },
+
+  otpFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: Spacing.sm,
+    paddingHorizontal: 4,
+  },
+
+  resendText: {
+    fontSize: 13,
+    color: '#666',
+  },
+
+  countdownText: {
+    fontWeight: '700',
+    color: Colors.primary.main,
+  },
+
+  footerLink: {
+    fontSize: 13,
+    color: Colors.primary.main,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+
+  disabledLink: {
+    opacity: 0.5,
   },
 
   button: {

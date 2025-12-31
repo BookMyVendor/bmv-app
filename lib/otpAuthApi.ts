@@ -17,6 +17,12 @@ export interface SendOTPResponse {
   retryAfter?: number; // seconds (for rate limiting)
 }
 
+export interface ResendOTPResponse {
+  success: boolean;
+  expiresIn: number; // seconds
+  retryAfter?: number; // seconds (for rate limiting)
+}
+
 export interface VerifyOTPRequest {
   phone: string;
   otp: string;
@@ -37,7 +43,12 @@ export interface VerifyOTPResponse {
     id: string;
     phone: string;
     created_at?: string;
-    // NOTE: Profile data (first_name, last_name, email, image_file_id, etc.)
+    email?: string | null;
+    email_confirmed_at?: string;
+    phone_confirmed_at?: string;
+    app_metadata?: any;
+    user_metadata?: any;
+    // NOTE: Detailed profile data (first_name, last_name, image_file_id, etc.)
     // should be fetched by dashboard/profile pages, not during auth
     // This keeps authentication focused and simple
   };
@@ -132,6 +143,42 @@ export async function sendOTP(phone: string): Promise<{ data?: SendOTPResponse; 
     return { data: data as SendOTPResponse };
   } catch (error: any) {
     console.error('Error sending OTP:', error);
+    return {
+      error: {
+        code: 'NETWORK_ERROR',
+        message: error.message || 'Network error. Please check your connection.',
+      },
+    };
+  }
+}
+
+/**
+ * Resend OTP to phone number
+ */
+export async function resendOTP(phone: string): Promise<{ data?: ResendOTPResponse; error?: AuthError }> {
+  try {
+    const projectRef = getProjectRef();
+    const url = `https://${projectRef}.supabase.co/functions/v1/auth-vendor-resend-otp`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        phone,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return { error: parseErrorResponse(response, data) };
+    }
+
+    return { data: data as ResendOTPResponse };
+  } catch (error: any) {
+    console.error('Error resending OTP:', error);
     return {
       error: {
         code: 'NETWORK_ERROR',

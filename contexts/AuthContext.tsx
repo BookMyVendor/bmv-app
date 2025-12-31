@@ -40,41 +40,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const userRef = useRef<User | null>(null);
   const isLoggingOutRef = useRef<boolean>(false);
 
-const fetchProfile = async (userId: string) => {
-  try {
-    // Don't fetch if userId is not provided or if we're logging out
-    if (!userId || isLoggingOutRef.current) {
-      setProfile(null);
-      return;
+  const fetchProfile = async (userId: string) => {
+    try {
+      // Don't fetch if userId is not provided or if we're logging out
+      if (!userId || isLoggingOutRef.current) {
+        setProfile(null);
+        return;
+      }
+
+      const { data, error } = await supabaseCore
+        .from('vendors')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (error) throw error;
+      setProfile(data);
+    } catch (error) {
+      console.error('Error fetching profile:', error);
     }
+  };
 
-    const { data, error } = await supabaseCore
-      .from('vendors')
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle();
-
-    if (error) throw error;
-    setProfile(data);
-  } catch (error) {
-    console.error('Error fetching profile:', error);
-  }
-};
-
-// Helper to set session on all Supabase clients
-const setSessionOnAllClients = async (session: Session) => {
-  try {
-    // Set session on all clients to ensure they use the custom JWT for RLS
-    await Promise.all([
-      supabaseCore.auth.setSession(session),
-      supabaseCms.auth.setSession(session),
-      supabaseCrm.auth.setSession(session),
-    ]);
-    console.log('[AUTH] Session set on all Supabase clients');
-  } catch (error) {
-    console.error('[AUTH] Failed to set session on all clients:', error);
-  }
-};
+  // Helper to set session on all Supabase clients
+  const setSessionOnAllClients = async (session: Session) => {
+    try {
+      // Set session on all clients to ensure they use the custom JWT for RLS
+      await Promise.all([
+        supabaseCore.auth.setSession(session),
+        supabaseCms.auth.setSession(session),
+        supabaseCrm.auth.setSession(session),
+      ]);
+      console.log('[AUTH] Session set on all Supabase clients');
+    } catch (error) {
+      console.error('[AUTH] Failed to set session on all clients:', error);
+    }
+  };
 
   // Check for stored tokens on mount and restore session
   useEffect(() => {
@@ -145,10 +145,17 @@ const setSessionOnAllClients = async (session: Session) => {
           return;
         }
 
-        setSession(session);
-        setUser(session.user);
-        if (session.user?.id) {
-          await fetchProfile(session.user.id);
+        // Set loading to true while we prepare the session and profile
+        // This prevents the UI from trying to navigate before the profile is loaded
+        setLoading(true);
+        try {
+          if (session.user?.id) {
+            await fetchProfile(session.user.id);
+          }
+          setSession(session);
+          setUser(session.user);
+        } finally {
+          setLoading(false);
         }
       })();
     });
@@ -213,7 +220,7 @@ const setSessionOnAllClients = async (session: Session) => {
   const signInWithOTP = async (phone: string) => {
     try {
       const result = await sendOTP(phone);
-      
+
       if (result.error) {
         return { error: new Error(result.error.message) };
       }
@@ -226,11 +233,14 @@ const setSessionOnAllClients = async (session: Session) => {
 
 
   const verifyOTP = async (phone: string, token: string) => {
+    setLoading(true);
     try {
       const result = await verifyOTPApi(phone, token);
 
       if (result.error) {
-        return { error: new Error(result.error.message) };
+        const error = new Error(result.error.message);
+        (error as any).code = result.error.code;
+        return { error };
       }
 
       if (result.data) {
@@ -240,7 +250,7 @@ const setSessionOnAllClients = async (session: Session) => {
         const user: User = {
           id: userData.id,
           phone: userData.phone,
-          email: userData.email || null,
+          email: userData.email || undefined,
           created_at: userData.created_at || new Date().toISOString(),
           app_metadata: userData.app_metadata || {},
           user_metadata: userData.user_metadata || {},
@@ -269,30 +279,31 @@ const setSessionOnAllClients = async (session: Session) => {
         // This ensures RLS policies can verify auth.uid() from the JWT claims
         await setSessionOnAllClients(session);
 
+        // Fetch profile before updating session state to avoid UI flicker in navigation
+        if (!newUser && user.id) {
+          await fetchProfile(user.id);
+        } else {
+          setProfile(null);
+        }
+
         setSession(session);
         setUser(user);
         setIsNewUser(newUser);
         userRef.current = user;
-        
-        console.log('[AUTH] OTP Verification successful:', { 
-          userId: user.id, 
+
+        console.log('[AUTH] OTP Verification successful:', {
+          userId: user.id,
           newUser,
           tokenSet: true,
-          message: 'Auth complete. Dashboard/profile page will fetch data on load.'
+          message: 'Auth complete. Profile loaded if existing user.'
         });
-        
-        // NOTE: Profile data is NOT fetched here
-        // The dashboard or profile-completion page will fetch it when the page loads
-        // This keeps auth function focused on authentication only
-        setProfile(null);
 
         return { error: null };
       }
 
       return { error: new Error('No data received from verification') };
-    } catch (error) {
-      console.error('Verification error:', error);
-      return { error: error as Error };
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -374,7 +385,7 @@ const setSessionOnAllClients = async (session: Session) => {
     try {
       // Create a dummy user ID
       const dummyUserId = '00000000-0000-0000-0000-000000000000';
-      
+
       // Create dummy profile
       const dummyProfile: UserProfile = {
         id: dummyUserId,
@@ -387,7 +398,7 @@ const setSessionOnAllClients = async (session: Session) => {
 
       // Set profile directly (bypassing Supabase)
       setProfile(dummyProfile);
-      
+
       // Create a dummy session object
       const dummySession = {
         access_token: 'dummy_token',
