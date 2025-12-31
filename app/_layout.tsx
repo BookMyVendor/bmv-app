@@ -16,7 +16,7 @@ const ONBOARDING_STORAGE_KEY = 'has_seen_onboarding';
 const TERMS_ACCEPTANCE_KEY = 'vendor_terms_accepted';
 
 function RootLayoutNav() {
-  const { session, profile, loading } = useAuth();
+  const { session, profile, loading, isNewUser } = useAuth();
   const segments = useSegments();
   const router = useRouter();
   const [initialLoad, setInitialLoad] = useState(true);
@@ -77,6 +77,17 @@ function RootLayoutNav() {
     const inCompleteProfile = segments[0] === 'complete-profile';
     const inBusinessReg = segments[0] === 'business-registration';
 
+    console.log('[NAV DEBUG]', {
+      session: !!session,
+      profile: !!profile,
+      isNewUser,
+      loading,
+      hasSeenOnboarding,
+      termsAccepted,
+      currentSegment: segments[0],
+      userFirstName: profile?.first_name,
+    });
+
     // If user is on onboarding screen, don't interfere - let onboarding handle navigation
     if (inOnboarding) {
       // But still hide splash screen if not already hidden
@@ -100,78 +111,106 @@ function RootLayoutNav() {
       }
 
       // Show onboarding for first-time users (only if not logged in)
-      // But only if we're not already navigating away from onboarding
       if (hasSeenOnboarding === false && !session && !inAuthGroup) {
+        console.log('[NAV] Redirecting to onboarding');
         router.replace('/onboarding');
         return;
       }
 
-      // If no session, redirect to login (this handles logout case and post-onboarding)
-      // Check both session and user to ensure we're truly logged out
+      // If no session, redirect to login
       if (!session && !loading && hasSeenOnboarding) {
         if (!inAuthGroup && !inOnboarding) {
+          console.log('[NAV] No session - redirecting to login');
           router.replace('/(auth)/login');
         }
         return;
       }
 
-      // If we have a session but no profile yet, wait for profile to load
-      if (session && !profile && loading) {
+      // If profile is still loading, wait
+      if (session && loading) {
+        console.log('[NAV] Session exists but profile/data still loading');
         return;
       }
 
-      // If we have session and profile, handle navigation
-      if (session && profile) {
+      // NEW USER - just authenticated, needs to complete profile
+      if (session && isNewUser) {
+        console.log('[NAV] New user detected - needs to complete profile');
+        if (!inOnboarding) {
+          const termsAcceptedValue = await AsyncStorage.getItem(TERMS_ACCEPTANCE_KEY);
+          const isTermsAccepted = termsAcceptedValue === 'true';
+          
+          if (!isTermsAccepted && !inTermsAndConditions) {
+            console.log('[NAV] New user: redirecting to terms and conditions');
+            router.replace('/terms-and-conditions');
+          } else if (!inCompleteProfile) {
+            console.log('[NAV] New user: redirecting to complete profile');
+            router.replace('/complete-profile');
+          }
+        }
+        return;
+      }
+
+      // EXISTING USER with profile - route to dashboard
+      if (session && profile && !isNewUser) {
+        console.log('[NAV] Existing user with profile - navigating to dashboard');
+        if (inAuthGroup || inCompleteProfile || inTermsAndConditions) {
+          console.log('[NAV] Existing user - redirecting to dashboard');
+          router.replace('/(tabs)');
+        }
+        return;
+      }
+
+      // NEW USER with profile - needs to complete onboarding flow
+      if (session && profile && isNewUser) {
+        console.log('[NAV] New user with profile created - checking onboarding status');
         // Don't redirect if user is on business-registration screen
         if (inBusinessReg) {
           return;
         }
         
-        // Check AsyncStorage directly for fresh value (don't rely on state)
+        // Check AsyncStorage directly for fresh value
         const checkAndNavigate = async () => {
           try {
             const termsAcceptedValue = await AsyncStorage.getItem(TERMS_ACCEPTANCE_KEY);
             const isTermsAccepted = termsAcceptedValue === 'true';
             
-            // Update state for future checks
             if (isTermsAccepted !== termsAccepted) {
               setTermsAccepted(isTermsAccepted);
             }
             
-            // If on terms screen, allow it to handle its own navigation
-            // Don't block navigation from terms screen
             if (inTermsAndConditions) {
               return;
             }
             
-            // Check if T&C needs to be accepted (for new users without first_name)
+            // Check if T&C still needs to be accepted
             const needsTermsAcceptance = !profile?.first_name && !isTermsAccepted;
             
             if (needsTermsAcceptance && !inTermsAndConditions) {
-              console.log('[NAV] Redirecting to terms and conditions');
+              console.log('[NAV] New user: redirecting to terms and conditions');
               router.replace('/terms-and-conditions');
               return;
             }
             
-            // If terms accepted and no first_name, go to complete profile
+            // If profile not yet complete, stay on complete-profile
             if (!profile?.first_name && !inCompleteProfile && isTermsAccepted) {
-              console.log('[NAV] Redirecting to complete profile');
+              console.log('[NAV] New user: redirecting to complete profile');
               router.replace('/complete-profile');
             } else if (profile?.first_name && (inAuthGroup || inCompleteProfile || inTermsAndConditions)) {
-              console.log('[NAV] Redirecting to tabs');
+              console.log('[NAV] New user profile complete - redirecting to dashboard');
               router.replace('/(tabs)');
             }
           } catch (error) {
-            console.error('[NAV] Error checking terms acceptance:', error);
+            console.error('[NAV] Error checking terms:', error);
           }
         };
         
         checkAndNavigate();
+        return;
       }
     };
 
     hideSplashAndNavigate();
-  }, [session, profile, loading, segments, hasSeenOnboarding, termsAccepted, initialLoad, isCheckingTerms]);
+  }, [session, profile, loading, isNewUser, segments, hasSeenOnboarding, termsAccepted, initialLoad, isCheckingTerms]);
 
   // Show gradient splash screen during initial load
   if (loading && initialLoad) {
