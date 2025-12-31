@@ -11,15 +11,14 @@ import {
   ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Smartphone, Shield } from 'lucide-react-native';
+import { Smartphone } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
-import Logo from '@/components/Logo';
 import ExternalLogo from '@/components/ExternalLogo';
+import { sendOTP, resendOTP } from '@/lib/otpAuthApi';
 
-const DEV_MODE = true;
-const DEV_OTP = '123456';
+
 
 export default function LoginScreen() {
   const [phone, setPhone] = useState('');
@@ -27,230 +26,269 @@ export default function LoginScreen() {
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [devInfo, setDevInfo] = useState('');
-  const { signInWithOTP, verifyOTP, dummyLogin } = useAuth();
-  const router = useRouter();
-  const otpInputRef = useRef<TextInput>(null);
+  const [rateLimitCountdown, setRateLimitCountdown] = useState(0);
+  const [resendCountdown, setResendCountdown] = useState(0);
+  const [otpAttemptsRemaining, setOtpAttemptsRemaining] = useState<number | null>(null);
 
-  // Auto-focus OTP input when step changes to 'otp'
+  const isVerifyingRef = useRef(false);
+  const { verifyOTP: authVerifyOTP } = useAuth();
+  const router = useRouter();
+
   useEffect(() => {
-    if (step === 'otp') {
-      // Small delay to ensure the input is rendered
-      setTimeout(() => {
-        otpInputRef.current?.focus();
-      }, 100);
+    let timer: any;
+    if (resendCountdown > 0) {
+      timer = setInterval(() => {
+        setResendCountdown((prev) => prev - 1);
+      }, 1000);
     }
-  }, [step]);
+    return () => clearInterval(timer);
+  }, [resendCountdown]);
+
+  /* -------------------- Helpers -------------------- */
+
+  const formatPhoneNumber = (text: string): string => {
+    const digits = text.replace(/\D/g, '');
+    return digits.length === 10 ? `+91${digits}` : text;
+  };
+
+  const validatePhoneNumber = (phone: string) => {
+    const digits = phone.replace(/\D/g, '');
+    return digits.length >= 10 && digits.length <= 13;
+  };
+
+  /* -------------------- OTP SEND -------------------- */
 
   const handleSendOTP = async () => {
-    if (!phone || phone.length < 10) {
+    const formattedPhone = formatPhoneNumber(phone);
+
+    if (!validatePhoneNumber(formattedPhone)) {
       setError('Please enter a valid phone number');
       return;
     }
 
     setLoading(true);
     setError('');
-    setDevInfo('');
+    setOtp('');
+    setOtpAttemptsRemaining(null);
 
-    if (DEV_MODE) {/* 
-      // In dev mode, skip Twilio entirely - just proceed to OTP step
-      setLoading(false);
-      setStep('otp');
-      //setDevInfo(`Development Mode: Use OTP ${DEV_OTP}`);
-      return;
-     */}
-
-    const { error } = await signInWithOTP(phone);
-
+    const result = await sendOTP(formattedPhone);
     setLoading(false);
 
-    if (error) {
-      setError(error.message);
-    } else {
-      setStep('otp');
-    }
-  };
-
-  const handleVerifyOTP = async () => {
-    if (!otp || otp.length !== 6) {
-      setError('Please enter a valid 6-digit OTP');
+    if (result?.error) {
+      if (result.error.code === 'RATE_LIMIT') {
+        setRateLimitCountdown(result.error.retryAfter || 60);
+        setError(`Too many requests. Try again later.`);
+      } else {
+        setError(result.error.message);
+      }
       return;
     }
+
+    setStep('otp');
+    setResendCountdown(30); // Initial 30s countdown
+  };
+
+  /* -------------------- OTP RESEND -------------------- */
+
+  const handleResendOTP = async () => {
+    if (resendCountdown > 0 || loading) return;
 
     setLoading(true);
     setError('');
+    setOtp('');
 
-    // verifyOTP now handles dev mode internally
-    const { error } = await verifyOTP(phone, otp);
-
+    const formattedPhone = formatPhoneNumber(phone);
+    const result = await resendOTP(formattedPhone);
     setLoading(false);
 
-    if (error) {
-      setError(error.message);
+    if (result?.error) {
+      setError(result.error.message);
+      return;
+    }
+
+    setResendCountdown(60); // Set to 60s for subsequent resends
+  };
+
+  /* -------------------- OTP VERIFY -------------------- */
+
+  const handleVerifyOTP = async () => {
+    if (isVerifyingRef.current) return;
+
+    if (otp.length !== 6) {
+      setError('Please enter a 6-digit OTP');
+      return;
+    }
+
+    isVerifyingRef.current = true;
+    setLoading(true);
+    setError('');
+
+    const formattedPhone = formatPhoneNumber(phone);
+    let hasError = false;
+
+    try {
+      const result = await authVerifyOTP(formattedPhone, otp);
+
+      if (result?.error) {
+        hasError = true;
+        const code = (result.error as any).code;
+
+        if (code === 'OTP_EXPIRED' || code === 'OTP_NOT_FOUND') {
+          setError('OTP expired. Please request a new one.');
+          setStep('phone');
+          setOtp('');
+          return;
+        }
+
+        if (code === 'MAX_ATTEMPTS_EXCEEDED') {
+          setError('Maximum attempts exceeded.');
+          setStep('phone');
+          setOtp('');
+          return;
+        }
+
+        if (code === 'INVALID_OTP') {
+          setError('Invalid OTP. Try again.');
+          setOtp('');
+          return;
+        }
+
+        setError(result.error.message);
+        return;
+      }
+
+      // ✅ SUCCESS — user is logged in
+      // AuthContext now has session + profile loaded
+      // The navigation logic in _layout.tsx will automatically route the user
+      // Keep loading true so user sees spinner while navigation happens
+
+    } catch (error) {
+      console.error('Unexpected error during OTP verification:', error);
+      setError('An unexpected error occurred. Please try again.');
+      hasError = true;
+    } finally {
+      isVerifyingRef.current = false;
+      // Only set loading to false on errors
+      if (hasError) {
+        setLoading(false);
+      }
     }
   };
 
+
+  /* -------------------- UI -------------------- */
+
   return (
-    <LinearGradient
-      colors={[Colors.background.primary, '#FFFFFF']}
-      style={styles.container}
-    >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardView}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
+    <LinearGradient colors={[Colors.background.primary, '#FFFFFF']} style={styles.container}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
           <View style={styles.content}>
-          <View style={styles.headerContainer}>
-            <Text style={styles.titleSmall}>Welcome to</Text>
-            <ExternalLogo size={280} style={styles.logo} />
-            {/* <Text style={styles.title}>Welcome to BookMyVendor</Text> */}
-            {/* {step !== 'phone' && (
-             <Text style={styles.subtitle}>
-                 Enter the OTP sent to your phone
-                </Text>
-                )} */}
-          </View>
 
-          {/* {DEV_MODE && (
-            <TouchableOpacity
-              style={styles.dummyLoginButton}
-              onPress={async () => {
-                await dummyLogin();
-              }}
-            >
-              <Text style={styles.dummyLoginText}>🚀 Skip Login (Dev Mode)</Text>
-            </TouchableOpacity>
-          )} */}
+            <View style={styles.headerContainer}>
+              <Text style={styles.titleSmall}>Welcome to</Text>
+              <ExternalLogo size={260} />
+            </View>
 
-          {step === 'phone' ? (
-            <>
-              <View style={styles.inputContainer}>
-                <View style={styles.inputIconContainer}>
+            {step === 'phone' ? (
+              <>
+                <View style={styles.inputContainer}>
                   <Smartphone size={20} color="#FFA500" />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Mobile Number"
+                    keyboardType="phone-pad"
+                    value={phone}
+                    onChangeText={(text) => {
+                      const digitsOnly = text.replace(/\D/g, '');
+                      if (digitsOnly.length <= 10) {
+                        setPhone(digitsOnly);
+                      }
+                    }}
+                    maxLength={10}
+                    returnKeyType="send"
+                    onSubmitEditing={handleSendOTP}
+                  />
+
                 </View>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Mobile Number"
-                  placeholderTextColor="#999"
-                  keyboardType="phone-pad"
-                  value={phone}
-                  onChangeText={setPhone}
-                  maxLength={10}
-                  returnKeyType="send"
-                  onSubmitEditing={handleSendOTP}
-                  blurOnSubmit={true}
-                />
-              </View>
-              <TouchableOpacity
-                style={[styles.button, loading && styles.buttonDisabled]}
-                onPress={handleSendOTP}
-                disabled={loading}
-                activeOpacity={0.8}
-              >
-                <LinearGradient
-                  colors={['#FFA500', '#FF8C00']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 0, y: 1 }}
-                  style={styles.buttonGradient}
+
+                <TouchableOpacity
+                  style={[styles.button, loading && styles.buttonDisabled]}
+                  onPress={handleSendOTP}
+                  disabled={loading}
                 >
-                  {loading ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.buttonText}>Send OTP</Text>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <View style={styles.inputContainer}>
-                <View style={styles.inputIconContainer}>
-                  <Shield size={20} color="#6BB6FF" />
+                  <LinearGradient colors={['#FFA500', '#FF8C00']} style={styles.buttonGradient}>
+                    {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Send OTP</Text>}
+                  </LinearGradient>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <View style={styles.otpHeader}>
+                  <Text style={styles.otpLabel}>Enter 6-digit OTP sent to</Text>
+                  <Text style={styles.phoneNumberDisplay}>{formatPhoneNumber(phone)}</Text>
                 </View>
+
                 <TextInput
-                  ref={otpInputRef}
-                  style={styles.input}
-                  placeholder="Enter 6-digit OTP"
-                  placeholderTextColor="#999"
+                  style={styles.otpInput}
                   keyboardType="number-pad"
-                  value={otp}
-                  onChangeText={setOtp}
                   maxLength={6}
+                  value={otp}
+                  onChangeText={(val) => setOtp(val.replace(/\D/g, ''))}
+                  textAlign="center"
+                  autoFocus={true}
                   returnKeyType="done"
                   onSubmitEditing={handleVerifyOTP}
-                  blurOnSubmit={true}
                 />
 
+                {otpAttemptsRemaining !== null && (
+                  <Text style={styles.attemptsText}>
+                    {otpAttemptsRemaining} attempt(s) remaining
+                  </Text>
+                )}
+
+                <TouchableOpacity
+                  style={[styles.button, loading && styles.buttonDisabled]}
+                  onPress={handleVerifyOTP}
+                  disabled={loading}
+                >
+                  <LinearGradient colors={['#87CEEB', '#6BB6FF']} style={styles.buttonGradient}>
+                    {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Verify OTP</Text>}
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                <View style={styles.otpFooter}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setStep('phone');
+                      setOtp('');
+                      setError('');
+                    }}
+                    disabled={loading}
+                  >
+                    <Text style={[styles.footerLink, loading && styles.disabledLink]}>Change Phone Number</Text>
+                  </TouchableOpacity>
+
+                  <View>
+                    {resendCountdown > 0 ? (
+                      <Text style={styles.resendText}>
+                        Resend in <Text style={styles.countdownText}>{resendCountdown}s</Text>
+                      </Text>
+                    ) : (
+                      <TouchableOpacity onPress={handleResendOTP} disabled={loading}>
+                        <Text style={[styles.footerLink, loading && styles.disabledLink]}>Resend OTP</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              </>
+            )}
+
+            {error ? (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>{error}</Text>
               </View>
+            ) : null}
 
-              <TouchableOpacity
-                style={[styles.button, loading && styles.buttonDisabled]}
-                onPress={handleVerifyOTP}
-                disabled={loading}
-                activeOpacity={0.8}
-              >
-                <LinearGradient
-                  colors={['#87CEEB', '#6BB6FF']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 0, y: 1 }}
-                  style={styles.buttonGradient}
-                >
-                  {loading ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.buttonText}>Verify OTP</Text>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
-              {/* <TouchableOpacity
-                style={styles.backButton}
-                onPress={() => {
-                  setStep('phone');
-                  setOtp('');
-                  setError('');
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.backButtonText}>Change Phone Number</Text>
-              </TouchableOpacity> */}
-              <TouchableOpacity
-                style={styles.button}
-                onPress={() => {
-                  setStep('phone');
-                  setOtp('');
-                  setError('');
-                }}
-                activeOpacity={0.8}
-              >
-                <LinearGradient
-                  colors={[Colors.secondary.main, Colors.secondary.light]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.buttonGradient}
-                >
-                  <Text style={styles.buttonText}>Change Phone Number</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-
-            </>
-          )}
-
-          {error ? (
-            <View style={styles.errorContainer}>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          ) : null}
-          {devInfo ? (
-            <View style={styles.devInfoContainer}>
-              <Text style={styles.devInfo}>{devInfo}</Text>
-            </View>
-          ) : null}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -258,159 +296,142 @@ export default function LoginScreen() {
   );
 }
 
+/* -------------------- Styles -------------------- */
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-  },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.xxxl,
-    paddingVertical: Spacing.xl,
-  },
-  titleWrapper: {
-    alignItems: 'center',
-  },
-  
-  titleSmall: {
-    fontSize: 22,
-    fontWeight: '600',
-    color: Colors.neutral.black,
-  },
-  
-  titleLarge: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: Colors.primary.black,
-  },
-  
-  headerContainer: {
-    alignItems: 'center',
-    marginBottom: Spacing.xxxl,
-  },
-  logo: {
-    marginTop: Spacing.md,
-    marginBottom: Spacing.md,
-    ...Shadows.colored,
-  },
-  iconCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: Spacing.xl,
-    ...Shadows.colored,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: Colors.text.primary,
-    marginBottom: Spacing.sm,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: Colors.text.secondary,
-    textAlign: 'center',
-    lineHeight: 24,
-  },
+  container: { flex: 1 },
+  scrollContent: { flexGrow: 1 },
+  content: { flex: 1, justifyContent: 'center', padding: Spacing.xxxl },
+
+  headerContainer: { alignItems: 'center', marginBottom: Spacing.xl },
+  titleSmall: { fontSize: 22, fontWeight: '600' },
+
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.neutral.white,
-    borderRadius: 12,
-    marginBottom: Spacing.lg,
-    paddingHorizontal: Spacing.lg,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    minHeight: 56,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    marginBottom: Spacing.lg,
   },
-  inputIconContainer: {
-    marginRight: Spacing.md,
-  },
+
   input: {
     flex: 1,
-    paddingVertical: Spacing.md,
     fontSize: 16,
+    paddingVertical: 12,
+  },
+
+  otpLabel: {
+    textAlign: 'center',
+    fontSize: 14,
+    color: '#666',
+  },
+
+  otpHeader: {
+    alignItems: 'center',
+    marginBottom: Spacing.xl,
+  },
+
+  phoneDisplayContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+
+  phoneNumberDisplay: {
+    fontSize: 16,
+    fontWeight: '700',
     color: Colors.text.primary,
   },
+
+  editButton: {
+    marginLeft: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    backgroundColor: Colors.primary.light + '20',
+    borderRadius: 4,
+  },
+
+  editText: {
+    fontSize: 12,
+    color: Colors.primary.main,
+    fontWeight: '600',
+  },
+
+  otpInput: {
+    height: 56,
+    borderWidth: 2,
+    borderRadius: 12,
+    textAlign: 'center',
+    fontSize: 24,
+    letterSpacing: 12,
+    borderColor: Colors.primary.main,
+    marginBottom: 24,
+  },
+
+  otpFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: Spacing.sm,
+    paddingHorizontal: 4,
+  },
+
+  resendText: {
+    fontSize: 13,
+    color: '#666',
+  },
+
+  countdownText: {
+    fontWeight: '700',
+    color: Colors.primary.main,
+  },
+
+  footerLink: {
+    fontSize: 13,
+    color: Colors.primary.main,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+
+  disabledLink: {
+    opacity: 0.5,
+  },
+
   button: {
     borderRadius: 12,
+    marginBottom: 12,
     overflow: 'hidden',
-    marginBottom: Spacing.md,
-    minHeight: 56,
   },
+
   buttonGradient: {
-    paddingVertical: Spacing.lg,
-    paddingHorizontal: Spacing.xl,
+    paddingVertical: 16,
     alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 56,
   },
+
+  buttonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
   buttonDisabled: {
     opacity: 0.6,
   },
-  buttonText: {
-    color: Colors.neutral.black,
-    fontSize: 16,
-    fontWeight: '500',
-    letterSpacing: 0.5,
-  },
-  backButton: {
-    alignItems: 'center',
-    padding: Spacing.md,
-  },
-  backButtonText: {
-    color: Colors.primary.main,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  secondaryButton: {
-    marginTop: 0,
-  },
+
   errorContainer: {
     backgroundColor: Colors.error.light + '20',
-    borderLeftWidth: 4,
-    borderLeftColor: Colors.error.main,
-    borderRadius: BorderRadius.sm,
-    padding: Spacing.md,
-    marginTop: Spacing.lg,
-  },
-  errorText: {
-    color: Colors.error.dark,
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  devInfoContainer: {
-    backgroundColor: Colors.success.light + '20',
-    borderLeftWidth: 4,
-    borderLeftColor: Colors.success.main,
-    borderRadius: BorderRadius.sm,
-    padding: Spacing.md,
-    marginTop: Spacing.lg,
-  },
-  devInfo: {
-    color: Colors.success.dark,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  dummyLoginButton: {
-    marginTop: 20,
     padding: 12,
-    backgroundColor: '#FF6B6B',
     borderRadius: 8,
-    alignItems: 'center',
+    marginTop: 16,
   },
-  dummyLoginText: {
-    color: '#000',
-    fontSize: 14,
-    fontWeight: '600',
+
+  errorText: {
+    color: Colors.error.main,
+  },
+
+  attemptsText: {
+    textAlign: 'center',
+    marginBottom: 8,
+    color: Colors.warning.main,
   },
 });

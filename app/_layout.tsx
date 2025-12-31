@@ -16,7 +16,7 @@ const ONBOARDING_STORAGE_KEY = 'has_seen_onboarding';
 const TERMS_ACCEPTANCE_KEY = 'vendor_terms_accepted';
 
 function RootLayoutNav() {
-  const { session, profile, loading } = useAuth();
+  const { session, profile, loading, isNewUser } = useAuth();
   const segments = useSegments();
   const router = useRouter();
   const [initialLoad, setInitialLoad] = useState(true);
@@ -77,6 +77,17 @@ function RootLayoutNav() {
     const inCompleteProfile = segments[0] === 'complete-profile';
     const inBusinessReg = segments[0] === 'business-registration';
 
+    console.log('[NAV DEBUG]', {
+      session: !!session,
+      profile: !!profile,
+      isNewUser,
+      loading,
+      hasSeenOnboarding,
+      termsAccepted,
+      currentSegment: segments[0],
+      userFirstName: profile?.first_name,
+    });
+
     // If user is on onboarding screen, don't interfere - let onboarding handle navigation
     if (inOnboarding) {
       // But still hide splash screen if not already hidden
@@ -100,78 +111,69 @@ function RootLayoutNav() {
       }
 
       // Show onboarding for first-time users (only if not logged in)
-      // But only if we're not already navigating away from onboarding
       if (hasSeenOnboarding === false && !session && !inAuthGroup) {
+        console.log('[NAV] Redirecting to onboarding');
         router.replace('/onboarding');
         return;
       }
 
-      // If no session, redirect to login (this handles logout case and post-onboarding)
-      // Check both session and user to ensure we're truly logged out
+      // If no session, redirect to login
       if (!session && !loading && hasSeenOnboarding) {
         if (!inAuthGroup && !inOnboarding) {
+          console.log('[NAV] No session - redirecting to login');
           router.replace('/(auth)/login');
         }
         return;
       }
 
-      // If we have a session but no profile yet, wait for profile to load
-      if (session && !profile && loading) {
+      // If profile is still loading, wait
+      if (session && loading) {
+        console.log('[NAV] Session exists but profile/data still loading');
         return;
       }
 
-      // If we have session and profile, handle navigation
-      if (session && profile) {
-        // Don't redirect if user is on business-registration screen
-        if (inBusinessReg) {
+      // Check if profile is complete (has first_name and last_name)
+      const isProfileComplete = profile?.first_name && profile?.last_name;
+
+      // NEW USER FLOW - if authenticated but profile NOT complete
+      if (session && !isProfileComplete) {
+        console.log('[NAV] User has no complete profile - needs to complete profile');
+        
+        const termsAcceptedValue = await AsyncStorage.getItem(TERMS_ACCEPTANCE_KEY);
+        const isTermsAccepted = termsAcceptedValue === 'true';
+
+        // Step 1: T&C must be accepted first
+        if (!isTermsAccepted) {
+          if (!inTermsAndConditions && !inOnboarding) {
+            console.log('[NAV] T&C not accepted - redirecting to terms and conditions');
+            router.replace('/terms-and-conditions');
+          }
           return;
         }
+
+        // Step 2: After T&C, complete profile
+        if (!inCompleteProfile && !inOnboarding && !inBusinessReg) {
+          console.log('[NAV] T&C accepted but profile incomplete - redirecting to complete profile');
+          router.replace('/complete-profile');
+        }
+        return;
+      }
+
+      // EXISTING USER or PROFILE COMPLETE - route to dashboard
+      if (session && isProfileComplete) {
+        console.log('[NAV] User has complete profile - navigating to dashboard');
         
-        // Check AsyncStorage directly for fresh value (don't rely on state)
-        const checkAndNavigate = async () => {
-          try {
-            const termsAcceptedValue = await AsyncStorage.getItem(TERMS_ACCEPTANCE_KEY);
-            const isTermsAccepted = termsAcceptedValue === 'true';
-            
-            // Update state for future checks
-            if (isTermsAccepted !== termsAccepted) {
-              setTermsAccepted(isTermsAccepted);
-            }
-            
-            // If on terms screen, allow it to handle its own navigation
-            // Don't block navigation from terms screen
-            if (inTermsAndConditions) {
-              return;
-            }
-            
-            // Check if T&C needs to be accepted (for new users without first_name)
-            const needsTermsAcceptance = !profile?.first_name && !isTermsAccepted;
-            
-            if (needsTermsAcceptance && !inTermsAndConditions) {
-              console.log('[NAV] Redirecting to terms and conditions');
-              router.replace('/terms-and-conditions');
-              return;
-            }
-            
-            // If terms accepted and no first_name, go to complete profile
-            if (!profile?.first_name && !inCompleteProfile && isTermsAccepted) {
-              console.log('[NAV] Redirecting to complete profile');
-              router.replace('/complete-profile');
-            } else if (profile?.first_name && (inAuthGroup || inCompleteProfile || inTermsAndConditions)) {
-              console.log('[NAV] Redirecting to tabs');
-              router.replace('/(tabs)');
-            }
-          } catch (error) {
-            console.error('[NAV] Error checking terms acceptance:', error);
-          }
-        };
-        
-        checkAndNavigate();
+        // Don't redirect if already on appropriate screen
+        if (inAuthGroup || inTermsAndConditions || inCompleteProfile) {
+          console.log('[NAV] User profile complete - redirecting to dashboard');
+          router.replace('/(tabs)');
+        }
+        return;
       }
     };
 
     hideSplashAndNavigate();
-  }, [session, profile, loading, segments, hasSeenOnboarding, termsAccepted, initialLoad, isCheckingTerms]);
+  }, [session, profile?.id, profile?.first_name, profile?.last_name, loading, segments, hasSeenOnboarding, termsAccepted, initialLoad]);
 
   // Show gradient splash screen during initial load
   if (loading && initialLoad) {
