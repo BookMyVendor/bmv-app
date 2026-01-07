@@ -51,7 +51,8 @@ export default function OnboardingScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { height: screenHeight } = useWindowDimensions();
+  const { width: screenWidth, height: windowHeight } = useWindowDimensions();
+  const screenHeight = Dimensions.get('screen').height;
 
   // Responsive sizes based on screen height
   const logoSize = screenHeight < 600 ? 80 : screenHeight < 700 ? 110 : 140;
@@ -78,7 +79,7 @@ export default function OnboardingScreen() {
       const nextIndex = currentIndex + 1;
       setCurrentIndex(nextIndex);
       scrollViewRef.current?.scrollTo({
-        x: nextIndex * width,
+        x: nextIndex * screenWidth,
         animated: true,
       });
     } else {
@@ -153,7 +154,7 @@ export default function OnboardingScreen() {
   const handleDotPress = (index: number) => {
     setCurrentIndex(index);
     scrollViewRef.current?.scrollTo({
-      x: index * width,
+      x: index * screenWidth,
       animated: true,
     });
   };
@@ -166,7 +167,7 @@ export default function OnboardingScreen() {
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         onMomentumScrollEnd={(event) => {
-          const index = Math.round(event.nativeEvent.contentOffset.x / width);
+          const index = Math.round(event.nativeEvent.contentOffset.x / screenWidth);
           setCurrentIndex(index);
         }}
         scrollEnabled={true}
@@ -174,7 +175,7 @@ export default function OnboardingScreen() {
         {ONBOARDING_DATA.map((item, index) => {
           const IconComponent = item.icon;
           return (
-            <View key={item.id} style={styles.slide}>
+            <View key={item.id} style={[styles.slide, { width: screenWidth, height: screenHeight }]}>
               <LinearGradient
                 colors={item.gradient as any}
                 start={{ x: 0, y: 0 }}
@@ -193,7 +194,10 @@ export default function OnboardingScreen() {
                 )}
 
                 {/* Content */}
-                <View style={[styles.content, { paddingTop: insets.top + 30, paddingBottom: insets.bottom + Spacing.xxxl }]}>
+                <View style={[styles.content, {
+                  paddingTop: insets.top + 30,
+                  paddingBottom: Math.max(insets.bottom, 48) + Spacing.xl
+                }]}>
                   {/* Logo */}
                   <View style={styles.logoContainer}>
                     <ExternalLogo size={logoSize} />
@@ -265,8 +269,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   slide: {
-    width: width,
-    height: Dimensions.get('screen').height,
+    // width is handled inline
   },
   gradient: {
     width: '100%',
