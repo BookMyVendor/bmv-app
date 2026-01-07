@@ -25,7 +25,13 @@ import { supabaseCore, supabaseCms } from '@/lib/supabase';
 const profileSchema = Yup.object().shape({
   firstName: Yup.string().required('First name is required'),
   lastName: Yup.string().required('Last name is required'),
-  email: Yup.string().email('Invalid email').required('Email is required'),
+  email: Yup.string()
+    .required('Email is required')
+    .email('Please enter a valid email address')
+    .matches(
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+      'Please enter a valid email address'
+    ),
 });
 
 export default function CompleteProfileScreen() {
@@ -347,6 +353,8 @@ export default function CompleteProfileScreen() {
           initialValues={{ firstName: '', lastName: '', email: '' }}
           validationSchema={profileSchema}
           onSubmit={handleSubmit}
+          validateOnChange={true}
+          validateOnBlur={true}
         >
           {({
             handleChange,
@@ -436,7 +444,7 @@ export default function CompleteProfileScreen() {
                 </Text>
                 <TextInput
                   ref={emailRef}
-                  style={styles.input}
+                  style={[styles.input, errors.email && styles.inputError]}
                   placeholder="Enter email address"
                   keyboardType="email-address"
                   autoCapitalize="none"
@@ -446,14 +454,14 @@ export default function CompleteProfileScreen() {
                   returnKeyType="done"
                   onSubmitEditing={() => formikHandleSubmit()}
                 />
-                {touched.email && errors.email ? (
+                {errors.email ? (
                   <Text style={styles.errorText}>{errors.email}</Text>
                 ) : null}
               </View>
 
               <TouchableOpacity
                 style={[styles.button, uploading && styles.buttonDisabled]}
-                onPress={(e) => {
+                onPress={async (e) => {
                   console.log('Continue button pressed', {
                     uploading,
                     values,
@@ -464,8 +472,17 @@ export default function CompleteProfileScreen() {
                   });
                   e?.preventDefault?.();
                   e?.stopPropagation?.();
-                  // Trigger Formik validation and submit
-                  formikHandleSubmit();
+                  
+                  // Validate the form and show all errors
+                  try {
+                    await profileSchema.validate(values, { abortEarly: false });
+                    // If validation passes, submit
+                    formikHandleSubmit();
+                  } catch (validationErrors: any) {
+                    // Validation errors will be shown in the form fields below
+                    // The Formik state will be updated automatically
+                    formikHandleSubmit();
+                  }
                 }}
                 disabled={uploading}
                 activeOpacity={0.8}
@@ -550,6 +567,10 @@ const styles = StyleSheet.create({
     padding: 16,
     fontSize: 16,
     backgroundColor: '#f9f9f9',
+  },
+  inputError: {
+    borderColor: '#FF3B30',
+    backgroundColor: '#fff5f5',
   },
   button: {
     backgroundColor: '#007AFF',

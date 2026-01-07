@@ -6,6 +6,7 @@ import {
   Dimensions,
   TouchableOpacity,
   ScrollView,
+  useWindowDimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -50,6 +51,11 @@ export default function OnboardingScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { height: screenHeight } = useWindowDimensions();
+
+  // Responsive sizes based on screen height
+  const logoSize = screenHeight < 600 ? 80 : screenHeight < 700 ? 110 : 140;
+  const iconSize = screenHeight < 600 ? 40 : screenHeight < 700 ? 52 : 64;
 
   // Hide splash screen when onboarding screen mounts
   useEffect(() => {
@@ -187,16 +193,16 @@ export default function OnboardingScreen() {
                 )}
 
                 {/* Content */}
-                <View style={[styles.content, { paddingTop: insets.top + 60, paddingBottom: insets.bottom + Spacing.xxxl }]}>
+                <View style={[styles.content, { paddingTop: insets.top + 30, paddingBottom: insets.bottom + Spacing.xxxl }]}>
                   {/* Logo */}
                   <View style={styles.logoContainer}>
-                    <ExternalLogo size={140} />
+                    <ExternalLogo size={logoSize} />
                   </View>
 
                   {/* Icon */}
                   <View style={styles.iconContainer}>
                     <View style={styles.iconCircle}>
-                      <IconComponent size={64} color="#000" strokeWidth={2} />
+                      <IconComponent size={iconSize} color="#000" strokeWidth={2} />
                     </View>
                   </View>
 
@@ -206,39 +212,42 @@ export default function OnboardingScreen() {
                     <Text style={styles.description}>{item.description}</Text>
                   </View>
 
-                  {/* Dots Indicator */}
-                  <View style={styles.dotsContainer}>
-                    {ONBOARDING_DATA.map((_, dotIndex) => (
-                      <TouchableOpacity
-                        key={dotIndex}
-                        onPress={() => handleDotPress(dotIndex)}
-                        style={styles.dotButton}
-                        activeOpacity={0.7}
-                      >
-                        <View
-                          style={[
-                            styles.dot,
-                            dotIndex === currentIndex && styles.dotActive,
-                          ]}
-                        />
-                      </TouchableOpacity>
-                    ))}
-                  </View>
+                  {/* Footer Section - Anchored to bottom */}
+                  <View style={styles.footer}>
+                    {/* Dots Indicator */}
+                    <View style={styles.dotsContainer}>
+                      {ONBOARDING_DATA.map((_, dotIndex) => (
+                        <TouchableOpacity
+                          key={dotIndex}
+                          onPress={() => handleDotPress(dotIndex)}
+                          style={styles.dotButton}
+                          activeOpacity={0.7}
+                        >
+                          <View
+                            style={[
+                              styles.dot,
+                              dotIndex === currentIndex && styles.dotActive,
+                            ]}
+                          />
+                        </TouchableOpacity>
+                      ))}
+                    </View>
 
-                  {/* Next/Get Started Button */}
-                  <View style={styles.buttonContainer}>
-                    <TouchableOpacity
-                      style={styles.nextButton}
-                      onPress={handleNext}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={styles.nextButtonText}>
-                        {index === ONBOARDING_DATA.length - 1
-                          ? 'Get Started'
-                          : 'Next'}
-                      </Text>
-                      <ChevronRight size={20} color="#000" strokeWidth={2.5} />
-                    </TouchableOpacity>
+                    {/* Next/Get Started Button */}
+                    <View style={styles.buttonContainer}>
+                      <TouchableOpacity
+                        style={styles.nextButton}
+                        onPress={handleNext}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.nextButtonText}>
+                          {index === ONBOARDING_DATA.length - 1
+                            ? 'Get Started'
+                            : 'Next'}
+                        </Text>
+                        <ChevronRight size={20} color="#000" strokeWidth={2.5} />
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 </View>
               </LinearGradient>
@@ -257,7 +266,7 @@ const styles = StyleSheet.create({
   },
   slide: {
     width: width,
-    height: height,
+    height: Dimensions.get('screen').height,
   },
   gradient: {
     width: '100%',
@@ -283,22 +292,22 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: Spacing.xxxl,
-    paddingBottom: Spacing.xxxl,
+    paddingBottom: height < 600 ? Spacing.lg : Spacing.xxxl,
     justifyContent: 'space-between',
   },
   logoContainer: {
     alignItems: 'center',
-    marginTop: Spacing.xl,
-    marginBottom: Spacing.xxl,
+    marginTop: height < 600 ? Spacing.sm : Spacing.xl,
+    marginBottom: height < 600 ? Spacing.md : Spacing.xxl,
   },
   iconContainer: {
     alignItems: 'center',
-    marginVertical: Spacing.xxxl,
+    marginVertical: height < 600 ? Spacing.md : Spacing.xxxl,
   },
   iconCircle: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
+    width: height < 600 ? 100 : height < 700 ? 120 : 140,
+    height: height < 600 ? 100 : height < 700 ? 120 : 140,
+    borderRadius: height < 600 ? 50 : height < 700 ? 60 : 70,
     backgroundColor: 'rgba(255, 255, 255, 0.9)',
     justifyContent: 'center',
     alignItems: 'center',
@@ -307,30 +316,33 @@ const styles = StyleSheet.create({
     ...Shadows.large,
   },
   textContainer: {
-    flex: 1,
+    flex: 0,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: Spacing.lg,
-    marginVertical: Spacing.xxxl,
+    marginVertical: height < 600 ? Spacing.md : Spacing.xxxl,
   },
   title: {
-    fontSize: 32,
+    fontSize: height < 600 ? 24 : height < 700 ? 28 : 32,
     fontWeight: '700',
     color: '#000',
     textAlign: 'center',
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.md,
   },
   description: {
-    fontSize: 18,
+    fontSize: height < 600 ? 14 : height < 700 ? 16 : 18,
     color: '#1a1a1a',
     textAlign: 'center',
-    lineHeight: 26,
+    lineHeight: height < 600 ? 20 : 26,
+  },
+  footer: {
+    width: '100%',
   },
   dotsContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginVertical: Spacing.xl,
+    marginBottom: Spacing.xl,
     gap: Spacing.sm,
   },
   dotButton: {
@@ -354,8 +366,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    paddingVertical: Spacing.lg,
-    paddingHorizontal: Spacing.xxxl,
+    paddingVertical: height < 600 ? Spacing.md : Spacing.lg,
+    paddingHorizontal: height < 600 ? Spacing.xxl : Spacing.xxxl,
     borderRadius: 30,
     borderWidth: 2,
     borderColor: '#000',
@@ -364,7 +376,7 @@ const styles = StyleSheet.create({
   },
   nextButtonText: {
     color: '#000',
-    fontSize: 18,
+    fontSize: height < 600 ? 16 : 18,
     fontWeight: '700',
   },
 });

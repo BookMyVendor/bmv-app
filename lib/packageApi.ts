@@ -53,7 +53,7 @@ export async function createPackage(
   try {
     // Remove UI-only fields before saving
     const { categoryId, categorySpecificFields, isDirty, validationErrors, ...dbData } = packageData as any;
-    
+
     // Set default values
     const insertData = {
       ...dbData,
@@ -116,7 +116,7 @@ export async function deletePackage(
     if (!packageId) {
       throw new Error('Package ID is required');
     }
-    
+
     console.log('Attempting to delete package with ID:', packageId);
     const { error, data } = await supabaseCore
       .from('vendor_business_pricing_packages')
@@ -128,7 +128,7 @@ export async function deletePackage(
       console.error('Supabase delete error:', error);
       throw error;
     }
-    
+
     console.log('Package deleted successfully:', data);
     return { error: null };
   } catch (error) {
@@ -148,15 +148,15 @@ export async function togglePackageStatus(
     if (!packageId) {
       throw new Error('Package ID is required');
     }
-    
+
     console.log('togglePackageStatus called:', { packageId, isActive });
-    
-    const updateData = { 
-      is_active: isActive, 
-      updated_at: new Date().toISOString() 
+
+    const updateData = {
+      is_active: isActive,
+      updated_at: new Date().toISOString()
     };
     console.log('Update data:', updateData);
-    
+
     const { data, error } = await supabaseCore
       .from('vendor_business_pricing_packages')
       .update(updateData)
@@ -170,7 +170,7 @@ export async function togglePackageStatus(
       console.error('Supabase error:', error);
       throw error;
     }
-    
+
     console.log('Package status updated successfully:', data);
     return { data: data as PricingPackage, error: null };
   } catch (error) {
@@ -244,7 +244,7 @@ export async function getBusinessCategories(
       .eq('business_id', businessId);
 
     if (error) throw error;
-    
+
     // Flatten the nested structure
     const categories = (data || []).map((item: any) => ({
       id: item.categories?.id || item.category_id,
