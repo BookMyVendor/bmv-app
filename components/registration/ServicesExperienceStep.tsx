@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Modal,
   Pressable,
+  Alert,
 } from 'react-native';
 import { Check, ChevronRight, ChevronDown, X } from 'lucide-react-native';
 import Dropdown from '@/components/Dropdown';
@@ -99,6 +100,26 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       selectedCategoryIds,
     });
   }, [selectedRootCategoryId, selectedCategoryIds]);
+
+  // Auto-detect root category if we have selected sub-categories but no root
+  useEffect(() => {
+    if (allBusinessCategories.length > 0 && selectedCategoryIds.length > 0 && !selectedRootCategoryId) {
+      const firstSelectedCat = allBusinessCategories.find(c => c.id === selectedCategoryIds[0]);
+      if (firstSelectedCat) {
+        let current = firstSelectedCat;
+        while (current.parent_category_id) {
+          const parent = allBusinessCategories.find(c => c.id === current.parent_category_id);
+          if (!parent) break;
+          current = parent;
+        }
+        if (current && current.id !== selectedRootCategoryId) {
+          setSelectedRootCategoryId(current.id);
+          // Don't modify expanded here to avoid infinite loops, but expanding root is usually desired
+          setExpandedCategoryIds(prev => new Set([...prev, current.id]));
+        }
+      }
+    }
+  }, [allBusinessCategories, selectedCategoryIds, selectedRootCategoryId]);
 
   const fetchCategories = async () => {
     try {
@@ -579,7 +600,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       const newExpanded = new Set(currentExpanded);
       let changed = false;
 
-      (data.selectedEventIds || []).forEach((eventId) => {
+      (data.selectedEventIds || []).forEach((eventId: string) => {
         // Expand the category itself if it has children
         const hasChildren = eventCategories.some(
           (c) => c.parent_category_id === eventId
@@ -637,7 +658,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   // Get selected events with paths for display
   const selectedEventsWithPaths = useMemo(() => {
     const selectedIds = data.selectedEventIds || [];
-    return selectedIds.map((id) => ({
+    return selectedIds.map((id: string) => ({
       id,
       path: getEventPath(id, eventCategories),
     }));
@@ -692,6 +713,22 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     return `${selectedCategoriesWithPaths.length} categories selected`;
   };
 
+  const handleCategoryDone = () => {
+    if (selectedCategoryIds.length === 0) {
+      Alert.alert('Validation Error', 'Please select at least one sub-category');
+      return;
+    }
+    setIsCategoryModalOpen(false);
+  };
+
+  const handleEventDone = () => {
+    if ((data.selectedEventIds || []).length === 0) {
+      Alert.alert('Validation Error', 'Please select at least one sub-category for event types');
+      return;
+    }
+    setIsEventModalOpen(false);
+  };
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.field}>
@@ -723,7 +760,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
             <Text style={styles.selectedLabel}>
               Selected Categories ({selectedCategoriesWithPaths.length}):
             </Text>
-            {selectedCategoriesWithPaths.map((item) => (
+            {selectedCategoriesWithPaths.map((item: { id: string, path: string }) => (
               <View key={item.id} style={styles.selectedChip}>
                 <Text style={styles.selectedChipText}>{item.path}</Text>
                 <TouchableOpacity
@@ -787,7 +824,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               <View style={styles.modalFooter}>
                 <TouchableOpacity
                   style={styles.modalButton}
-                  onPress={() => setIsCategoryModalOpen(false)}
+                  onPress={handleCategoryDone}
                 >
                   <Text style={styles.modalButtonText}>Done</Text>
                 </TouchableOpacity>
@@ -824,7 +861,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
             <Text style={styles.selectedLabel}>
               Selected Events ({selectedEventsWithPaths.length}):
             </Text>
-            {selectedEventsWithPaths.map((item) => {
+            {selectedEventsWithPaths.map((item: { id: string, path: string }) => {
               const eventCategory = eventCategories.find((cat) => cat.id === item.id);
               return (
                 <View key={item.id} style={styles.selectedChip}>
@@ -894,7 +931,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               <View style={styles.modalFooter}>
                 <TouchableOpacity
                   style={styles.modalButton}
-                  onPress={() => setIsEventModalOpen(false)}
+                  onPress={handleEventDone}
                 >
                   <Text style={styles.modalButtonText}>Done</Text>
                 </TouchableOpacity>
@@ -1009,11 +1046,6 @@ const styles = StyleSheet.create({
   eventOptionTextSelected: {
     fontWeight: '600',
     color: '#007AFF',
-  },
-  errorText: {
-    fontSize: 14,
-    color: '#ff3b30',
-    fontStyle: 'italic',
   },
   dropdownTrigger: {
     flexDirection: 'row',

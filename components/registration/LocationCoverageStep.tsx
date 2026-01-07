@@ -98,7 +98,7 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
     // Only allow digits
     const cleanText = text.replace(/\D/g, '');
     handleChange('pincode', cleanText);
-    
+
     // Reset status when typing
     if (pincodeStatus !== 'idle') {
       setPincodeStatus('idle');
@@ -109,7 +109,7 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
 
   const handlePincodeBlur = async () => {
     const pincode = data.pincode;
-    
+
     // Only validate if 6 digits
     if (!pincode || pincode.length !== 6) {
       if (pincode && pincode.length > 0 && pincode.length < 6) {
@@ -127,12 +127,12 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
 
       if (result.valid) {
         setPincodeStatus('valid');
-        
+
         // Set city options for dropdown
         if (result.cityOptions && result.cityOptions.length > 0) {
           setCityOptions(result.cityOptions);
         }
-        
+
         // Auto-fill fields
         if (result.city) {
           handleChange('city', result.city);
@@ -314,6 +314,7 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
           placeholder="Enter service radius in kilometers"
           placeholderTextColor="#999"
           keyboardType="numeric"
+          maxLength={4}
           returnKeyType="done"
         />
       </View>

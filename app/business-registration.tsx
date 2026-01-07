@@ -232,9 +232,9 @@ export default function BusinessRegistrationScreen() {
       }
     } else if (currentPage === 1) {
       // Services & Experience step
-      // Only require at least one category to be selected (root or child)
-      if (!businessData.selectedRootCategoryId && (!businessData.selectedCategoryIds || businessData.selectedCategoryIds.length === 0)) {
-        errors.selectedCategoryIds = 'Please select at least one service category';
+      // Must have at least one sub-category selected
+      if (!businessData.selectedCategoryIds || businessData.selectedCategoryIds.length === 0) {
+        errors.selectedCategoryIds = 'Please select at least one sub-category';
       }
       if (!businessData.selectedEventIds || businessData.selectedEventIds.length === 0) {
         errors.selectedEventIds = 'Please select at least one event type';
