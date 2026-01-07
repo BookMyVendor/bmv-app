@@ -100,18 +100,10 @@ export const pickDocuments = async (allowMultiple: boolean = true): Promise<Pick
       };
     }
 
-    // Ensure the component is fully mounted and ready before launching the image picker
-    // This prevents "unregistered ActivityResultLauncher" errors on Android
-    await new Promise(resolve => {
-      if (Platform.OS === 'android') {
-        // Use InteractionManager to ensure UI is ready, then add a small delay
-        InteractionManager.runAfterInteractions(() => {
-          setTimeout(resolve, 100);
-        });
-      } else {
-        resolve(undefined);
-      }
-    });
+    // On Android, a small delay after permission request can prevent "unregistered ActivityResultLauncher" errors
+    if (Platform.OS === 'android') {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
 
     // Use expo-image-picker with all media types
     // Note: expo-image-picker may not support PDFs directly on all platforms
@@ -129,7 +121,7 @@ export const pickDocuments = async (allowMultiple: boolean = true): Promise<Pick
 
     const files: DocumentFile[] = result.assets.map((asset) => {
       const mimeType = getMimeType(asset.uri, asset.fileName || undefined);
-      
+
       return {
         uri: asset.uri,
         name: asset.fileName || undefined,
@@ -274,18 +266,10 @@ export const pickImages = async (allowMultiple: boolean = true): Promise<PickDoc
       };
     }
 
-    // Ensure the component is fully mounted and ready before launching the image picker
-    // This prevents "unregistered ActivityResultLauncher" errors on Android
-    await new Promise(resolve => {
-      if (Platform.OS === 'android') {
-        // Use InteractionManager to ensure UI is ready, then add a small delay
-        InteractionManager.runAfterInteractions(() => {
-          setTimeout(resolve, 100);
-        });
-      } else {
-        resolve(undefined);
-      }
-    });
+    // On Android, a small delay after permission request can prevent "unregistered ActivityResultLauncher" errors
+    if (Platform.OS === 'android') {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,

@@ -45,7 +45,7 @@ const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(
   const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([]);
   const [loadingTypes, setLoadingTypes] = useState(true);
   const [uploading, setUploading] = useState<string | null>(null); // typeCode of document being uploaded
-  const [isMounted, setIsMounted] = useState(false);
+
 
   // Refs for keyboard navigation
   const panNumberRef = useRef<TextInput>(null);
@@ -78,14 +78,7 @@ const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(
 
   useEffect(() => {
     loadDocumentTypes();
-    // Ensure component is mounted before allowing image picker calls
-    InteractionManager.runAfterInteractions(() => {
-      setIsMounted(true);
-    });
-    
-    return () => {
-      setIsMounted(false);
-    };
+
   }, []);
 
   const loadDocumentTypes = async () => {
@@ -127,12 +120,6 @@ const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(
   };
 
   const handlePickDocuments = async (typeCode: string) => {
-    // Prevent calling image picker if component is not fully mounted
-    if (!isMounted) {
-      // Wait a bit for component to be ready
-      await new Promise(resolve => setTimeout(resolve, 200));
-    }
-    
     try {
       setUploading(typeCode);
       const { files, error } = await pickDocuments(true);
@@ -301,7 +288,7 @@ const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(
           <View key={group.typeCode} style={styles.field}>
             <Text style={styles.label}>{typeName} {isMandatory ? '*' : ''}</Text>
             <Text style={[styles.hint, isMandatory && styles.mandatoryHint]}>
-              {isMandatory 
+              {isMandatory
                 ? 'Required - Upload PAN card image (jpg, png) or PDF (max 10MB)'
                 : 'Optional - Upload images (jpg, png) or PDF files (max 10MB each)'}
             </Text>
@@ -323,7 +310,7 @@ const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(
             {/* Upload Button */}
             <TouchableOpacity
               style={[
-                styles.uploadButton, 
+                styles.uploadButton,
                 isUploading && styles.uploadButtonDisabled,
                 hasError && styles.uploadButtonError
               ]}

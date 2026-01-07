@@ -7,10 +7,10 @@ interface LogoProps {
   resizeMode?: 'contain' | 'cover' | 'stretch' | 'center';
 }
 
-export const Logo: React.FC<LogoProps> = ({ 
-  size = 120, 
+export const Logo: React.FC<LogoProps> = ({
+  size = 120,
   style,
-  resizeMode = 'contain' 
+  resizeMode = 'contain'
 }) => {
   return (
     <Image

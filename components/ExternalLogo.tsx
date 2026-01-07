@@ -7,25 +7,25 @@ interface LogoProps {
   resizeMode?: 'contain' | 'cover' | 'stretch' | 'center';
 }
 
-export const ExternalLogo: React.FC<LogoProps> = ({ 
-    size = 120, 
-    style,
-    resizeMode = 'contain' 
-  }) => {
-    return (
-      <Image
-        source={require('@/assets/images/bmv-logo-transparent.png')}
-        style={[
-          {
-            width: size,
-            height: size,
-            resizeMode,
-          },
-          style,
-        ]}
-      />
-    );
-  };
+export const ExternalLogo: React.FC<LogoProps> = ({
+  size = 120,
+  style,
+  resizeMode = 'contain'
+}) => {
+  return (
+    <Image
+      source={require('@/assets/images/bmv_internal_logo.png')}
+      style={[
+        {
+          width: size,
+          height: size,
+          resizeMode,
+        },
+        style,
+      ]}
+    />
+  );
+};
 
 
 
