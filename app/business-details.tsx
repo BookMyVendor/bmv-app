@@ -151,6 +151,11 @@ export default function BusinessDetailsScreen() {
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [loadingCategories, setLoadingCategories] = useState(false);
 
+  // Temporary modal state - only committed when Done is clicked
+  const [tempSelectedRootCategoryId, setTempSelectedRootCategoryId] = useState<string | null>(null);
+  const [tempSelectedCategoryIds, setTempSelectedCategoryIds] = useState<string[]>([]);
+  const [tempSelectedEventIds, setTempSelectedEventIds] = useState<string[]>([]);
+
   // Pincode validation state
   const [validatingPincode, setValidatingPincode] = useState(false);
   const [pincodeStatus, setPincodeStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
@@ -246,12 +251,21 @@ export default function BusinessDetailsScreen() {
         const selectedCats = allBusinessCategories.filter((cat) =>
           businessIds.includes(cat.id)
         );
-        const rootCat = selectedCats.find(
-          (cat) => cat.category_level === 1 || cat.parent_category_id === null
-        );
-        if (rootCat) {
-          setSelectedRootCategoryId(rootCat.id);
-          setExpandedCategoryIds(new Set([rootCat.id]));
+
+        // Find the root parent for the first selected category
+        const firstSelectedCat = selectedCats[0];
+        if (firstSelectedCat) {
+          let current = firstSelectedCat;
+          while (current.parent_category_id) {
+            const parent = allBusinessCategories.find(c => c.id === current.parent_category_id);
+            if (!parent) break;
+            current = parent;
+          }
+
+          if (current) {
+            setSelectedRootCategoryId(current.id);
+            setExpandedCategoryIds(new Set([current.id]));
+          }
         }
       }
 
@@ -704,6 +718,88 @@ export default function BusinessDetailsScreen() {
     });
   };
 
+  // Render category tree for modal (uses temp state)
+  const renderCategoryTreeForModal = (nodes: any[], level: number = 0): React.ReactNode => {
+    return nodes.map((node) => {
+      const isRoot = node.category_level === 1 || node.parent_category_id === null;
+      const isSelected = tempSelectedCategoryIds.includes(node.id);
+      const isExpanded = expandedCategoryIds.has(node.id);
+      const hasChildren = node.children.length > 0;
+      const isRootSelected = tempSelectedRootCategoryId === node.id;
+
+      return (
+        <View key={node.id} style={styles.categoryItem}>
+          <TouchableOpacity
+            style={[styles.categoryRow, { paddingLeft: level * 20 + 12 }]}
+            onPress={() => {
+              if (isRoot) {
+                handleTempRootSelection(node.id);
+              } else {
+                toggleTempCategorySelection(node.id);
+              }
+            }}
+            activeOpacity={0.7}
+          >
+            {hasChildren && (
+              <TouchableOpacity
+                style={styles.expandButton}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  toggleExpansion(node.id);
+                }}
+              >
+                {isExpanded ? (
+                  <ChevronDown size={16} color="#666" />
+                ) : (
+                  <ChevronRight size={16} color="#666" />
+                )}
+              </TouchableOpacity>
+            )}
+            {!hasChildren && <View style={styles.expandButton} />}
+
+            {isRoot ? (
+              <View style={styles.radioButton}>
+                {isRootSelected ? (
+                  <View style={styles.radioButtonSelected}>
+                    <View style={styles.radioButtonInner} />
+                  </View>
+                ) : (
+                  <View style={styles.radioButtonOuter} />
+                )}
+              </View>
+            ) : (
+              <View style={styles.checkbox}>
+                {isSelected ? (
+                  <View style={styles.checkboxSelected}>
+                    <Check size={14} color="#fff" strokeWidth={3} />
+                  </View>
+                ) : (
+                  <View style={styles.checkboxUnselected} />
+                )}
+              </View>
+            )}
+
+            {node.icon && <Text style={styles.categoryIcon}>{node.icon}</Text>}
+            <Text
+              style={[
+                styles.categoryName,
+                (isRootSelected || isSelected) && styles.categoryNameSelected,
+              ]}
+            >
+              {node.name}
+            </Text>
+          </TouchableOpacity>
+
+          {hasChildren && isExpanded && (
+            <View style={styles.childrenContainer}>
+              {renderCategoryTreeForModal(node.children, level + 1)}
+            </View>
+          )}
+        </View>
+      );
+    });
+  };
+
   // Get selected categories with full paths
   const selectedCategoriesWithPaths = React.useMemo(() => {
     return selectedCategoryIds.map((id) => ({
@@ -888,6 +984,130 @@ export default function BusinessDetailsScreen() {
     });
   };
 
+  // Modal handlers for category selection
+  const handleCategoryModalOpen = () => {
+    // Copy current selections to temp state when modal opens
+    setTempSelectedRootCategoryId(selectedRootCategoryId);
+    setTempSelectedCategoryIds([...selectedCategoryIds]);
+    setIsCategoryModalOpen(true);
+  };
+
+  const handleCategoryModalClose = () => {
+    // Discard temp changes when X is clicked
+    setIsCategoryModalOpen(false);
+    // Reset search
+    setSearchQuery('');
+  };
+
+  const handleCategoryModalDone = () => {
+    // Validate: at least one sub-category (child) must be selected
+    if (tempSelectedCategoryIds.length === 0) {
+      Alert.alert('Validation Error', 'Please select at least one sub-category');
+      return;
+    }
+
+    // Commit temp selections to actual state
+    setSelectedRootCategoryId(tempSelectedRootCategoryId);
+    setSelectedCategoryIds([...tempSelectedCategoryIds]);
+    setIsCategoryModalOpen(false);
+    // Reset search
+    setSearchQuery('');
+  };
+
+  // Temp handlers for category selection in modal
+  const handleTempRootSelection = (categoryId: string) => {
+    setTempSelectedRootCategoryId(categoryId);
+    // Clear all previous selections when root changes
+    setTempSelectedCategoryIds([]);
+    // Expand the selected root to show children
+    setExpandedCategoryIds(new Set([categoryId]));
+  };
+
+  const toggleTempCategorySelection = (categoryId: string) => {
+    setTempSelectedCategoryIds((prev) => {
+      if (prev.includes(categoryId)) {
+        // Collapse when deselecting
+        setExpandedCategoryIds((expanded) => {
+          const newExpanded = new Set(expanded);
+          if (newExpanded.has(categoryId)) {
+            newExpanded.delete(categoryId);
+          }
+          return newExpanded;
+        });
+        return prev.filter((id) => id !== categoryId);
+      } else {
+        // Find the category and expand it if it has children
+        const category = allBusinessCategories.find((c) => c.id === categoryId);
+        if (category) {
+          const hasChildren = allBusinessCategories.some(
+            (c) => c.parent_category_id === categoryId
+          );
+          if (hasChildren) {
+            setExpandedCategoryIds((expanded) => new Set([...expanded, categoryId]));
+          }
+        }
+        return [...prev, categoryId];
+      }
+    });
+  };
+
+  // Modal handlers for event selection
+  const handleEventModalOpen = () => {
+    // Copy current selections to temp state when modal opens
+    setTempSelectedEventIds([...selectedEventIds]);
+    setIsEventModalOpen(true);
+  };
+
+  const handleEventModalClose = () => {
+    // Discard temp changes when X is clicked
+    setIsEventModalOpen(false);
+    // Reset search
+    setEventSearchQuery('');
+  };
+
+  const handleEventModalDone = () => {
+    // Validate: at least one event type must be selected
+    if (tempSelectedEventIds.length === 0) {
+      Alert.alert('Validation Error', 'Please select at least one event type');
+      return;
+    }
+
+    // Commit temp selections to actual state
+    setSelectedEventIds([...tempSelectedEventIds]);
+    setIsEventModalOpen(false);
+    // Reset search
+    setEventSearchQuery('');
+  };
+
+  // Temp handler for event selection in modal
+  const toggleTempEventSelection = (eventId: string) => {
+    setTempSelectedEventIds((prev) => {
+      if (prev.includes(eventId)) {
+        // Collapse when deselecting
+        setExpandedEventCategoryIds((expanded) => {
+          const newExpanded = new Set(expanded);
+          if (newExpanded.has(eventId)) {
+            newExpanded.delete(eventId);
+          }
+          return newExpanded;
+        });
+        return prev.filter((id) => id !== eventId);
+      } else {
+        // Find the category and expand it if it has children
+        const category = allEventCategories.find((c) => c.id === eventId);
+        if (category) {
+          const hasChildren = allEventCategories.some(
+            (c) => c.parent_category_id === eventId
+          );
+          if (hasChildren) {
+            setExpandedEventCategoryIds((expanded) => new Set([...expanded, eventId]));
+          }
+        }
+        return [...prev, eventId];
+      }
+    });
+  };
+
   // Auto-expand selected event categories with children
   React.useEffect(() => {
     setExpandedEventCategoryIds((currentExpanded) => {
@@ -906,10 +1126,10 @@ export default function BusinessDetailsScreen() {
     });
   }, [selectedEventIds, allEventCategories]);
 
-  // Render event category tree recursively
-  const renderEventCategoryTree = (nodes: any[], level: number = 0): React.ReactNode => {
+  // Render event category tree for modal (uses temp state)
+  const renderEventCategoryTreeForModal = (nodes: any[], level: number = 0): React.ReactNode => {
     return nodes.map((node) => {
-      const isSelected = selectedEventIds.includes(node.id);
+      const isSelected = tempSelectedEventIds.includes(node.id);
       const isExpanded = expandedEventCategoryIds.has(node.id);
       const hasChildren = node.children.length > 0;
 
@@ -917,7 +1137,7 @@ export default function BusinessDetailsScreen() {
         <View key={node.id} style={styles.categoryItem}>
           <TouchableOpacity
             style={[styles.categoryRow, { paddingLeft: level * 20 + 12 }]}
-            onPress={() => toggleEventSelection(node.id)}
+            onPress={() => toggleTempEventSelection(node.id)}
             activeOpacity={0.7}
           >
             {hasChildren && (
@@ -960,7 +1180,7 @@ export default function BusinessDetailsScreen() {
 
           {hasChildren && isExpanded && (
             <View style={styles.childrenContainer}>
-              {renderEventCategoryTree(node.children, level + 1)}
+              {renderEventCategoryTreeForModal(node.children, level + 1)}
             </View>
           )}
         </View>
@@ -1329,17 +1549,67 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleSaveDetails = async () => {
-    // Validate PAN number is provided
+    // 1. Validate Email (format if provided)
+    if (editData.business_email && editData.business_email.trim()) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(editData.business_email)) {
+        Alert.alert('Validation Error', 'Please enter a valid email address.');
+        setSavingDetails(false);
+        return;
+      }
+    }
+
+    // 2. Validate Phone Number (10 digits if provided)
+    if (editData.contact_person_phone && editData.contact_person_phone.trim()) {
+      const phoneRegex = /^\d{10}$/;
+      if (!phoneRegex.test(editData.contact_person_phone)) {
+        Alert.alert('Validation Error', 'Phone number must be exactly 10 digits.');
+        setSavingDetails(false);
+        return;
+      }
+    }
+
+    // 3. Validate PAN (Required and format [A-Z]{5}[0-9]{4}[A-Z]{1})
     if (!editData.business_registration_number || !editData.business_registration_number.trim()) {
       Alert.alert('Validation Error', 'PAN is required. Please enter your PAN number.');
       setSavingDetails(false);
       return;
     }
+    const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+    if (!panRegex.test(editData.business_registration_number.toUpperCase())) {
+      Alert.alert('Validation Error', 'Please enter a valid PAN number (e.g., ABCDE1234F).');
+      setSavingDetails(false);
+      return;
+    }
 
-    // Validate PAN document is uploaded
+    // 4. Validate GST (format if provided)
+    if (editData.gst_number && editData.gst_number.trim()) {
+      const gstRegex = /^\d{2}[A-Z]{5}\d{4}[A-Z]{1}\d{1}Z\d{1}$/;
+      if (!gstRegex.test(editData.gst_number.toUpperCase())) {
+        Alert.alert('Validation Error', 'Please enter a valid GST number.');
+        setSavingDetails(false);
+        return;
+      }
+    }
+
+    // 5. Validate PAN document is uploaded
     const panDocs = documentsByType['pan'] || [];
     if (panDocs.length === 0) {
       Alert.alert('Validation Error', 'PAN card document is required. Please upload your PAN card.');
+      setSavingDetails(false);
+      return;
+    }
+
+    // 6. Validate at least one service category
+    if (selectedCategoryIds.length === 0) {
+      Alert.alert('Validation Error', 'At least one service category must be selected.');
+      setSavingDetails(false);
+      return;
+    }
+
+    // 7. Validate at least one event type
+    if (selectedEventIds.length === 0) {
+      Alert.alert('Validation Error', 'At least one event type must be selected.');
       setSavingDetails(false);
       return;
     }
@@ -1917,7 +2187,7 @@ export default function BusinessDetailsScreen() {
                 {/* Dropdown Trigger */}
                 <TouchableOpacity
                   style={styles.dropdownTrigger}
-                  onPress={() => setIsCategoryModalOpen(true)}
+                  onPress={handleCategoryModalOpen}
                   activeOpacity={0.7}
                 >
                   <Text style={[styles.dropdownText, !selectedRootCategoryId && styles.placeholder]}>
@@ -1936,7 +2206,14 @@ export default function BusinessDetailsScreen() {
                       <View key={item.id} style={styles.selectedChip}>
                         <Text style={styles.selectedChipText}>{item.path}</Text>
                         <TouchableOpacity
-                          onPress={() => toggleCategorySelection(item.id)}
+                          onPress={() => {
+                            const totalSelected = selectedCategoryIds.length + (selectedRootCategoryId ? 1 : 0);
+                            if (totalSelected <= 1) {
+                              Alert.alert('Validation Error', 'At least one service category must be selected.');
+                              return;
+                            }
+                            toggleCategorySelection(item.id);
+                          }}
                           style={styles.removeButton}
                         >
                           <X size={16} color="#fff" />
@@ -1951,11 +2228,11 @@ export default function BusinessDetailsScreen() {
                   visible={isCategoryModalOpen}
                   transparent
                   animationType="fade"
-                  onRequestClose={() => setIsCategoryModalOpen(false)}
+                  onRequestClose={handleCategoryModalClose}
                 >
                   <Pressable
                     style={styles.modalOverlay}
-                    onPress={() => setIsCategoryModalOpen(false)}
+                    onPress={handleCategoryModalClose}
                   >
                     <Pressable
                       style={styles.categoryModalContent}
@@ -1964,7 +2241,7 @@ export default function BusinessDetailsScreen() {
                       <View style={styles.categoryModalHeader}>
                         <Text style={styles.categoryModalTitle}>Select Service Category</Text>
                         <TouchableOpacity
-                          onPress={() => setIsCategoryModalOpen(false)}
+                          onPress={handleCategoryModalClose}
                           style={styles.closeButton}
                         >
                           <X size={24} color="#666" />
@@ -1989,14 +2266,14 @@ export default function BusinessDetailsScreen() {
                         {filteredTree.length === 0 ? (
                           <Text style={styles.emptyText}>No categories found</Text>
                         ) : (
-                          renderCategoryTree(filteredTree)
+                          renderCategoryTreeForModal(filteredTree)
                         )}
                       </ScrollView>
 
                       <View style={styles.categoryModalFooter}>
                         <TouchableOpacity
                           style={styles.categoryModalButton}
-                          onPress={() => setIsCategoryModalOpen(false)}
+                          onPress={handleCategoryModalDone}
                         >
                           <Text style={styles.modalButtonText}>Done</Text>
                         </TouchableOpacity>
@@ -2012,7 +2289,7 @@ export default function BusinessDetailsScreen() {
                 {/* Event Dropdown Trigger */}
                 <TouchableOpacity
                   style={styles.dropdownTrigger}
-                  onPress={() => setIsEventModalOpen(true)}
+                  onPress={handleEventModalOpen}
                   activeOpacity={0.7}
                 >
                   <Text style={[styles.dropdownText, selectedEventsWithPaths.length === 0 && styles.placeholder]}>
@@ -2052,11 +2329,11 @@ export default function BusinessDetailsScreen() {
                   visible={isEventModalOpen}
                   transparent
                   animationType="fade"
-                  onRequestClose={() => setIsEventModalOpen(false)}
+                  onRequestClose={handleEventModalClose}
                 >
                   <Pressable
                     style={styles.modalOverlay}
-                    onPress={() => setIsEventModalOpen(false)}
+                    onPress={handleEventModalClose}
                   >
                     <Pressable
                       style={styles.categoryModalContent}
@@ -2065,7 +2342,7 @@ export default function BusinessDetailsScreen() {
                       <View style={styles.categoryModalHeader}>
                         <Text style={styles.categoryModalTitle}>Select Event Types</Text>
                         <TouchableOpacity
-                          onPress={() => setIsEventModalOpen(false)}
+                          onPress={handleEventModalClose}
                           style={styles.closeButton}
                         >
                           <X size={24} color="#666" />
@@ -2090,14 +2367,14 @@ export default function BusinessDetailsScreen() {
                         {filteredEventTree.length === 0 ? (
                           <Text style={styles.emptyText}>No events found</Text>
                         ) : (
-                          renderEventCategoryTree(filteredEventTree)
+                          renderEventCategoryTreeForModal(filteredEventTree)
                         )}
                       </ScrollView>
 
                       <View style={styles.categoryModalFooter}>
                         <TouchableOpacity
                           style={styles.categoryModalButton}
-                          onPress={() => setIsEventModalOpen(false)}
+                          onPress={handleEventModalDone}
                         >
                           <Text style={styles.modalButtonText}>Done</Text>
                         </TouchableOpacity>
