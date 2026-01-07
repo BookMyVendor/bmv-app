@@ -206,16 +206,16 @@ export default function BusinessDetailsScreen() {
 
       setBusiness(businessRes.data);
       setOffers(offersRes.data || []);
-      
+
       // Combine images from vendor_business_media with cover_photo_url from business
       let allImages = imagesRes.data || [];
-      
+
       // If business has cover_photo_url and it's not already in images, add it
       if (businessRes.data?.cover_photo_url) {
         const coverExists = allImages.some(
           (img) => img.image_url === businessRes.data.cover_photo_url || img.image_type === 'cover'
         );
-        
+
         if (!coverExists) {
           // Add cover photo as the first image
           allImages = [
@@ -232,7 +232,7 @@ export default function BusinessDetailsScreen() {
           ];
         }
       }
-      
+
       setImages(allImages);
       setEditData(businessRes.data || {});
 
@@ -240,7 +240,7 @@ export default function BusinessDetailsScreen() {
       await loadCategories();
       // Load existing category mappings (this will set selectedCategoryIds)
       const { businessIds } = await loadCategoryMappings();
-      
+
       // After mappings are loaded, determine root category
       if (businessIds.length > 0) {
         const selectedCats = allBusinessCategories.filter((cat) =>
@@ -257,7 +257,7 @@ export default function BusinessDetailsScreen() {
 
       // Load verification documents
       await loadVerificationDocuments();
-      
+
       // Load packages
       await loadPackages();
     } catch (error: any) {
@@ -308,10 +308,10 @@ export default function BusinessDetailsScreen() {
 
         setSelectedCategoryIds(businessCategoryIds);
         setSelectedEventIds(eventCategoryIds);
-        
+
         return { businessIds: businessCategoryIds, eventIds: eventCategoryIds };
       }
-      
+
       return { businessIds: [], eventIds: [] };
     } catch (error) {
       console.error('Error loading category mappings:', error);
@@ -409,7 +409,7 @@ export default function BusinessDetailsScreen() {
       console.log('Calling togglePackageStatus with:', packageToDelete.id, false);
       const result = await togglePackageStatus(packageToDelete.id, false);
       console.log('togglePackageStatus result:', result);
-      
+
       if (result.error) {
         console.error('Delete package error:', result.error);
         Alert.alert('Error', result.error.message || 'Failed to delete package. Please try again.');
@@ -417,7 +417,7 @@ export default function BusinessDetailsScreen() {
         setPackageToDelete(null);
         return;
       }
-      
+
       console.log('Package marked as inactive successfully');
       setShowDeleteModal(false);
       setPackageToDelete(null);
@@ -485,7 +485,7 @@ export default function BusinessDetailsScreen() {
     return rootCategories;
   };
 
-  // Get full path for a category
+  // Get full path for a category (excluding root/parent category)
   const getCategoryPath = (categoryId: string, categories: any[]): string => {
     const categoryMap = new Map<string, any>();
     categories.forEach((cat) => categoryMap.set(cat.id, cat));
@@ -498,6 +498,11 @@ export default function BusinessDetailsScreen() {
       if (!cat) break;
       path.unshift(cat.name);
       currentId = cat.parent_category_id;
+    }
+
+    // Remove the root category (first element) if there are multiple levels
+    if (path.length > 1) {
+      path.shift(); // Remove the first element (root category)
     }
 
     return path.join(' > ');
@@ -561,6 +566,14 @@ export default function BusinessDetailsScreen() {
   const toggleCategorySelection = (categoryId: string) => {
     setSelectedCategoryIds((prev) => {
       if (prev.includes(categoryId)) {
+        // Collapse when deselecting
+        setExpandedCategoryIds((expanded) => {
+          const newExpanded = new Set(expanded);
+          if (newExpanded.has(categoryId)) {
+            newExpanded.delete(categoryId);
+          }
+          return newExpanded;
+        });
         return prev.filter((id) => id !== categoryId);
       } else {
         // Find the category and expand it if it has children
@@ -837,6 +850,14 @@ export default function BusinessDetailsScreen() {
   const toggleEventSelection = (eventId: string) => {
     setSelectedEventIds((prev) => {
       if (prev.includes(eventId)) {
+        // Collapse when deselecting
+        setExpandedEventCategoryIds((expanded) => {
+          const newExpanded = new Set(expanded);
+          if (newExpanded.has(eventId)) {
+            newExpanded.delete(eventId);
+          }
+          return newExpanded;
+        });
         return prev.filter((id) => id !== eventId);
       } else {
         // Find the category and expand it if it has children
@@ -1175,10 +1196,10 @@ export default function BusinessDetailsScreen() {
           throw uploadError;
         }
         console.log('Upload successful, data:', data);
-        
+
         // Reload images to get the persisted data
         await loadData();
-        
+
         Alert.alert('Success', 'Image uploaded successfully');
       } catch (error: any) {
         console.error('Upload failed:', error);
@@ -1532,7 +1553,7 @@ export default function BusinessDetailsScreen() {
         </View>
       </View>
       <View style={styles.tabContainer}>
-          {/*
+        {/*
           <TouchableOpacity
             style={[
               styles.tab,
@@ -1551,63 +1572,63 @@ export default function BusinessDetailsScreen() {
             </Text>
           </TouchableOpacity>
           */}
-          
-          <TouchableOpacity
+
+        <TouchableOpacity
+          style={[
+            styles.tab,
+            activeSection === 'gallery' && styles.activeTab,
+          ]}
+          onPress={() => setActiveSection('gallery')}
+        >
+          <ImageIcon size={20} color={activeSection === 'gallery' ? '#fff' : 'rgba(255,255,255,0.7)'} />
+          <Text
             style={[
-              styles.tab,
-              activeSection === 'gallery' && styles.activeTab,
+              styles.tabText,
+              activeSection === 'gallery' && styles.activeTabText,
             ]}
-            onPress={() => setActiveSection('gallery')}
+            numberOfLines={1}
           >
-            <ImageIcon size={20} color={activeSection === 'gallery' ? '#fff' : 'rgba(255,255,255,0.7)'} />
-            <Text
-              style={[
-                styles.tabText,
-                activeSection === 'gallery' && styles.activeTabText,
-              ]}
-              numberOfLines={1}
-            >
-              Gallery
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
+            Gallery
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.tab,
+            activeSection === 'packages' && styles.activeTab,
+          ]}
+          onPress={() => setActiveSection('packages')}
+        >
+          <Package size={20} color={activeSection === 'packages' ? '#fff' : 'rgba(255,255,255,0.7)'} />
+          <Text
             style={[
-              styles.tab,
-              activeSection === 'packages' && styles.activeTab,
+              styles.tabText,
+              activeSection === 'packages' && styles.activeTabText,
             ]}
-            onPress={() => setActiveSection('packages')}
+            numberOfLines={1}
           >
-            <Package size={20} color={activeSection === 'packages' ? '#fff' : 'rgba(255,255,255,0.7)'} />
-            <Text
-              style={[
-                styles.tabText,
-                activeSection === 'packages' && styles.activeTabText,
-              ]}
-              numberOfLines={1}
-            >
-              Packages
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
+            Packages
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.tab,
+            activeSection === 'edit' && styles.activeTab,
+          ]}
+          onPress={() => setActiveSection('edit')}
+        >
+          <Edit size={20} color={activeSection === 'edit' ? '#fff' : 'rgba(255,255,255,0.7)'} />
+          <Text
             style={[
-              styles.tab,
-              activeSection === 'edit' && styles.activeTab,
+              styles.tabText,
+              activeSection === 'edit' && styles.activeTabText,
             ]}
-            onPress={() => setActiveSection('edit')}
+            numberOfLines={1}
           >
-            <Edit size={20} color={activeSection === 'edit' ? '#fff' : 'rgba(255,255,255,0.7)'} />
-            <Text
-              style={[
-                styles.tabText,
-                activeSection === 'edit' && styles.activeTabText,
-              ]}
-              numberOfLines={1}
-            >
-              Edit Details
-            </Text>
-          </TouchableOpacity>
-        </View>
-     
+            Edit Details
+          </Text>
+        </TouchableOpacity>
+      </View>
+
 
       <ScrollView
         style={styles.content}
@@ -1615,7 +1636,7 @@ export default function BusinessDetailsScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-  
+
         {/*activeSection === 'offers' && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -1644,7 +1665,7 @@ export default function BusinessDetailsScreen() {
             )}
           </View>
         )*/}
-      
+
 
         {activeSection === 'gallery' && (
           <View style={styles.section}>
@@ -1757,7 +1778,7 @@ export default function BusinessDetailsScreen() {
                 packages={packages}
                 onEdit={handleEditPackage}
                 onDelete={handleDeletePackage}
-                onToggleStatus={() => {}} // Not used anymore, but required by interface
+                onToggleStatus={() => { }} // Not used anymore, but required by interface
                 loading={loadingPackages}
               />
             )}
@@ -1892,7 +1913,7 @@ export default function BusinessDetailsScreen() {
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Service Category *</Text>
-                
+
                 {/* Dropdown Trigger */}
                 <TouchableOpacity
                   style={styles.dropdownTrigger}
@@ -1960,7 +1981,7 @@ export default function BusinessDetailsScreen() {
                       />
 
                       {/* Category Tree */}
-                      <ScrollView 
+                      <ScrollView
                         style={styles.modalCategoryTree}
                         nestedScrollEnabled={true}
                         showsVerticalScrollIndicator={true}
@@ -1987,7 +2008,7 @@ export default function BusinessDetailsScreen() {
 
               <View style={styles.editField}>
                 <Text style={styles.editLabel}>Event Types *</Text>
-                
+
                 {/* Event Dropdown Trigger */}
                 <TouchableOpacity
                   style={styles.dropdownTrigger}
@@ -2061,7 +2082,7 @@ export default function BusinessDetailsScreen() {
                       />
 
                       {/* Event Category Tree */}
-                      <ScrollView 
+                      <ScrollView
                         style={styles.modalCategoryTree}
                         nestedScrollEnabled={true}
                         showsVerticalScrollIndicator={true}
@@ -2319,6 +2340,7 @@ export default function BusinessDetailsScreen() {
                   returnKeyType="next"
                   onSubmitEditing={() => gstNumberRef.current?.focus()}
                   keyboardType="numeric"
+                  maxLength={4}
                   placeholderTextColor="#999"
                 />
               </View>

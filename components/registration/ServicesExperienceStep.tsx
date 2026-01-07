@@ -180,7 +180,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     return rootCategories;
   };
 
-  // Get full path for a category
+  // Get full path for a category (excluding root/parent category)
   const getCategoryPath = (categoryId: string, categories: Category[]): string => {
     const categoryMap = new Map<string, Category>();
     categories.forEach((cat) => categoryMap.set(cat.id, cat));
@@ -193,6 +193,11 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       if (!cat) break;
       path.unshift(cat.name);
       currentId = cat.parent_category_id;
+    }
+
+    // Remove the root category (first element) if there are multiple levels
+    if (path.length > 1) {
+      path.shift(); // Remove the first element (root category)
     }
 
     return path.join(' > ');
@@ -250,15 +255,13 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     );
   }, [allBusinessCategories]);
 
-  // Handle root category selection (kept for backward compatibility)
+  // Handle root category selection
   const handleRootSelection = (categoryId: string) => {
     setSelectedRootCategoryId(categoryId);
-    // Also add to selectedCategoryIds if not already there
-    if (!selectedCategoryIds.includes(categoryId)) {
-      setSelectedCategoryIds((prev) => [...prev, categoryId]);
-    }
+    // Clear all previous selections when root changes
+    setSelectedCategoryIds([]);
     // Expand the selected root to show children
-    setExpandedCategoryIds((expanded) => new Set([...expanded, categoryId]));
+    setExpandedCategoryIds(new Set([categoryId]));
   };
 
   // Handle category selection (both root and child categories)
@@ -267,6 +270,16 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       if (prev.includes(categoryId)) {
         // Remove from selection
         const newIds = prev.filter((id) => id !== categoryId);
+
+        // Collapse the category when unselected
+        setExpandedCategoryIds((expanded) => {
+          const newExpanded = new Set(expanded);
+          if (newExpanded.has(categoryId)) {
+            newExpanded.delete(categoryId);
+          }
+          return newExpanded;
+        });
+
         // Also clear root selection if this was the selected root
         if (selectedRootCategoryId === categoryId) {
           setSelectedRootCategoryId(null);
@@ -280,24 +293,29 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           // Auto-expand parent chain to make the selected category visible
           const parentChain: string[] = [];
           let currentParentId: string | null = category.parent_category_id;
-          
+
           while (currentParentId) {
             parentChain.push(currentParentId);
             const parent = allBusinessCategories.find((c) => c.id === currentParentId);
             currentParentId = parent?.parent_category_id || null;
           }
-          
+
           // Expand all parents in the chain
           if (parentChain.length > 0) {
             setExpandedCategoryIds((expanded) => new Set([...expanded, ...parentChain]));
           }
-          
+
           // Expand the category itself if it has children
           const hasChildren = allBusinessCategories.some(
             (c) => c.parent_category_id === categoryId
           );
           if (hasChildren) {
             setExpandedCategoryIds((expanded) => new Set([...expanded, categoryId]));
+          }
+
+          // If the added category is a root (no parent / level 1), mark it as selected root
+          if (!category.parent_category_id || category.category_level === 1) {
+            setSelectedRootCategoryId(categoryId);
           }
         }
         return [...prev, categoryId];
@@ -323,13 +341,13 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     setExpandedCategoryIds((currentExpanded) => {
       const newExpanded = new Set(currentExpanded);
       let changed = false;
-      
+
       // Include root category in selectedCategoryIds if it's selected
       const allSelectedIds = [...selectedCategoryIds];
       if (selectedRootCategoryId && !allSelectedIds.includes(selectedRootCategoryId)) {
         allSelectedIds.push(selectedRootCategoryId);
       }
-      
+
       allSelectedIds.forEach((categoryId) => {
         // Expand the category itself if it has children
         const hasChildren = allBusinessCategories.some(
@@ -339,7 +357,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           newExpanded.add(categoryId);
           changed = true;
         }
-        
+
         // Expand parent chain so selected child categories are visible
         const category = allBusinessCategories.find((c) => c.id === categoryId);
         if (category) {
@@ -354,7 +372,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           }
         }
       });
-      
+
       return changed ? newExpanded : currentExpanded;
     });
   }, [selectedCategoryIds, selectedRootCategoryId, allBusinessCategories]);
@@ -373,11 +391,10 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           <TouchableOpacity
             style={[styles.categoryRow, { paddingLeft: level * 20 + 12 }]}
             onPress={() => {
-              // Allow selecting root categories as checkboxes
-              toggleCategorySelection(node.id);
-              // Also update root selection for backward compatibility
               if (isRoot) {
-                setSelectedRootCategoryId(node.id);
+                handleRootSelection(node.id);
+              } else {
+                toggleCategorySelection(node.id);
               }
             }}
             activeOpacity={0.7}
@@ -399,16 +416,27 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
             )}
             {!hasChildren && <View style={styles.expandButton} />}
 
-            {/* Use checkbox for all categories, including root */}
-            <View style={styles.checkbox}>
-              {(isSelected || (isRoot && isRootSelected)) ? (
-                <View style={styles.checkboxSelected}>
-                  <Check size={14} color="#fff" strokeWidth={3} />
-                </View>
-              ) : (
-                <View style={styles.checkboxUnselected} />
-              )}
-            </View>
+            {isRoot ? (
+              <View style={styles.radioButton}>
+                {isRootSelected ? (
+                  <View style={styles.radioButtonSelected}>
+                    <View style={styles.radioButtonInner} />
+                  </View>
+                ) : (
+                  <View style={styles.radioButtonOuter} />
+                )}
+              </View>
+            ) : (
+              <View style={styles.checkbox}>
+                {isSelected ? (
+                  <View style={styles.checkboxSelected}>
+                    <Check size={14} color="#fff" strokeWidth={3} />
+                  </View>
+                ) : (
+                  <View style={styles.checkboxUnselected} />
+                )}
+              </View>
+            )}
 
             {node.icon && <Text style={styles.categoryIcon}>{node.icon}</Text>}
             <Text
@@ -438,7 +466,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     if (selectedRootCategoryId && !allSelectedIds.includes(selectedRootCategoryId)) {
       allSelectedIds.push(selectedRootCategoryId);
     }
-    
+
     return allSelectedIds.map((id) => ({
       id,
       path: getCategoryPath(id, allBusinessCategories),
@@ -451,7 +479,20 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
   const toggleEventType = (eventId: string) => {
     const currentIds = data.selectedEventIds || [];
-    const newIds = currentIds.includes(eventId)
+    const isSelected = currentIds.includes(eventId);
+
+    if (isSelected) {
+      // Collapse when deselecting
+      setExpandedEventIds((expanded) => {
+        const newExpanded = new Set(expanded);
+        if (newExpanded.has(eventId)) {
+          newExpanded.delete(eventId);
+        }
+        return newExpanded;
+      });
+    }
+
+    const newIds = isSelected
       ? currentIds.filter((id: string) => id !== eventId)
       : [...currentIds, eventId];
     handleChange('selectedEventIds', newIds);
@@ -537,7 +578,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     setExpandedEventIds((currentExpanded) => {
       const newExpanded = new Set(currentExpanded);
       let changed = false;
-      
+
       (data.selectedEventIds || []).forEach((eventId) => {
         // Expand the category itself if it has children
         const hasChildren = eventCategories.some(
@@ -547,7 +588,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           newExpanded.add(eventId);
           changed = true;
         }
-        
+
         // Expand parent chain so selected child categories are visible
         const category = eventCategories.find((c) => c.id === eventId);
         if (category) {
@@ -562,19 +603,19 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           }
         }
       });
-      
+
       return changed ? newExpanded : currentExpanded;
     });
   }, [data.selectedEventIds, eventCategories]);
 
-  // Get event category path (similar to getCategoryPath)
+  // Get event category path (excluding root/parent category)
   const getEventPath = (eventId: string, events: Category[]): string => {
     const event = events.find((e) => e.id === eventId);
     if (!event) return '';
-    
+
     const path: string[] = [event.name];
     let currentId: string | null = event.parent_category_id;
-    
+
     while (currentId) {
       const parent = events.find((e) => e.id === currentId);
       if (parent) {
@@ -584,7 +625,12 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         currentId = null;
       }
     }
-    
+
+    // Remove the root category (first element) if there are multiple levels
+    if (path.length > 1) {
+      path.shift(); // Remove the first element (root category)
+    }
+
     return path.join(' > ');
   };
 
@@ -650,7 +696,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.field}>
         <Text style={styles.label}>Service Category *</Text>
-        
+
         {/* Dropdown Trigger */}
         <TouchableOpacity
           style={[
@@ -726,7 +772,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               />
 
               {/* Category Tree */}
-              <ScrollView 
+              <ScrollView
                 style={styles.modalCategoryTree}
                 nestedScrollEnabled={true}
                 showsVerticalScrollIndicator={true}
@@ -753,7 +799,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
       <View style={styles.field}>
         <Text style={styles.label}>Event Types *</Text>
-        
+
         {/* Event Dropdown Trigger */}
         <TouchableOpacity
           style={[
@@ -833,7 +879,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               />
 
               {/* Event Category Tree */}
-              <ScrollView 
+              <ScrollView
                 style={styles.modalCategoryTree}
                 nestedScrollEnabled={true}
                 showsVerticalScrollIndicator={true}

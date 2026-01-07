@@ -4,12 +4,12 @@
     "slug": "BookMyVendors",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/bmv-logo-transparent.png",
+    "icon": "./assets/images/bmv_internal_logo.png",
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/bmv-logo-transparent.png",
+      "image": "./assets/images/bmv_internal_logo.png",
       "resizeMode": "contain",
       "backgroundColor": "#FFFFFF"
     },
@@ -18,11 +18,11 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/bmv-logo-transparent.png",
+        "foregroundImage": "./assets/images/bmv_internal_logo.png",
         "backgroundColor": "#ffffff",
-        "monochromeImage": "./assets/images/bmv-logo-transparent.png"
+        "monochromeImage": "./assets/images/bmv_internal_logo.png"
       },
-      "icon": "./assets/images/bmv-logo-transparent.png",
+      "icon": "./assets/images/bmv_internal_logo.png",
       "navigationBar": {
         "backgroundColor": "#ffffff"
       },

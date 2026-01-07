@@ -46,7 +46,7 @@ export default function PackageFormScreen() {
   const [categoryFormFields, setCategoryFormFields] = useState<any[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<PackageTemplate | null>(null);
   const [availableTemplates, setAvailableTemplates] = useState<PackageTemplate[]>([]);
-  
+
   const [formData, setFormData] = useState<Partial<PackageFormData>>({
     package_name: '',
     package_type: null,
@@ -83,7 +83,7 @@ export default function PackageFormScreen() {
           .eq('vendor_id', user.id)
           .limit(1)
           .single();
-        
+
         if (!businessError && businesses) {
           actualBusinessId = businesses.id;
           setBusinessId(actualBusinessId);
@@ -135,7 +135,7 @@ export default function PackageFormScreen() {
               setAvailableTemplates(templates);
             }
           }
-          
+
           // Load category-specific fields if they exist
           if (pkg.category_id) {
             const { data: fields } = await getCategoryFormFields(pkg.category_id);
@@ -166,11 +166,11 @@ export default function PackageFormScreen() {
     setSelectedCategory(category);
     setFormData(prev => ({ ...prev, categoryId: category.id }));
     loadCategoryFields(category.id);
-    
+
     // Load templates for this category
     const templates = getTemplatesForCategory(category.name);
     setAvailableTemplates(templates);
-    
+
     setCurrentStep(1); // Move to template selection
   };
 
@@ -315,7 +315,7 @@ export default function PackageFormScreen() {
   const renderStepContent = () => {
     // Get category config once for use across multiple cases
     const categoryConfig = getCategoryConfig(selectedCategory?.name || '');
-    
+
     switch (currentStep) {
       case 0: // Category selection
         if (categories.length === 0) {
@@ -336,7 +336,7 @@ export default function PackageFormScreen() {
               <Text style={styles.sectionDescription}>
                 Choose the category for which you want to create a package
               </Text>
-              
+
               <View style={styles.categoriesList}>
                 {categories.map((category) => (
                   <TouchableOpacity
@@ -476,7 +476,7 @@ export default function PackageFormScreen() {
       case 6: // Services
         const serviceSuggestions = categoryConfig?.customFields
           ?.find(f => f.field_name === 'deliverables')?.field_options?.options || [];
-        
+
         return (
           <ScrollView style={styles.stepContent}>
             <IncludedServicesInput
@@ -492,7 +492,7 @@ export default function PackageFormScreen() {
           <ScrollView style={styles.stepContent}>
             <View style={styles.reviewSection}>
               <Text style={styles.reviewTitle}>Review Package Details</Text>
-              
+
               <View style={styles.reviewItem}>
                 <Text style={styles.reviewLabel}>Package Name:</Text>
                 <Text style={styles.reviewValue}>{formData.package_name || 'N/A'}</Text>
@@ -511,7 +511,7 @@ export default function PackageFormScreen() {
               </View>
 
               {/* Add more review items based on package type */}
-              
+
               <View style={styles.reviewItem}>
                 <Text style={styles.reviewLabel}>Included Services:</Text>
                 <Text style={styles.reviewValue}>

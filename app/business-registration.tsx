@@ -15,6 +15,7 @@ import {
 import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore } from '@/lib/supabase';
 import BasicInformationStep, { BasicInformationStepRef } from '@/components/registration/BasicInformationStep';
@@ -72,6 +73,7 @@ export default function BusinessRegistrationScreen() {
   const locationStepRef = useRef<LocationCoverageStepRef>(null);
   const verificationStepRef = useRef<VerificationStepRef>(null);
   const scrollViewRef = useRef<ScrollView>(null);
+  const insets = useSafeAreaInsets();
 
   // Save form data to AsyncStorage whenever it changes
   useEffect(() => {
@@ -95,23 +97,23 @@ export default function BusinessRegistrationScreen() {
         try {
           const savedData = await AsyncStorage.getItem(STORAGE_KEY);
           const savedPage = await AsyncStorage.getItem(STORAGE_PAGE_KEY);
-          
+
           if (savedData) {
             const parsedData = JSON.parse(savedData);
             setBusinessData(parsedData);
           }
-          
+
           if (savedPage) {
             setCurrentPage(parseInt(savedPage, 10));
           }
-          
+
           setIsRestored(true);
         } catch (error) {
           console.error('Error restoring business registration data:', error);
           setIsRestored(true);
         }
       };
-      
+
       restoreData();
     }, [])
   );
@@ -179,7 +181,16 @@ export default function BusinessRegistrationScreen() {
   };
 
   const handleNextField = () => {
+    const errors: Record<string, string> = {};
+
     if (currentPage === 0) {
+      // Validate email format if it has been entered on Basic Information step
+      if (businessData.email && businessData.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(businessData.email)) {
+        errors.email = 'Please enter a valid email address';
+        setValidationErrors(errors);
+        Alert.alert('Invalid Email', 'Please enter a valid email address');
+        return;
+      }
       basicInfoStepRef.current?.focusNextEmptyField();
     } else if (currentPage === 1) {
       servicesStepRef.current?.focusNextEmptyField();
@@ -199,10 +210,10 @@ export default function BusinessRegistrationScreen() {
   const handleNext = () => {
     // Dismiss keyboard before validation
     Keyboard.dismiss();
-    
+
     // Validate current step before proceeding
     const errors: Record<string, string> = {};
-    
+
     if (currentPage === 0) {
       // Basic Information step
       if (!businessData.businessName || !businessData.businessName.trim()) {
@@ -255,14 +266,14 @@ export default function BusinessRegistrationScreen() {
       if (!businessData.panNumber || !businessData.panNumber.trim()) {
         errors.panNumber = 'PAN number is required';
       }
-      
+
       const panDocuments = businessData.verificationDocuments?.['pan'];
       if (!panDocuments || panDocuments.length === 0) {
         errors.panDocument = 'PAN card document is required. Please upload your PAN card.';
       }
     }
     // Step 4 (Portfolio & Social) has no mandatory fields
-    
+
     if (Object.keys(errors).length > 0) {
       setValidationErrors(errors);
       Alert.alert(
@@ -272,10 +283,10 @@ export default function BusinessRegistrationScreen() {
       );
       return;
     }
-    
+
     // Clear validation errors when moving to next step
     setValidationErrors({});
-    
+
     if (currentPage < totalSteps - 1) {
       setCurrentPage(currentPage + 1);
     }
@@ -310,7 +321,7 @@ export default function BusinessRegistrationScreen() {
     console.log('Close button pressed');
     // Dismiss keyboard first to ensure proper navigation and button responsiveness
     Keyboard.dismiss();
-    
+
     // Use setTimeout to ensure keyboard is fully dismissed before showing alert
     setTimeout(() => {
       if (hasEnteredData()) {
@@ -349,12 +360,12 @@ export default function BusinessRegistrationScreen() {
 
   const updateBusinessData = (data: Partial<BusinessData>) => {
     setBusinessData((prev) => ({ ...prev, ...data }));
-    
+
     // Clear validation errors when user fixes the issues
     if (Object.keys(validationErrors).length > 0) {
       const updatedErrors = { ...validationErrors };
       let hasChanges = false;
-      
+
       // Clear errors for fields that are being updated
       if (data.businessName !== undefined && data.businessName.trim() && updatedErrors.businessName) {
         delete updatedErrors.businessName;
@@ -419,7 +430,7 @@ export default function BusinessRegistrationScreen() {
           hasChanges = true;
         }
       }
-      
+
       if (hasChanges) {
         setValidationErrors(updatedErrors);
       }
@@ -537,7 +548,7 @@ export default function BusinessRegistrationScreen() {
       if (businessData.verificationDocuments) {
         try {
           const documentsToUpload: UploadDocumentData[] = [];
-          
+
           // Flatten all documents by type into upload format
           Object.entries(businessData.verificationDocuments).forEach(([typeCode, files]) => {
             if (Array.isArray(files) && files.length > 0) {
@@ -578,7 +589,7 @@ export default function BusinessRegistrationScreen() {
       if (businessData.selectedRootCategoryId && !allSelectedCategoryIds.includes(businessData.selectedRootCategoryId)) {
         allSelectedCategoryIds.push(businessData.selectedRootCategoryId);
       }
-      
+
       if (allSelectedCategoryIds.length > 0) {
         allSelectedCategoryIds.forEach((categoryId) => {
           categoryMappings.push({
@@ -665,7 +676,7 @@ export default function BusinessRegistrationScreen() {
       component: (
         <VerificationStep
           ref={verificationStepRef}
-          data={businessData} 
+          data={businessData}
           onUpdate={updateBusinessData}
           validationErrors={validationErrors}
         />
@@ -684,7 +695,7 @@ export default function BusinessRegistrationScreen() {
   ];
 
   return (
-    <KeyboardAvoidingView 
+    <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
@@ -731,7 +742,7 @@ export default function BusinessRegistrationScreen() {
         {steps[currentPage].component}
       </ScrollView>
 
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: 16 + insets.bottom }]}>
         {currentPage > 0 && (
           <TouchableOpacity
             style={styles.secondaryButton}
@@ -741,8 +752,6 @@ export default function BusinessRegistrationScreen() {
             <Text style={styles.secondaryButtonText}>Previous</Text>
           </TouchableOpacity>
         )}
-
-        <View style={{ flex: 1 }} />
 
         {currentPage < totalSteps - 1 ? (
           areMandatoryFieldsFilled() ? (
@@ -843,13 +852,18 @@ const styles = StyleSheet.create({
   },
   pagerContent: {
     flexGrow: 1,
+    paddingBottom: 16,
   },
   footer: {
     flexDirection: 'row',
-    padding: 24,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
     borderTopWidth: 1,
     borderTopColor: '#f0f0f0',
     alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 12,
+    minHeight: 64,
   },
   secondaryButton: {
     flexDirection: 'row',
@@ -857,6 +871,7 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingVertical: 12,
     paddingHorizontal: 16,
+    marginRight: 'auto',
   },
   secondaryButtonText: {
     color: '#007AFF',
@@ -866,11 +881,13 @@ const styles = StyleSheet.create({
   primaryButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
     backgroundColor: '#007AFF',
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 12,
+    minHeight: 48,
   },
   primaryButtonText: {
     color: '#fff',
@@ -883,6 +900,7 @@ const styles = StyleSheet.create({
   nextFieldButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
     backgroundColor: '#f0f0f0',
     paddingVertical: 12,
@@ -890,6 +908,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#e0e0e0',
+    minHeight: 48,
   },
   nextFieldButtonText: {
     color: '#007AFF',
