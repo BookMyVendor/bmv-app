@@ -195,8 +195,7 @@ export default function OnboardingScreen() {
 
                 {/* Content */}
                 <View style={[styles.content, {
-                  paddingTop: insets.top + 30,
-                  paddingBottom: Math.max(insets.bottom, 48) + Spacing.xl
+                  paddingTop: insets.top + 30
                 }]}>
                   {/* Logo */}
                   <View style={styles.logoContainer}>
@@ -217,7 +216,10 @@ export default function OnboardingScreen() {
                   </View>
 
                   {/* Footer Section - Anchored to bottom */}
-                  <View style={styles.footer}>
+                  <View style={[
+                    styles.footer,
+                    { bottom: insets.bottom + Spacing.md }
+                  ]}>
                     {/* Dots Indicator */}
                     <View style={styles.dotsContainer}>
                       {ONBOARDING_DATA.map((_, dotIndex) => (
@@ -296,7 +298,6 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: Spacing.xxxl,
     paddingBottom: height < 600 ? Spacing.lg : Spacing.xxxl,
-    justifyContent: 'space-between',
   },
   logoContainer: {
     alignItems: 'center',
@@ -305,7 +306,7 @@ const styles = StyleSheet.create({
   },
   iconContainer: {
     alignItems: 'center',
-    marginVertical: height < 600 ? Spacing.md : Spacing.xxxl,
+    marginVertical: height < 600 ? Spacing.sm : Spacing.lg,
   },
   iconCircle: {
     width: height < 600 ? 100 : height < 700 ? 120 : 140,
@@ -323,15 +324,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: Spacing.lg,
-    marginVertical: height < 600 ? Spacing.md : Spacing.xxxl,
+    marginTop: Spacing.md,
+    marginBottom: Spacing.lg,
   },
   title: {
-    fontSize: height < 600 ? 24 : height < 700 ? 28 : 32,
+    fontSize: height < 600 ? 22 : height < 700 ? 24 : 26,
     fontWeight: '700',
-    color: '#000',
     textAlign: 'center',
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.sm,
   },
+
   description: {
     fontSize: height < 600 ? 14 : height < 700 ? 16 : 18,
     color: '#1a1a1a',
@@ -339,8 +341,13 @@ const styles = StyleSheet.create({
     lineHeight: height < 600 ? 20 : 26,
   },
   footer: {
-    width: '100%',
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
   },
+
+
   dotsContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -362,15 +369,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
   buttonContainer: {
-    paddingBottom: Spacing.xl,
+    width: '100%',
+    paddingHorizontal: Spacing.xxxl,
   },
   nextButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    paddingVertical: height < 600 ? Spacing.md : Spacing.lg,
-    paddingHorizontal: height < 600 ? Spacing.xxl : Spacing.xxxl,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.xxl,
     borderRadius: 30,
     borderWidth: 2,
     borderColor: '#000',
