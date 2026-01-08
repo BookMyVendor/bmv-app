@@ -50,3 +50,59 @@ android/.kotlin/
 # Keystore properties (contains passwords)
 keystore.properties
 signing.properties
+
+# dependencies
+node_modules/
+
+# expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# metro
+.metro-health-check*
+
+# logs
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# env
+.env
+.env*.local
+
+# mac
+.DS_Store
+
+# android (generated only)
+android/**/build/
+android/.gradle/
+android/local.properties
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+
+# ide
+.idea/
+
+# typescript
+*.tsbuildinfo
+
+android/.kotlin/
+
+# =========================
+# Android signing (CRITICAL)
+# =========================
+
+# Keystore files (NEVER commit)
+*.jks
+*.keystore
+
+# Keystore properties (contains passwords)
+keystore.properties
+signing.properties
+
+# Gradle secrets (local only)
+android/gradle.properties
