@@ -216,7 +216,7 @@ export default function DashboardScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+      <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
         <View style={styles.headerLeft}>
           <Logo size={38} style={styles.headerLogo} />
           <Text style={styles.headerTitle}>Dashboard</Text>
@@ -299,10 +299,10 @@ export default function DashboardScreen() {
               style={styles.statCard}
               activeOpacity={0.7}
               onPress={() => {
-                const params = selectedStatuses.length > 0
-                  ? `?statuses=${selectedStatuses.join(',')}`
-                  : '';
-                router.push(`/(tabs)/leads${params}`);
+                router.push({
+                  pathname: '/leads',
+                  params: selectedStatuses.length > 0 ? { statuses: selectedStatuses.join(',') } : {}
+                });
               }}
             >
               <LinearGradient
@@ -323,10 +323,14 @@ export default function DashboardScreen() {
               style={styles.statCard}
               activeOpacity={0.7}
               onPress={() => {
-                const params = selectedStatuses.length > 0
-                  ? `?statuses=${selectedStatuses.join(',')}&timeFilter=month`
-                  : '?timeFilter=month';
-                router.push(`/(tabs)/leads${params}`);
+                const params: any = { timeFilter: 'month' };
+                if (selectedStatuses.length > 0) {
+                  params.statuses = selectedStatuses.join(',');
+                }
+                router.push({
+                  pathname: '/leads',
+                  params
+                });
               }}
             >
               <LinearGradient
@@ -347,10 +351,14 @@ export default function DashboardScreen() {
               style={styles.statCard}
               activeOpacity={0.7}
               onPress={() => {
-                const params = selectedStatuses.length > 0
-                  ? `?statuses=${selectedStatuses.join(',')}&timeFilter=today`
-                  : '?timeFilter=today';
-                router.push(`/(tabs)/leads${params}`);
+                const params: any = { timeFilter: 'today' };
+                if (selectedStatuses.length > 0) {
+                  params.statuses = selectedStatuses.join(',');
+                }
+                router.push({
+                  pathname: '/leads',
+                  params
+                });
               }}
             >
               <LinearGradient
@@ -506,23 +514,26 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     backgroundColor: '#fff',
     paddingHorizontal: 20,
-    paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 0,
+    height: '100%',
   },
   headerLogo: {
-    marginRight: 8,
+    marginRight: 4,
     marginVertical: 0,
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: '#1a1a1a',
+    lineHeight: 22,
+    textAlignVertical: 'center',
+    includeFontPadding: false,
   },
   content: {
     padding: 20,

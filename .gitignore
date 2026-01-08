@@ -38,3 +38,15 @@ android/local.properties
 *.tsbuildinfo
 
 android/.kotlin/
+
+# =========================
+# Android signing (CRITICAL)
+# =========================
+
+# Keystore files (NEVER commit)
+*.jks
+*.keystore
+
+# Keystore properties (contains passwords)
+keystore.properties
+signing.properties

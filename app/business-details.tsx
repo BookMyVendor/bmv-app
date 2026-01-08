@@ -62,6 +62,7 @@ import {
 } from '@/lib/businessApi';
 import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '@/lib/documentUpload';
 import { validatePincode } from '@/lib/pincodeValidation';
+import { validateEmail, getEmailError } from '@/lib/validation';
 import Logo from '@/components/Logo';
 import Dropdown from '@/components/Dropdown';
 import PackageList from '@/components/packages/PackageList';
@@ -161,6 +162,7 @@ export default function BusinessDetailsScreen() {
   const [pincodeStatus, setPincodeStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
   const [pincodeError, setPincodeError] = useState<string | null>(null);
   const [cityOptions, setCityOptions] = useState<string[]>([]);
+  const [emailError, setEmailError] = useState<string | null>(null);
 
   // Refs for keyboard navigation in edit form
   const contactPersonNameRef = useRef<TextInput>(null);
@@ -802,7 +804,13 @@ export default function BusinessDetailsScreen() {
 
   // Get selected categories with full paths
   const selectedCategoriesWithPaths = React.useMemo(() => {
-    return selectedCategoryIds.map((id) => ({
+    // Only show child categories (those with parents)
+    const childIds = selectedCategoryIds.filter(id => {
+      const cat = allBusinessCategories.find(c => c.id === id);
+      return cat && cat.parent_category_id !== null;
+    });
+
+    return childIds.map((id) => ({
       id,
       path: getCategoryPath(id, allBusinessCategories),
     }));
@@ -816,7 +824,7 @@ export default function BusinessDetailsScreen() {
     if (selectedCategoriesWithPaths.length === 1) {
       return selectedCategoriesWithPaths[0].path;
     }
-    return `${selectedCategoriesWithPaths.length} categories selected`;
+    return `${selectedCategoriesWithPaths.length} sub-categories selected`;
   };
 
   // Build hierarchical tree structure for event categories
@@ -925,7 +933,13 @@ export default function BusinessDetailsScreen() {
 
   // Get selected event categories with full paths
   const selectedEventsWithPaths = React.useMemo(() => {
-    return selectedEventIds.map((id) => ({
+    // Only show child categories
+    const childIds = selectedEventIds.filter(id => {
+      const cat = allEventCategories.find(c => c.id === id);
+      return cat && cat.parent_category_id !== null;
+    });
+
+    return childIds.map((id) => ({
       id,
       path: getEventCategoryPath(id, allEventCategories),
     }));
@@ -939,7 +953,7 @@ export default function BusinessDetailsScreen() {
     if (selectedEventsWithPaths.length === 1) {
       return selectedEventsWithPaths[0].path;
     }
-    return `${selectedEventsWithPaths.length} events selected`;
+    return `${selectedEventsWithPaths.length} sub-categories selected`;
   };
 
   // Toggle event selection
@@ -1001,7 +1015,12 @@ export default function BusinessDetailsScreen() {
 
   const handleCategoryModalDone = () => {
     // Validate: at least one sub-category (child) must be selected
-    if (tempSelectedCategoryIds.length === 0) {
+    const hasSubCategory = tempSelectedCategoryIds.some(id => {
+      const cat = allBusinessCategories.find(c => c.id === id);
+      return cat && cat.parent_category_id !== null;
+    });
+
+    if (!hasSubCategory) {
       Alert.alert('Validation Error', 'Please select at least one sub-category');
       return;
     }
@@ -1066,9 +1085,14 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleEventModalDone = () => {
-    // Validate: at least one event type must be selected
-    if (tempSelectedEventIds.length === 0) {
-      Alert.alert('Validation Error', 'Please select at least one event type');
+    // Validate: at least one event type (sub-category) must be selected
+    const hasSubEventType = tempSelectedEventIds.some(id => {
+      const cat = allEventCategories.find(c => c.id === id);
+      return cat && cat.parent_category_id !== null;
+    });
+
+    if (!hasSubEventType) {
+      Alert.alert('Validation Error', 'Please select at least one sub-category for event types');
       return;
     }
 
@@ -1551,9 +1575,9 @@ export default function BusinessDetailsScreen() {
   const handleSaveDetails = async () => {
     // 1. Validate Email (format if provided)
     if (editData.business_email && editData.business_email.trim()) {
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(editData.business_email)) {
-        Alert.alert('Validation Error', 'Please enter a valid email address.');
+      const error = getEmailError(editData.business_email);
+      if (error) {
+        setEmailError(error);
         setSavingDetails(false);
         return;
       }
@@ -1601,15 +1625,23 @@ export default function BusinessDetailsScreen() {
     }
 
     // 6. Validate at least one service category
-    if (selectedCategoryIds.length === 0) {
-      Alert.alert('Validation Error', 'At least one service category must be selected.');
+    const hasSubCategory = selectedCategoryIds.some(id => {
+      const cat = allBusinessCategories.find(c => c.id === id);
+      return cat && cat.parent_category_id !== null;
+    });
+    if (!hasSubCategory) {
+      Alert.alert('Validation Error', 'At least one sub-category must be selected.');
       setSavingDetails(false);
       return;
     }
 
     // 7. Validate at least one event type
-    if (selectedEventIds.length === 0) {
-      Alert.alert('Validation Error', 'At least one event type must be selected.');
+    const hasSubEventType = selectedEventIds.some(id => {
+      const cat = allEventCategories.find(c => c.id === id);
+      return cat && cat.parent_category_id !== null;
+    });
+    if (!hasSubEventType) {
+      Alert.alert('Validation Error', 'At least one sub-category for event types must be selected.');
       setSavingDetails(false);
       return;
     }
@@ -1797,7 +1829,7 @@ export default function BusinessDetailsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+      <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
         <TouchableOpacity
           style={styles.backBtn}
           onPress={() => {
@@ -1816,9 +1848,11 @@ export default function BusinessDetailsScreen() {
             <Text style={styles.headerTitle} numberOfLines={1}>
               {business.business_name}
             </Text>
-            <Text style={styles.headerSubtitle} numberOfLines={1}>
-              {business.vendor_service_category}
-            </Text>
+            {business.vendor_service_category ? (
+              <Text style={styles.headerSubtitle} numberOfLines={1}>
+                {business.vendor_service_category}
+              </Text>
+            ) : null}
           </View>
         </View>
       </View>
@@ -2065,15 +2099,15 @@ export default function BusinessDetailsScreen() {
             setPackageToDelete(null);
           }}
         >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Delete Package</Text>
-              <Text style={styles.modalMessage}>
+          <View style={styles.confirmModalOverlay}>
+            <View style={styles.confirmModalContent}>
+              <Text style={styles.confirmModalTitle}>Delete Package</Text>
+              <Text style={styles.confirmModalMessage}>
                 Are you sure you want to delete "{packageToDelete?.package_name || 'this package'}"? This will mark it as inactive and hide it from the list.
               </Text>
-              <View style={styles.modalButtons}>
+              <View style={styles.confirmModalButtons}>
                 <TouchableOpacity
-                  style={[styles.modalButton, styles.modalButtonCancel]}
+                  style={[styles.confirmModalButton, styles.modalButtonCancel]}
                   onPress={() => {
                     setShowDeleteModal(false);
                     setPackageToDelete(null);
@@ -2083,7 +2117,7 @@ export default function BusinessDetailsScreen() {
                   <Text style={styles.modalButtonCancelText}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.modalButton, styles.modalButtonDelete]}
+                  style={[styles.confirmModalButton, styles.modalButtonDelete]}
                   onPress={confirmDeletePackage}
                   disabled={deleting}
                 >
@@ -2150,9 +2184,17 @@ export default function BusinessDetailsScreen() {
                 <Text style={styles.editLabel}>Email</Text>
                 <TextInput
                   ref={businessEmailRef}
-                  style={styles.editInput}
+                  style={[styles.editInput, emailError && styles.validationInputInvalid]}
                   value={editData.business_email || ''}
-                  onChangeText={(text) => setEditData({ ...editData, business_email: text })}
+                  onChangeText={(text) => {
+                    setEditData({ ...editData, business_email: text });
+                    const error = getEmailError(text);
+                    if (error && text.trim().length > 5) {
+                      setEmailError(error);
+                    } else {
+                      setEmailError(null);
+                    }
+                  }}
                   placeholder="Enter email"
                   placeholderTextColor="#999"
                   keyboardType="email-address"
@@ -2160,6 +2202,7 @@ export default function BusinessDetailsScreen() {
                   returnKeyType="next"
                   onSubmitEditing={() => contactPersonPhoneRef.current?.focus()}
                 />
+                {emailError && <Text style={styles.validationErrorText}>{emailError}</Text>}
               </View>
 
               <View style={styles.editField}>
@@ -2992,36 +3035,46 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     backgroundColor: '#fff',
     paddingHorizontal: 20,
-    paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+    zIndex: 10,
   },
   backBtn: {
-    padding: 4,
-    marginRight: 8,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 4,
   },
   headerCenter: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
-    gap: 12,
+    gap: 0,
+    height: '100%',
   },
   headerLogo: {
-    marginRight: 8,
+    marginRight: 4,
     marginVertical: 0,
   },
   headerTitleContainer: {
     flex: 1,
+    justifyContent: 'center',
+    height: '100%',
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: '#1a1a1a',
-    marginBottom: 2,
+    textAlignVertical: 'center',
+    includeFontPadding: false,
   },
   headerSubtitle: {
     fontSize: 13,
     color: '#666',
+    lineHeight: 16,
+    textAlignVertical: 'center',
+    includeFontPadding: false,
   },
   tabContainer: {
     flexDirection: 'row',
@@ -3774,13 +3827,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
   },
-  modalOverlay: {
+  confirmModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  modalContent: {
+  confirmModalContent: {
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 24,
@@ -3792,23 +3845,23 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
-  modalTitle: {
+  confirmModalTitle: {
     fontSize: 20,
     fontWeight: '700',
     color: '#1a1a1a',
     marginBottom: 12,
   },
-  modalMessage: {
+  confirmModalMessage: {
     fontSize: 14,
     color: '#666',
     marginBottom: 24,
     lineHeight: 20,
   },
-  modalButtons: {
+  confirmModalButtons: {
     flexDirection: 'row',
     gap: 12,
   },
-  modalButton: {
+  confirmModalButton: {
     flex: 1,
     paddingVertical: 12,
     paddingHorizontal: 20,
@@ -3837,6 +3890,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#FF3B30',
     marginTop: 4,
+  },
+  validationErrorText: {
+    fontSize: 12,
+    color: '#FF3B30',
+    marginTop: 4,
+    marginLeft: 4,
+  },
+  validationInputInvalid: {
+    borderColor: '#FF3B30',
+    borderWidth: 1,
   },
   pincodeSuccessText: {
     fontSize: 12,

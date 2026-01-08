@@ -97,10 +97,11 @@ export default function PackageFormScreen() {
           console.error('Error loading categories:', catError);
           Alert.alert('Error', 'Failed to load categories. Please try again.');
         } else if (cats && cats.length > 0) {
-          setCategories(cats as Category[]);
+          const subCategories = (cats as Category[]).filter(cat => cat.parent_category_id !== null);
+          setCategories(subCategories);
           // If only one category, auto-select and move to next step
-          if (cats.length === 1) {
-            const cat = cats[0] as Category;
+          if (subCategories.length === 1) {
+            const cat = subCategories[0];
             setSelectedCategory(cat);
             loadCategoryFields(cat.id);
             // Load templates for this category

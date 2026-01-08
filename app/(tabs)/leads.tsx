@@ -117,7 +117,7 @@ export default function LeadsScreen() {
       const { data: leadsData, error } = await supabaseCrm
         .from('customer_leads')
         .select('*')
-        .eq('vendor_id', user.id)
+        .eq('vendor_id', user?.id)
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -221,7 +221,7 @@ export default function LeadsScreen() {
 
     if (selectedEventTypes.length > 0) {
       filtered = filtered.filter((lead) =>
-        selectedEventTypes.includes(lead.event_type)
+        selectedEventTypes.includes(lead.event_type || '')
       );
     }
 
@@ -439,7 +439,7 @@ export default function LeadsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+      <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
         <View style={styles.headerLeft}>
           <Logo size={38} style={styles.headerLogo} />
           <View style={styles.headerTitleRow}>
@@ -535,54 +535,54 @@ export default function LeadsScreen() {
             }}
             scrollEventThrottle={16}
           >
-          <FilterChip
-            label={
-              selectedEventTypes.length > 0
-                ? `Event (${selectedEventTypes.length})`
-                : 'Event Type'
-            }
-            active={selectedEventTypes.length > 0}
-            onPress={() => setShowEventTypeModal(true)}
-            showClear={selectedEventTypes.length > 0}
-            onClear={() => setSelectedEventTypes([])}
-          />
-          <FilterChip
-            label={
-              selectedStatuses.length > 0
-                ? `Status (${selectedStatuses.length})`
-                : 'Status'
-            }
-            active={selectedStatuses.length > 0}
-            onPress={() => setShowStatusModal(true)}
-            showClear={selectedStatuses.length > 0}
-            onClear={() => setSelectedStatuses([])}
-          />
-          {availableCities.length > 0 && (
             <FilterChip
               label={
-                selectedCities.length > 0
-                  ? `City (${selectedCities.length})`
-                  : 'City'
+                selectedEventTypes.length > 0
+                  ? `Event (${selectedEventTypes.length})`
+                  : 'Event Type'
               }
-              active={selectedCities.length > 0}
-              onPress={() => setShowCityModal(true)}
-              showClear={selectedCities.length > 0}
-              onClear={() => setSelectedCities([])}
+              active={selectedEventTypes.length > 0}
+              onPress={() => setShowEventTypeModal(true)}
+              showClear={selectedEventTypes.length > 0}
+              onClear={() => setSelectedEventTypes([])}
             />
-          )}
-          {activeFilterCount > 0 && (
-            <TouchableOpacity
-              style={styles.clearAllButton}
-              onPress={() => {
-                setSearchQuery('');
-                setSelectedEventTypes([]);
-                setSelectedStatuses([]);
-                setSelectedCities([]);
-              }}
-            >
-              <Text style={styles.clearAllText}>Clear All</Text>
-            </TouchableOpacity>
-          )}
+            <FilterChip
+              label={
+                selectedStatuses.length > 0
+                  ? `Status (${selectedStatuses.length})`
+                  : 'Status'
+              }
+              active={selectedStatuses.length > 0}
+              onPress={() => setShowStatusModal(true)}
+              showClear={selectedStatuses.length > 0}
+              onClear={() => setSelectedStatuses([])}
+            />
+            {availableCities.length > 0 && (
+              <FilterChip
+                label={
+                  selectedCities.length > 0
+                    ? `City (${selectedCities.length})`
+                    : 'City'
+                }
+                active={selectedCities.length > 0}
+                onPress={() => setShowCityModal(true)}
+                showClear={selectedCities.length > 0}
+                onClear={() => setSelectedCities([])}
+              />
+            )}
+            {activeFilterCount > 0 && (
+              <TouchableOpacity
+                style={styles.clearAllButton}
+                onPress={() => {
+                  setSearchQuery('');
+                  setSelectedEventTypes([]);
+                  setSelectedStatuses([]);
+                  setSelectedCities([]);
+                }}
+              >
+                <Text style={styles.clearAllText}>Clear All</Text>
+              </TouchableOpacity>
+            )}
           </ScrollView>
           {showFilterScrollIndicator && (
             <TouchableOpacity
@@ -745,7 +745,7 @@ export default function LeadsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-   // backgroundColor: 'rgba(138, 151, 209, 0.02)',
+    // backgroundColor: 'rgba(138, 151, 209, 0.02)',
   },
   header: {
     flexDirection: 'row',
@@ -753,18 +753,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     backgroundColor: '#fff',
     paddingHorizontal: 20,
-    paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 0,
     flex: 1,
+    height: '100%',
   },
   headerLogo: {
-    marginRight: 8,
+    marginRight: 4,
     marginVertical: 0,
   },
   headerTitleRow: {
@@ -776,6 +776,9 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#1a1a1a',
+    lineHeight: 22,
+    textAlignVertical: 'center',
+    includeFontPadding: false,
   },
   timeFilterBadge: {
     backgroundColor: '#E8F1FF',

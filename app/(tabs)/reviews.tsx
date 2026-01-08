@@ -78,7 +78,7 @@ export default function ReviewsScreen() {
   const fetchReviews = async () => {
     try {
       if (!user?.id) return;
-      
+
       const isRefresh = refreshing;
       if (!isRefresh) setLoading(true);
 
@@ -125,7 +125,7 @@ export default function ReviewsScreen() {
           .from('customers')
           .select('id, name, email')
           .in('id', customerIds);
-        
+
         if (customersError) {
           console.error('Error fetching customers:', customersError);
         } else if (customersData) {
@@ -141,7 +141,7 @@ export default function ReviewsScreen() {
           .from('customer_leads')
           .select('id, template_id, sub_template_id')
           .in('id', leadIds);
-        
+
         if (leadsError) {
           console.error('Error fetching leads:', leadsError);
         } else if (leadsData) {
@@ -160,14 +160,14 @@ export default function ReviewsScreen() {
       const templateIds = reviewsWithJoins
         .map((r: any) => r.customer_leads?.template_id || r.customer_leads?.sub_template_id)
         .filter(Boolean);
-      
+
       let eventTypeMap = new Map();
       if (templateIds.length > 0) {
         const { data: templates, error: templatesError } = await supabaseCore
           .from('event_templates')
           .select('id, name')
           .in('id', templateIds);
-        
+
         const { data: subTemplates, error: subTemplatesError } = await supabaseCore
           .from('event_sub_templates')
           .select('id, name')
@@ -194,7 +194,7 @@ export default function ReviewsScreen() {
         const eventType = eventTypeId ? eventTypeMap.get(eventTypeId) : null;
 
         // Get business name if business_id exists, otherwise show "No Business"
-        const businessName = review.business_id 
+        const businessName = review.business_id
           ? (businessMap.get(review.business_id) || 'Unknown Business')
           : 'No Business';
 
@@ -581,12 +581,12 @@ export default function ReviewsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+      <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
         <View style={styles.headerLeft}>
           <Logo size={38} style={styles.headerLogo} />
           <Text style={styles.headerTitle}>Reviews</Text>
         </View>
-        </View>
+      </View>
 
       {loading ? (
         <View style={styles.loadingContainer}>
@@ -689,23 +689,26 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     backgroundColor: '#fff',
     paddingHorizontal: 20,
-    paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 0,
+    height: '100%',
   },
   headerLogo: {
-    marginRight: 8,
+    marginRight: 4,
     marginVertical: 0,
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: '#1a1a1a',
+    lineHeight: 22,
+    textAlignVertical: 'center',
+    includeFontPadding: false,
   },
   loadingContainer: {
     flex: 1,

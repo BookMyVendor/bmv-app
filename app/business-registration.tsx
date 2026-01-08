@@ -28,6 +28,7 @@ import { INDIAN_STATES } from '@/constants/indianStates';
 import { TextInput } from '@/components/TextInput';
 import { Dropdown } from '@/components/Dropdown';
 import Logo from '@/components/Logo';
+import { validateEmail, getEmailError } from '@/lib/validation';
 
 interface BusinessData {
   businessName: string;
@@ -153,7 +154,7 @@ export default function BusinessRegistrationScreen() {
       // Basic Information step - all fields must be filled AND valid
       const hasBusinessName = !!(businessData.businessName?.trim());
       const hasContactName = !!(businessData.contactPersonName?.trim());
-      const hasEmail = !!(businessData.email?.trim()) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(businessData.email);
+      const hasEmail = !!(businessData.email?.trim()) && validateEmail(businessData.email);
       const hasPhone = !!(businessData.phoneNumber?.trim());
       return hasBusinessName && hasContactName && hasEmail && hasPhone;
     } else if (currentPage === 1) {
@@ -185,7 +186,7 @@ export default function BusinessRegistrationScreen() {
 
     if (currentPage === 0) {
       // Validate email format if it has been entered on Basic Information step
-      if (businessData.email && businessData.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(businessData.email)) {
+      if (businessData.email && businessData.email.trim() && !validateEmail(businessData.email)) {
         errors.email = 'Please enter a valid email address';
         setValidationErrors(errors);
         Alert.alert('Invalid Email', 'Please enter a valid email address');
@@ -224,7 +225,7 @@ export default function BusinessRegistrationScreen() {
       }
       if (!businessData.email || !businessData.email.trim()) {
         errors.email = 'Email is required';
-      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(businessData.email)) {
+      } else if (!validateEmail(businessData.email)) {
         errors.email = 'Please enter a valid email address';
       }
       if (!businessData.phoneNumber || !businessData.phoneNumber.trim()) {
@@ -375,9 +376,15 @@ export default function BusinessRegistrationScreen() {
         delete updatedErrors.contactPersonName;
         hasChanges = true;
       }
-      if (data.email !== undefined && data.email.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email) && updatedErrors.email) {
-        delete updatedErrors.email;
-        hasChanges = true;
+      if (data.email !== undefined) {
+        const emailErr = getEmailError(data.email);
+        if (emailErr && data.email.trim().length > 5) { // Only show error if they've typed a bit
+          updatedErrors.email = emailErr;
+          hasChanges = true;
+        } else if (!emailErr && updatedErrors.email) {
+          delete updatedErrors.email;
+          hasChanges = true;
+        }
       }
       if (data.phoneNumber !== undefined && data.phoneNumber.trim() && updatedErrors.phoneNumber) {
         delete updatedErrors.phoneNumber;
