@@ -23,6 +23,7 @@ import {
 } from '@/types/leads';
 import Dropdown from '@/components/Dropdown';
 import Logo from '@/components/Logo';
+import { validateEmail, getEmailError } from '@/lib/validation';
 
 export default function LeadFormScreen() {
   const router = useRouter();
@@ -83,7 +84,7 @@ export default function LeadFormScreen() {
         .from('categories')
         .select('id, name')
         .eq('category_type', 'event')
-        .eq('category_level', 1)
+        .neq('category_level', 1)
         .order('sort_order', { ascending: true })
         .order('name', { ascending: true });
 
@@ -166,7 +167,7 @@ export default function LeadFormScreen() {
       newErrors.customer_phone = 'Please enter a valid phone number';
     }
 
-    if (formData.customer_email && !/^\S+@\S+\.\S+$/.test(formData.customer_email)) {
+    if (formData.customer_email && !validateEmail(formData.customer_email)) {
       newErrors.customer_email = 'Please enter a valid email address';
     }
 
@@ -266,7 +267,19 @@ export default function LeadFormScreen() {
 
   const updateFormData = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
-    if (errors[field]) {
+
+    if (field === 'customer_email') {
+      const emailErr = getEmailError(value);
+      if (emailErr && value.trim().length > 5) {
+        setErrors((prev) => ({ ...prev, [field]: emailErr }));
+      } else {
+        setErrors((prev) => {
+          const newErrors = { ...prev };
+          delete newErrors[field];
+          return newErrors;
+        });
+      }
+    } else if (errors[field]) {
       setErrors((prev) => {
         const newErrors = { ...prev };
         delete newErrors[field];
@@ -601,7 +614,7 @@ export default function LeadFormScreen() {
                 multiline
                 numberOfLines={4}
                 textAlignVertical="top"
-                scrollEnabled = {true}
+                scrollEnabled={true}
               />
             </View>
           </View>

@@ -20,6 +20,7 @@ import { Formik } from 'formik';
 import * as Yup from 'yup';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore, supabaseCms } from '@/lib/supabase';
+import { validateEmail } from '@/lib/validation';
 
 
 const profileSchema = Yup.object().shape({
@@ -27,11 +28,9 @@ const profileSchema = Yup.object().shape({
   lastName: Yup.string().required('Last name is required'),
   email: Yup.string()
     .required('Email is required')
-    .email('Please enter a valid email address')
-    .matches(
-      /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-      'Please enter a valid email address'
-    ),
+    .test('email-validation', 'Invalid email address', function (value) {
+      return validateEmail(value);
+    }),
 });
 
 export default function CompleteProfileScreen() {
@@ -472,7 +471,7 @@ export default function CompleteProfileScreen() {
                   });
                   e?.preventDefault?.();
                   e?.stopPropagation?.();
-                  
+
                   // Validate the form and show all errors
                   try {
                     await profileSchema.validate(values, { abortEarly: false });
