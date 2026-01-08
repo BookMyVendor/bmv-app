@@ -24,12 +24,17 @@ import * as Yup from 'yup';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabaseCore, supabaseCms } from '@/lib/supabase';
 import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
+import { validateEmail } from '@/lib/validation';
 import Logo from '@/components/Logo';
 
 const profileSchema = Yup.object().shape({
   firstName: Yup.string().required('First name is required'),
   lastName: Yup.string().required('Last name is required'),
-  email: Yup.string().email('Invalid email').required('Email is required'),
+  email: Yup.string()
+    .required('Email is required')
+    .test('email-validation', 'Invalid email address', function (value) {
+      return validateEmail(value);
+    }),
 });
 
 export default function ProfileScreen() {
@@ -405,7 +410,7 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+      <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
         <View style={styles.headerLeft}>
           <Logo size={38} style={styles.headerLogo} />
           <Text style={styles.headerTitle}>Profile</Text>
@@ -576,23 +581,26 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     backgroundColor: '#fff',
     paddingHorizontal: 20,
-    paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 0,
+    height: '100%',
   },
   headerLogo: {
-    marginRight: 8,
+    marginRight: 4,
     marginVertical: 0,
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: '#1a1a1a',
+    lineHeight: 22,
+    textAlignVertical: 'center',
+    includeFontPadding: false,
   },
   signOutButton: {
     padding: Spacing.sm,

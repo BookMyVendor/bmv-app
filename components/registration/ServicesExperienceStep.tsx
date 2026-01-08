@@ -482,17 +482,17 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
   // Get selected categories with full paths (including root if selected)
   const selectedCategoriesWithPaths = useMemo(() => {
-    // Combine selectedCategoryIds with root category if selected
-    const allSelectedIds = [...selectedCategoryIds];
-    if (selectedRootCategoryId && !allSelectedIds.includes(selectedRootCategoryId)) {
-      allSelectedIds.push(selectedRootCategoryId);
-    }
+    // Only show child categories (those with parents)
+    const childIds = selectedCategoryIds.filter(id => {
+      const cat = allBusinessCategories.find(c => c.id === id);
+      return cat && cat.parent_category_id !== null;
+    });
 
-    return allSelectedIds.map((id) => ({
+    return childIds.map((id) => ({
       id,
       path: getCategoryPath(id, allBusinessCategories),
     }));
-  }, [selectedCategoryIds, selectedRootCategoryId, allBusinessCategories]);
+  }, [selectedCategoryIds, allBusinessCategories]);
 
   const handleChange = (field: string, value: any) => {
     onUpdate({ [field]: value });
@@ -657,8 +657,13 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
   // Get selected events with paths for display
   const selectedEventsWithPaths = useMemo(() => {
-    const selectedIds = data.selectedEventIds || [];
-    return selectedIds.map((id: string) => ({
+    // Only show child categories
+    const childIds = (data.selectedEventIds || []).filter((id: string) => {
+      const cat = eventCategories.find(c => c.id === id);
+      return cat && cat.parent_category_id !== null;
+    });
+
+    return childIds.map((id: string) => ({
       id,
       path: getEventPath(id, eventCategories),
     }));
@@ -690,7 +695,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     if (selectedEventsWithPaths.length === 1) {
       return selectedEventsWithPaths[0].path;
     }
-    return `${selectedEventsWithPaths.length} events selected`;
+    return `${selectedEventsWithPaths.length} sub-categories selected`;
   };
 
   if (loading) {
@@ -710,11 +715,16 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     if (selectedCategoriesWithPaths.length === 1) {
       return selectedCategoriesWithPaths[0].path;
     }
-    return `${selectedCategoriesWithPaths.length} categories selected`;
+    return `${selectedCategoriesWithPaths.length} sub-categories selected`;
   };
 
   const handleCategoryDone = () => {
-    if (selectedCategoryIds.length === 0) {
+    const hasSubCategory = selectedCategoryIds.some(id => {
+      const cat = allBusinessCategories.find(c => c.id === id);
+      return cat && cat.parent_category_id !== null;
+    });
+
+    if (!hasSubCategory) {
       Alert.alert('Validation Error', 'Please select at least one sub-category');
       return;
     }
@@ -722,7 +732,12 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   };
 
   const handleEventDone = () => {
-    if ((data.selectedEventIds || []).length === 0) {
+    const hasSubEventType = (data.selectedEventIds || []).some((id: string) => {
+      const cat = eventCategories.find(c => c.id === id);
+      return cat && cat.parent_category_id !== null;
+    });
+
+    if (!hasSubEventType) {
       Alert.alert('Validation Error', 'Please select at least one sub-category for event types');
       return;
     }
