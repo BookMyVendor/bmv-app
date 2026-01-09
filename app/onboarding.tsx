@@ -163,45 +163,40 @@ export default function OnboardingScreen() {
                   </TouchableOpacity>
                 )}
 
-                {/* Main Content Area - Scrollable for safety on small devices */}
-                <ScrollView
-                  contentContainerStyle={[
-                    styles.scrollContent,
-                    {
-                      paddingTop: insets.top + (screenHeight < 700 ? 40 : 80),
-                      paddingBottom: Math.max(insets.bottom, Spacing.xl) + 20
-                    }
-                  ]}
-                  showsVerticalScrollIndicator={false}
-                  bounces={false}
-                >
-                  {/* Top Content (Logo, Icon, Text) */}
-                  <View style={styles.topContent}>
-                    <View style={styles.logoWrapper}>
-                      <ExternalLogo size={logoSize} />
-                    </View>
+                {/* Slide Content Layout */}
+                <View style={[styles.mainContainer, { paddingTop: insets.top }]}>
+                  {/* Content Area - Centers itself in available space */}
+                  <View style={styles.contentWrapper}>
+                    <ScrollView
+                      contentContainerStyle={styles.scrollContent}
+                      showsVerticalScrollIndicator={false}
+                      bounces={false}
+                    >
+                      <View style={styles.topContent}>
+                        <View style={styles.logoWrapper}>
+                          <ExternalLogo size={logoSize} />
+                        </View>
 
-                    <View style={styles.iconWrapper}>
-                      <View style={[styles.iconCircle, {
-                        width: iconSize * 2.2,
-                        height: iconSize * 2.2,
-                        borderRadius: (iconSize * 2.2) / 2
-                      }]}>
-                        <IconComponent size={iconSize} color="#000" strokeWidth={2} />
+                        <View style={styles.iconWrapper}>
+                          <View style={[styles.iconCircle, {
+                            width: iconSize * 2.2,
+                            height: iconSize * 2.2,
+                            borderRadius: (iconSize * 2.2) / 2
+                          }]}>
+                            <IconComponent size={iconSize} color="#000" strokeWidth={2} />
+                          </View>
+                        </View>
+
+                        <View style={styles.textWrapper}>
+                          <Text style={[styles.title, { fontSize: screenHeight < 750 ? 24 : 32 }]}>{item.title}</Text>
+                          <Text style={[styles.description, { fontSize: screenHeight < 750 ? 16 : 18 }]}>{item.description}</Text>
+                        </View>
                       </View>
-                    </View>
-
-                    <View style={styles.textWrapper}>
-                      <Text style={[styles.title, { fontSize: screenHeight < 750 ? 24 : 32 }]}>{item.title}</Text>
-                      <Text style={[styles.description, { fontSize: screenHeight < 750 ? 16 : 18 }]}>{item.description}</Text>
-                    </View>
+                    </ScrollView>
                   </View>
 
-                  {/* Spacer to give some room if screen is tall */}
-                  <View style={{ height: screenHeight < 700 ? Spacing.lg : Spacing.xxl }} />
-
-                  {/* Footer Section - Flows naturally after content */}
-                  <View style={styles.footer}>
+                  {/* Footer Area - Pinned to bottom but with safe padding */}
+                  <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) + 15 }]}>
                     <View style={styles.dotsContainer}>
                       {ONBOARDING_DATA.map((_, dotIndex) => (
                         <TouchableOpacity
@@ -234,7 +229,7 @@ export default function OnboardingScreen() {
                       </TouchableOpacity>
                     </View>
                   </View>
-                </ScrollView>
+                </View>
               </LinearGradient>
             </View>
           );
@@ -266,11 +261,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  mainContainer: {
+    flex: 1,
+  },
+  contentWrapper: {
+    flex: 1,
+    justifyContent: 'center',
+  },
   scrollContent: {
     flexGrow: 1,
+    justifyContent: 'center',
     paddingHorizontal: Spacing.xl,
-    alignItems: 'center',
-    justifyContent: 'flex-start', // This centers the group vertically when there's extra space
+    paddingVertical: Spacing.md,
   },
   topContent: {
     width: '100%',
@@ -313,6 +315,7 @@ const styles = StyleSheet.create({
   footer: {
     width: '100%',
     alignItems: 'center',
+    paddingHorizontal: Spacing.xl,
   },
   dotsContainer: {
     flexDirection: 'row',
@@ -336,7 +339,6 @@ const styles = StyleSheet.create({
   },
   buttonWrapper: {
     width: '100%',
-    paddingHorizontal: Spacing.md,
   },
   nextButton: {
     flexDirection: 'row',
