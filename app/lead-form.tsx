@@ -13,17 +13,17 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Save } from 'lucide-react-native';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '../contexts/AuthContext';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { supabaseCore, supabaseCrm } from '@/lib/supabase';
+import { supabaseCore, supabaseCrm } from '../lib/supabase';
 import {
   BUDGET_RANGES,
   STATUS_OPTIONS,
   Lead,
-} from '@/types/leads';
-import Dropdown from '@/components/Dropdown';
-import Logo from '@/components/Logo';
-import { validateEmail, getEmailError } from '@/lib/validation';
+} from '../types/leads';
+import Dropdown from '../components/Dropdown';
+import Logo from '../components/Logo';
+import { validateEmail, getEmailError } from '../lib/validation';
 
 export default function LeadFormScreen() {
   const router = useRouter();

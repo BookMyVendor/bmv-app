@@ -1,5 +1,5 @@
 import { supabaseCore } from './supabase';
-import { PricingPackage, PackageFormData } from '@/types/packages';
+import { PricingPackage, PackageFormData } from '../types/packages';
 
 /**
  * Get all packages for a business

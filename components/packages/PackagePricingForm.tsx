@@ -1,9 +1,9 @@
 import React from 'react';
 import { View, Text, TextInput, StyleSheet, ScrollView } from 'react-native';
-import { PackageType, PackageFormData } from '@/types/packages';
-import { PACKAGE_TYPE_CONFIGS, PRICE_UNIT_OPTIONS } from '@/lib/packageConfig';
-import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
-import Dropdown from '@/components/Dropdown';
+import { PackageType, PackageFormData } from '../../types/packages';
+import { PACKAGE_TYPE_CONFIGS, PRICE_UNIT_OPTIONS } from '../../lib/packageConfig';
+import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
+import Dropdown from '../../components/Dropdown';
 
 interface PackagePricingFormProps {
   packageType: PackageType;

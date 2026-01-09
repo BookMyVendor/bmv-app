@@ -1,4 +1,4 @@
-import { PackageTypeConfig, CategoryPackageConfig, PriceUnit } from '@/types/packages';
+import { PackageTypeConfig, CategoryPackageConfig, PriceUnit } from '../types/packages';
 
 // Package Type Configurations
 export const PACKAGE_TYPE_CONFIGS: Record<string, PackageTypeConfig> = {
@@ -16,7 +16,7 @@ export const PACKAGE_TYPE_CONFIGS: Record<string, PackageTypeConfig> = {
       base_price: { min: 0, required: true }
     }
   },
-  
+
   hourly: {
     type: 'hourly',
     label: 'Hourly Rate',
@@ -32,7 +32,7 @@ export const PACKAGE_TYPE_CONFIGS: Record<string, PackageTypeConfig> = {
       min_capacity: { min: 1 }  // Used as minimum hours
     }
   },
-  
+
   per_person: {
     type: 'per_person',
     label: 'Per Person',
@@ -49,7 +49,7 @@ export const PACKAGE_TYPE_CONFIGS: Record<string, PackageTypeConfig> = {
       max_capacity: { min: 1, required: true }
     }
   },
-  
+
   custom: {
     type: 'custom',
     label: 'Price Range',
@@ -90,7 +90,7 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<string, Partial<CategoryPackageCon
     showDurationFields: true,
     pricingGuidelines: 'Photography packages typically range from ₹30,000 to ₹2,00,000 depending on duration and deliverables.',
   },
-  
+
   // Catering
   catering: {
     recommendedPackageTypes: ['per_person', 'fixed'],
@@ -100,7 +100,7 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<string, Partial<CategoryPackageCon
     showDurationFields: false,
     pricingGuidelines: 'Catering typically costs ₹400-₹2,000 per person depending on cuisine and service style.',
   },
-  
+
   // Makeup Artist
   makeup: {
     recommendedPackageTypes: ['fixed'],
@@ -110,7 +110,7 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<string, Partial<CategoryPackageCon
     showDurationFields: false,
     pricingGuidelines: 'Makeup packages typically range from ₹5,000 to ₹50,000 depending on number of people and services.',
   },
-  
+
   // Decor
   decor: {
     recommendedPackageTypes: ['fixed', 'custom'],
@@ -120,7 +120,7 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<string, Partial<CategoryPackageCon
     showDurationFields: false,
     pricingGuidelines: 'Decor packages typically range from ₹50,000 to ₹5,00,000 depending on venue size and elements.',
   },
-  
+
   // Venue
   venue: {
     recommendedPackageTypes: ['fixed', 'hourly', 'custom'],
@@ -130,7 +130,7 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<string, Partial<CategoryPackageCon
     showDurationFields: true,
     pricingGuidelines: 'Venue pricing typically ranges from ₹50,000 to ₹10,00,000 depending on capacity and amenities.',
   },
-  
+
   // Entertainment
   entertainment: {
     recommendedPackageTypes: ['fixed', 'hourly'],
@@ -140,7 +140,7 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<string, Partial<CategoryPackageCon
     showDurationFields: true,
     pricingGuidelines: 'Entertainment packages typically range from ₹20,000 to ₹2,00,000 depending on duration and equipment.',
   },
-  
+
   // Transportation
   transportation: {
     recommendedPackageTypes: ['fixed', 'hourly', 'custom'],
@@ -155,19 +155,19 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<string, Partial<CategoryPackageCon
 // Helper function to get category config by category name or slug
 export function getCategoryConfig(categoryNameOrSlug: string): Partial<CategoryPackageConfig> | null {
   const normalized = categoryNameOrSlug.toLowerCase().replace(/\s+/g, '');
-  
+
   // Try exact match first
   if (DEFAULT_CATEGORY_CONFIGS[normalized]) {
     return DEFAULT_CATEGORY_CONFIGS[normalized];
   }
-  
+
   // Try partial match
   for (const [key, config] of Object.entries(DEFAULT_CATEGORY_CONFIGS)) {
     if (normalized.includes(key) || key.includes(normalized)) {
       return config;
     }
   }
-  
+
   // Return default config
   return {
     recommendedPackageTypes: ['fixed'],

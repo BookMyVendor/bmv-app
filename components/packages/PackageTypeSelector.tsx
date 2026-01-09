@@ -1,8 +1,8 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { PackageType, PackageTypeConfig } from '@/types/packages';
-import { PACKAGE_TYPE_CONFIGS } from '@/lib/packageConfig';
-import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
+import { PackageType, PackageTypeConfig } from '../../types/packages';
+import { PACKAGE_TYPE_CONFIGS } from '../../lib/packageConfig';
+import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
 
 interface PackageTypeSelectorProps {
   selectedType: PackageType | null;
@@ -23,7 +23,7 @@ export default function PackageTypeSelector({
       <Text style={styles.description}>
         Choose how you want to price this package
       </Text>
-      
+
       <View style={styles.grid}>
         {types.map((type) => {
           const config = PACKAGE_TYPE_CONFIGS[type];

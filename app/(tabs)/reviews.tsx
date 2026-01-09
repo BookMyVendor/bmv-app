@@ -21,13 +21,13 @@ import {
   MessageSquare,
   X,
 } from 'lucide-react-native';
-import { useAuth } from '@/contexts/AuthContext';
-import { supabaseCore, supabaseCrm } from '@/lib/supabase';
-import FilterModal from '@/components/FilterModal';
-import SortModal from '@/components/SortModal';
-import ReplyModal from '@/components/ReplyModal';
-import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
-import Logo from '@/components/Logo';
+import { useAuth } from '../../contexts/AuthContext';
+import { supabaseCore, supabaseCrm } from '../../lib/supabase';
+import FilterModal from '../../components/FilterModal';
+import SortModal from '../../components/SortModal';
+import ReplyModal from '../../components/ReplyModal';
+import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
+import Logo from '../../components/Logo';
 
 interface Review {
   id: string;

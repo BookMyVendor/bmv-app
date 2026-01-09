@@ -12,8 +12,8 @@ import {
   Alert,
 } from 'react-native';
 import { Check, ChevronRight, ChevronDown, X } from 'lucide-react-native';
-import Dropdown from '@/components/Dropdown';
-import { supabaseCore } from '@/lib/supabase';
+import Dropdown from '../../components/Dropdown';
+import { supabaseCore } from '../../lib/supabase';
 
 interface ServicesExperienceStepProps {
   data: any;

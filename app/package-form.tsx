@@ -13,19 +13,19 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Save, ChevronRight } from 'lucide-react-native';
-import { useAuth } from '@/contexts/AuthContext';
-import { PackageFormData, PackageType, Category } from '@/types/packages';
-import { getBusinessCategories, getCategoryFormFields, createPackage, updatePackage, getPackage } from '@/lib/packageApi';
-import { getCategoryConfig } from '@/lib/packageConfig';
-import { validatePackageForm } from '@/lib/packageValidation';
-import { supabaseCore } from '@/lib/supabase';
-import PackageTypeSelector from '@/components/packages/PackageTypeSelector';
-import PackagePricingForm from '@/components/packages/PackagePricingForm';
-import IncludedServicesInput from '@/components/packages/IncludedServicesInput';
-import TemplateSelector from '@/components/packages/TemplateSelector';
-import CategoryFieldsForm from '@/components/packages/CategoryFieldsForm';
-import { getTemplatesForCategory, applyTemplate, PackageTemplate } from '@/lib/packageTemplates';
-import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
+import { useAuth } from '../contexts/AuthContext';
+import { PackageFormData, PackageType, Category } from '../types/packages';
+import { getBusinessCategories, getCategoryFormFields, createPackage, updatePackage, getPackage } from '../lib/packageApi';
+import { getCategoryConfig } from '../lib/packageConfig';
+import { validatePackageForm } from '../lib/packageValidation';
+import { supabaseCore } from '../lib/supabase';
+import PackageTypeSelector from '../components/packages/PackageTypeSelector';
+import PackagePricingForm from '../components/packages/PackagePricingForm';
+import IncludedServicesInput from '../components/packages/IncludedServicesInput';
+import TemplateSelector from '../components/packages/TemplateSelector';
+import CategoryFieldsForm from '../components/packages/CategoryFieldsForm';
+import { getTemplatesForCategory, applyTemplate, PackageTemplate } from '../lib/packageTemplates';
+import { Colors, Shadows, BorderRadius, Spacing } from '../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const STEPS = ['Category', 'Template', 'Type', 'Details', 'Pricing', 'Category Fields', 'Services', 'Review'];
@@ -614,7 +614,7 @@ export default function PackageFormScreen() {
 }
 
 // Import PACKAGE_TYPE_CONFIGS
-import { PACKAGE_TYPE_CONFIGS } from '@/lib/packageConfig';
+import { PACKAGE_TYPE_CONFIGS } from '../lib/packageConfig';
 
 const styles = StyleSheet.create({
   container: {
