@@ -21,11 +21,11 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { Camera, LogOut, Save } from 'lucide-react-native';
 import { Formik } from 'formik';
 import * as Yup from 'yup';
-import { useAuth } from '@/contexts/AuthContext';
-import { supabaseCore, supabaseCms } from '@/lib/supabase';
-import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
-import { validateEmail } from '@/lib/validation';
-import Logo from '@/components/Logo';
+import { useAuth } from '../../contexts/AuthContext';
+import { supabaseCore, supabaseCrm } from '../../lib/supabase';
+import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
+import { validateEmail } from '../../lib/validation';
+import Logo from '../../components/Logo';
 
 const profileSchema = Yup.object().shape({
   firstName: Yup.string().required('First name is required'),

@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
-import { PackageTemplate } from '@/lib/packageTemplates';
-import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
+import { PackageTemplate } from '../../lib/packageTemplates';
+import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
 
 interface TemplateSelectorProps {
   templates: PackageTemplate[];
