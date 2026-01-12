@@ -12,12 +12,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Plus, TrendingUp, Calendar, Eye, X, ChevronRight } from 'lucide-react-native';
-import { useAuth } from '@/contexts/AuthContext';
-import { supabaseCore, supabaseCrm } from '@/lib/supabase';
-import { STATUS_OPTIONS, LeadStatus } from '@/types/leads';
-import FilterChip from '@/components/FilterChip';
-import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
-import Logo from '@/components/Logo';
+import { useAuth } from '../../contexts/AuthContext';
+import { supabaseCore, supabaseCrm } from '../../lib/supabase';
+import { STATUS_OPTIONS, LeadStatus } from '../../types/leads';
+import FilterChip from '../../components/FilterChip';
+import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
+import Logo from '../../components/Logo';
 
 interface Business {
   id: string;

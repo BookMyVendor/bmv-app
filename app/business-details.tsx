@@ -36,8 +36,8 @@ import {
   AlertCircle,
   Package,
 } from 'lucide-react-native';
-import { useAuth } from '@/contexts/AuthContext';
-import { supabaseCore } from '@/lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { supabaseCore } from '../lib/supabase';
 import {
   getBusinessDetails,
   getOffers,
@@ -59,14 +59,14 @@ import {
   VerificationDocument,
   Offer,
   PortfolioImage,
-} from '@/lib/businessApi';
-import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '@/lib/documentUpload';
-import { validatePincode } from '@/lib/pincodeValidation';
-import { validateEmail, getEmailError } from '@/lib/validation';
-import Logo from '@/components/Logo';
-import Dropdown from '@/components/Dropdown';
-import PackageList from '@/components/packages/PackageList';
-import { Colors } from '@/constants/theme';
+} from '../lib/businessApi';
+import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '../lib/documentUpload';
+import { validatePincode } from '../lib/pincodeValidation';
+import { validateEmail, getEmailError } from '../lib/validation';
+import Logo from '../components/Logo';
+import Dropdown from '../components/Dropdown';
+import PackageList from '../components/packages/PackageList';
+import { Colors } from '../constants/theme';
 
 const EXPERIENCE_OPTIONS = [
   'Less than 1 year',
@@ -382,7 +382,7 @@ export default function BusinessDetailsScreen() {
     if (!id) return;
     try {
       setLoadingPackages(true);
-      const { getBusinessPackages } = await import('@/lib/packageApi');
+      const { getBusinessPackages } = await import('../lib/packageApi');
       const { data, error } = await getBusinessPackages(id);
       if (error) throw error;
       // Filter out inactive packages - only show active ones
@@ -421,7 +421,7 @@ export default function BusinessDetailsScreen() {
     try {
       setDeleting(true);
       console.log('Delete confirmed. Marking package as inactive:', packageToDelete.id);
-      const { togglePackageStatus } = await import('@/lib/packageApi');
+      const { togglePackageStatus } = await import('../lib/packageApi');
       console.log('Calling togglePackageStatus with:', packageToDelete.id, false);
       const result = await togglePackageStatus(packageToDelete.id, false);
       console.log('togglePackageStatus result:', result);
@@ -448,7 +448,7 @@ export default function BusinessDetailsScreen() {
 
   const handleTogglePackageStatus = async (pkg: any) => {
     try {
-      const { togglePackageStatus } = await import('@/lib/packageApi');
+      const { togglePackageStatus } = await import('../lib/packageApi');
       const newStatus = !pkg.is_active;
       const { error } = await togglePackageStatus(pkg.id, newStatus);
       if (error) throw error;
