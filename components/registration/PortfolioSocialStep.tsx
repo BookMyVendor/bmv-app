@@ -11,7 +11,7 @@ import {
   Alert,
 } from 'react-native';
 import { Globe, Instagram, Facebook, Youtube, Image, Plus, X, Star } from 'lucide-react-native';
-import { pickMultipleImages, uploadMultipleBusinessImages, pickImage } from '@/lib/businessApi';
+import { pickMultipleImages, uploadMultipleBusinessImages, pickImage } from '../../lib/businessApi';
 
 interface PortfolioSocialStepProps {
   data: any;
@@ -184,7 +184,7 @@ export default function PortfolioSocialStep({
         <Text style={styles.uploadHintTop}>
           This image will be displayed as the main cover photo for your business on the dashboard.
         </Text>
-        
+
         {coverPhotoUri ? (
           <View style={styles.coverImageContainer}>
             <RNImage source={{ uri: coverPhotoUri }} style={styles.coverImage} />

@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { X, ChevronRight } from 'lucide-react-native';
-import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
+import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
 
 interface IncludedServicesInputProps {
   services: string[];
@@ -30,7 +30,7 @@ export default function IncludedServicesInput({
         .split(',')
         .map(s => s.trim())
         .filter(s => s.length > 0 && !services.includes(s));
-      
+
       if (newServices.length > 0) {
         onChange([...services, ...newServices]);
         setInputValue('');
@@ -90,10 +90,10 @@ export default function IncludedServicesInput({
         <View style={styles.suggestionsContainer}>
           <Text style={styles.suggestionsLabel}>Suggestions:</Text>
           <View style={styles.scrollContainer}>
-            <ScrollView 
+            <ScrollView
               ref={suggestionsScrollViewRef}
-              horizontal 
-              showsHorizontalScrollIndicator={false} 
+              horizontal
+              showsHorizontalScrollIndicator={false}
               style={styles.suggestions}
               contentContainerStyle={styles.suggestionsContent}
               onContentSizeChange={(width) => {

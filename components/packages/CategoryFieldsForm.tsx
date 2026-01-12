@@ -1,8 +1,8 @@
 import React from 'react';
 import { View, Text, TextInput, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { CategoryFormField } from '@/types/packages';
-import Dropdown from '@/components/Dropdown';
-import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
+import { CategoryFormField } from '../../types/packages';
+import Dropdown from '../../components/Dropdown';
+import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
 
 interface CategoryFieldsFormProps {
   fields: CategoryFormField[];

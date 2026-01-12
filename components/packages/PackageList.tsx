@@ -1,9 +1,9 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { Edit, Trash2, Eye, EyeOff } from 'lucide-react-native';
-import { PricingPackage } from '@/types/packages';
-import { PACKAGE_TYPE_CONFIGS } from '@/lib/packageConfig';
-import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
+import { PricingPackage } from '../../types/packages';
+import { PACKAGE_TYPE_CONFIGS } from '../../lib/packageConfig';
+import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
 
 interface PackageListProps {
   packages: PricingPackage[];
@@ -22,7 +22,7 @@ export default function PackageList({
 }: PackageListProps) {
   const formatPrice = (pkg: PricingPackage): string => {
     const config = PACKAGE_TYPE_CONFIGS[pkg.package_type];
-    
+
     switch (pkg.package_type) {
       case 'fixed':
         return `₹${pkg.base_price.toLocaleString('en-IN')}`;

@@ -13,10 +13,10 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Smartphone } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
-import { useAuth } from '@/contexts/AuthContext';
-import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
-import ExternalLogo from '@/components/ExternalLogo';
-import { sendOTP, resendOTP } from '@/lib/otpAuthApi';
+import { useAuth } from '../../contexts/AuthContext';
+import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
+import ExternalLogo from '../../components/ExternalLogo';
+import { sendOTP, resendOTP } from '../../lib/otpAuthApi';
 
 
 
