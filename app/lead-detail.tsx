@@ -14,11 +14,11 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Phone, Mail, Calendar, MapPin, Users, Building2, CreditCard as Edit, Clock, Tag, FileText, MessageSquare, CircleCheck as CheckCircle, Circle as XCircle } from 'lucide-react-native';
-import { useAuth } from '@/contexts/AuthContext';
-import { supabaseCore, supabaseCrm } from '@/lib/supabase';
-import Logo from '@/components/Logo';
-import { Lead, LeadActivity, STATUS_OPTIONS } from '@/types/leads';
-import { getTimeAgo, formatEventDate } from '@/lib/timeUtils';
+import { useAuth } from '../contexts/AuthContext';
+import { supabaseCore, supabaseCrm } from '../lib/supabase';
+import Logo from '../components/Logo';
+import { Lead, LeadActivity, STATUS_OPTIONS } from '../types/leads';
+import { getTimeAgo, formatEventDate } from '../lib/timeUtils';
 
 export default function LeadDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();

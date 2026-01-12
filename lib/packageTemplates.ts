@@ -1,4 +1,4 @@
-import { PackageFormData, PackageType } from '@/types/packages';
+import { PackageFormData, PackageType } from '../types/packages';
 
 export interface PackageTemplate {
   id: string;
@@ -380,7 +380,7 @@ export function getTemplatesForCategory(categoryName?: string): PackageTemplate[
   }
 
   const normalizedCategoryName = categoryName.toLowerCase().trim();
-  
+
   // First, try exact match
   const exactMatches = PACKAGE_TEMPLATES.filter(
     template => template.categoryName?.toLowerCase() === normalizedCategoryName
@@ -396,8 +396,8 @@ export function getTemplatesForCategory(categoryName?: string): PackageTemplate[
     template => {
       if (!template.categoryName) return false;
       const templateCategory = template.categoryName.toLowerCase();
-      return normalizedCategoryName.includes(templateCategory) || 
-             templateCategory.includes(normalizedCategoryName);
+      return normalizedCategoryName.includes(templateCategory) ||
+        templateCategory.includes(normalizedCategoryName);
     }
   );
 

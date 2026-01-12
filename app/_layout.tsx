@@ -6,8 +6,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SplashScreen from 'expo-splash-screen';
-import { useFrameworkReady } from '@/hooks/useFrameworkReady';
-import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { useFrameworkReady } from '../hooks/useFrameworkReady';
+import { AuthProvider, useAuth } from '../contexts/AuthContext';
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
@@ -92,7 +92,7 @@ function RootLayoutNav() {
     if (inOnboarding) {
       // But still hide splash screen if not already hidden
       if (initialLoad) {
-        SplashScreen.hideAsync().catch(() => {});
+        SplashScreen.hideAsync().catch(() => { });
         setInitialLoad(false);
       }
       return;
@@ -138,7 +138,7 @@ function RootLayoutNav() {
       // NEW USER FLOW - if authenticated but profile NOT complete
       if (session && !isProfileComplete) {
         console.log('[NAV] User has no complete profile - needs to complete profile');
-        
+
         const termsAcceptedValue = await AsyncStorage.getItem(TERMS_ACCEPTANCE_KEY);
         const isTermsAccepted = termsAcceptedValue === 'true';
 
@@ -162,7 +162,7 @@ function RootLayoutNav() {
       // EXISTING USER or PROFILE COMPLETE - route to dashboard
       if (session && isProfileComplete) {
         console.log('[NAV] User has complete profile - navigating to dashboard');
-        
+
         // Don't redirect if already on appropriate screen
         if (inAuthGroup || inTermsAndConditions || inCompleteProfile) {
           console.log('[NAV] User profile complete - redirecting to dashboard');

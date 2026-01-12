@@ -16,15 +16,15 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Calendar, MapPin, Clock, ArrowUpDown, ChevronRight, Search, Plus, X, Download, MoveVertical as MoreVertical, SquareCheck as CheckSquare, Square } from 'lucide-react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { useAuth } from '@/contexts/AuthContext';
-import { supabaseCore, supabaseCrm } from '@/lib/supabase';
-import { getTimeAgo, formatEventDate } from '@/lib/timeUtils';
-import FilterChip from '@/components/FilterChip';
-import SortModal, { SortOption } from '@/components/SortModal';
-import FilterModal from '@/components/FilterModal';
-import { Lead, STATUS_OPTIONS, PRIORITY_OPTIONS } from '@/types/leads';
-import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
-import Logo from '@/components/Logo';
+import { useAuth } from '../../contexts/AuthContext';
+import { supabaseCore, supabaseCrm } from '../../lib/supabase';
+import { getTimeAgo, formatEventDate } from '../../lib/timeUtils';
+import FilterChip from '../../components/FilterChip';
+import SortModal, { SortOption } from '../../components/SortModal';
+import FilterModal from '../../components/FilterModal';
+import { Lead, STATUS_OPTIONS, PRIORITY_OPTIONS } from '../../types/leads';
+import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
+import Logo from '../../components/Logo';
 
 
 const EVENT_TYPES = [

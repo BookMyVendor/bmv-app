@@ -2,7 +2,7 @@ import { Tabs } from 'expo-router';
 import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LayoutDashboard, MessageSquare, Star, User } from 'lucide-react-native';
-import { Colors } from '@/constants/theme';
+import { Colors } from '../../constants/theme';
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();

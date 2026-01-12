@@ -1,5 +1,5 @@
 import * as Yup from 'yup';
-import { PackageType } from '@/types/packages';
+import { PackageType } from '../types/packages';
 
 /**
  * Create validation schema based on package type
@@ -10,10 +10,10 @@ export function createPackageValidationSchema(packageType: PackageType) {
       .required('Package name is required')
       .min(3, 'Package name must be at least 3 characters')
       .max(100, 'Package name must be less than 100 characters'),
-    
+
     package_description: Yup.string()
       .max(1000, 'Description must be less than 1000 characters'),
-    
+
     included_services: Yup.array()
       .of(Yup.string())
       .max(20, 'Maximum 20 services allowed'),
@@ -60,7 +60,7 @@ export function createPackageValidationSchema(packageType: PackageType) {
           .required('Maximum capacity is required')
           .min(1, 'Maximum capacity must be at least 1')
           .integer('Capacity must be a whole number')
-          .test('greater-than-min', 'Maximum capacity must be greater than minimum capacity', function(value) {
+          .test('greater-than-min', 'Maximum capacity must be greater than minimum capacity', function (value) {
             const minCapacity = this.parent.min_capacity;
             return !minCapacity || !value || value >= minCapacity;
           }),
@@ -77,7 +77,7 @@ export function createPackageValidationSchema(packageType: PackageType) {
           .required('Maximum price is required')
           .min(0, 'Maximum price must be 0 or greater')
           .max(99999999, 'Price is too large')
-          .test('greater-than-min', 'Maximum price must be greater than minimum price', function(value) {
+          .test('greater-than-min', 'Maximum price must be greater than minimum price', function (value) {
             const minPrice = this.parent.min_price;
             return !minPrice || !value || value > minPrice;
           }),

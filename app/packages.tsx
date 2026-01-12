@@ -10,11 +10,11 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Plus, ArrowLeft } from 'lucide-react-native';
-import { useAuth } from '@/contexts/AuthContext';
-import { PricingPackage } from '@/types/packages';
-import { getBusinessPackages, togglePackageStatus } from '@/lib/packageApi';
-import PackageList from '@/components/packages/PackageList';
-import { Colors, Shadows, BorderRadius, Spacing } from '@/constants/theme';
+import { useAuth } from '../contexts/AuthContext';
+import { PricingPackage } from '../types/packages';
+import { getBusinessPackages, togglePackageStatus } from '../lib/packageApi';
+import PackageList from '../components/packages/PackageList';
+import { Colors, Shadows, BorderRadius, Spacing } from '../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function PackagesScreen() {
@@ -133,7 +133,7 @@ export default function PackagesScreen() {
           packages={packages}
           onEdit={handleEditPackage}
           onDelete={handleDeletePackage}
-          onToggleStatus={() => {}} // Not used anymore, but required by interface
+          onToggleStatus={() => { }} // Not used anymore, but required by interface
           loading={loading}
         />
       </View>

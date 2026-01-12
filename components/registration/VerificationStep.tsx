@@ -12,8 +12,8 @@ import {
   InteractionManager,
 } from 'react-native';
 import { Upload, X, FileText, Image as ImageIcon } from 'lucide-react-native';
-import { supabaseCore } from '@/lib/supabase';
-import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '@/lib/documentUpload';
+import { supabaseCore } from '../../lib/supabase';
+import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '../../lib/documentUpload';
 
 interface VerificationStepProps {
   data: any;
