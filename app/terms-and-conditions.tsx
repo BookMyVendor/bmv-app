@@ -11,9 +11,9 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Check } from 'lucide-react-native';
-import { useAuth } from '@/contexts/AuthContext';
-import { supabaseCore } from '@/lib/supabase';
-import Logo from '@/components/Logo';
+import { useAuth } from '../contexts/AuthContext';
+import { supabaseCore } from '../lib/supabase';
+import Logo from '../components/Logo';
 
 const TERMS_ACCEPTANCE_KEY = 'vendor_terms_accepted';
 

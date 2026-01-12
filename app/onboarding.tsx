@@ -14,8 +14,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronRight, Building2, TrendingUp, Star } from 'lucide-react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Colors, Spacing, Shadows } from '@/constants/theme';
-import ExternalLogo from '@/components/ExternalLogo';
+import { Colors, Spacing, Shadows } from '../constants/theme';
+import ExternalLogo from '../components/ExternalLogo';
 
 const { width, height } = Dimensions.get('window');
 

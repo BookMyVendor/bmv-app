@@ -8,8 +8,8 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Check, AlertCircle } from 'lucide-react-native';
-import Dropdown from '@/components/Dropdown';
-import { validatePincode } from '@/lib/pincodeValidation';
+import Dropdown from '../../components/Dropdown';
+import { validatePincode } from '../../lib/pincodeValidation';
 
 interface LocationCoverageStepProps {
   data: any;

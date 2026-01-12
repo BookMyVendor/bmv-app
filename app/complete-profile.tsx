@@ -18,9 +18,9 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { Camera } from 'lucide-react-native';
 import { Formik } from 'formik';
 import * as Yup from 'yup';
-import { useAuth } from '@/contexts/AuthContext';
-import { supabaseCore, supabaseCms } from '@/lib/supabase';
-import { validateEmail } from '@/lib/validation';
+import { useAuth } from '../contexts/AuthContext';
+import { supabaseCore, supabaseCms } from '../lib/supabase';
+import { validateEmail } from '../lib/validation';
 
 
 const profileSchema = Yup.object().shape({

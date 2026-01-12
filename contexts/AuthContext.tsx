@@ -1,9 +1,16 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { Session, User } from '@supabase/supabase-js';
-import { supabaseCore, supabaseCms, supabaseCrm } from '@/lib/supabase';
-import { sendOTP, verifyOTP as verifyOTPApi, type VerifyOTPResponse } from '@/lib/otpAuthApi';
-import { getAccessToken, hasTokens, clearTokens, isTokenExpiredOrExpiringSoon } from '@/lib/tokenStorage';
-import { refreshAccessToken } from '@/lib/otpAuthApi';
+
+import { supabaseCore, supabaseCms, supabaseCrm } from '../lib/supabase';
+import { sendOTP, verifyOTP as verifyOTPApi, type VerifyOTPResponse } from '../lib/otpAuthApi';
+import {
+  getAccessToken,
+  hasTokens,
+  clearTokens,
+  isTokenExpiredOrExpiringSoon,
+} from '../lib/tokenStorage';
+import { refreshAccessToken } from '../lib/otpAuthApi';
+
 
 interface UserProfile {
   id: string;
