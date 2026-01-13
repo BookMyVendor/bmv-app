@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import * as Linking from 'expo-linking';
 import {
   View,
   Text,
@@ -8,7 +9,6 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
-  Linking,
   Platform,
   KeyboardAvoidingView,
 } from 'react-native';
@@ -132,27 +132,69 @@ export default function LeadDetailScreen() {
     }
   };
 
-  const handleCallPress = () => {
+  const handleCallPress = async () => {
+    console.log('[DEBUG] handleCallPress triggered');
     if (lead?.customer_phone) {
       const phoneUrl = `tel:${lead.customer_phone}`;
-      Linking.canOpenURL(phoneUrl).then((supported) => {
-        if (supported) {
-          Linking.openURL(phoneUrl);
-          logActivity('call', 'Called customer', `Phone call to ${lead.customer_phone}`);
-        }
-      });
+      console.log('[DEBUG] Prepared phone URL:', phoneUrl);
+      try {
+        await Linking.openURL(phoneUrl);
+        await logActivity('call', 'Called customer', `Phone call to ${lead.customer_phone}`);
+      } catch (error) {
+        console.error('[DEBUG] Error opening dialer:', error);
+        Alert.alert('Error', 'Failed to open dialer. Your device might not support phone calls.');
+      }
+    } else {
+      console.log('[DEBUG] No customer phone found');
+      Alert.alert('Info', 'No phone number available for this lead');
     }
   };
 
-  const handleEmailPress = () => {
+  const handleEmailPress = async () => {
+    console.log('[DEBUG] handleEmailPress triggered');
+    console.log('[DEBUG] Current Lead Data:', JSON.stringify(lead, null, 2));
+
     if (lead?.customer_email) {
       const emailUrl = `mailto:${lead.customer_email}`;
-      Linking.canOpenURL(emailUrl).then((supported) => {
-        if (supported) {
-          Linking.openURL(emailUrl);
-          logActivity('email', 'Sent email', `Email sent to ${lead.customer_email}`);
-        }
-      });
+      console.log('[DEBUG] Prepared email URL:', emailUrl);
+
+      try {
+        console.log('[DEBUG] Calling Linking.openURL(emailUrl)...');
+        // Use expo-linking's openURL
+        const success = await Linking.openURL(emailUrl);
+        console.log('[DEBUG] Linking.openURL promise resolved, success:', success);
+
+        await logActivity('email', 'Sent email', `Email sent to ${lead.customer_email}`);
+      } catch (error) {
+        console.error('[DEBUG] catch error in handleEmailPress:', error);
+        Alert.alert('Error', 'Failed to open email client. Please make sure you have an email app installed.');
+      }
+    } else {
+      console.log('[DEBUG] No customer email found. lead.customer_email is:', lead?.customer_email);
+      Alert.alert('Info', 'No email address available for this lead');
+    }
+  };
+
+  const handleMessagePress = async () => {
+    console.log('[DEBUG] handleMessagePress triggered');
+    if (lead?.customer_phone) {
+      // Clean phone number: remove non-numeric characters
+      const cleanPhone = lead.customer_phone.replace(/\D/g, '');
+      // Add India country code if not present (assuming default is India for this app)
+      const phoneWithCountry = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+
+      const whatsappUrl = `https://wa.me/${phoneWithCountry}`;
+      console.log('[DEBUG] Prepared WhatsApp URL:', whatsappUrl);
+      try {
+        await Linking.openURL(whatsappUrl);
+        await logActivity('message', 'WhatsApp message', `WhatsApp chat opened for ${lead.customer_phone}`);
+      } catch (error) {
+        console.error('[DEBUG] Error opening WhatsApp:', error);
+        Alert.alert('Error', 'Failed to open WhatsApp. Please make sure it is installed.');
+      }
+    } else {
+      console.log('[DEBUG] No customer phone found for WhatsApp');
+      Alert.alert('Info', 'No phone number available for this lead');
     }
   };
 
@@ -185,10 +227,10 @@ export default function LeadDetailScreen() {
       await logActivity(
         'message',
         'Status changed',
-        `Status changed from ${lead.lead_status || lead.status} to ${newStatus}`
+        `Status changed from ${lead.lead_status} to ${newStatus}`
       );
 
-      setLead({ ...lead, lead_status: newStatus as any, status: newStatus as any });
+      setLead({ ...lead, lead_status: newStatus as any });
       Alert.alert('Success', 'Status updated successfully');
     } catch (error) {
       console.error('Error updating status:', error);
@@ -355,7 +397,6 @@ export default function LeadDetailScreen() {
           <TouchableOpacity
             style={styles.actionButton}
             onPress={handleCallPress}
-            disabled={!lead.customer_phone}
           >
             <Phone size={20} color="#007AFF" strokeWidth={2} />
             <Text style={styles.actionButtonText}>Call</Text>
@@ -363,12 +404,14 @@ export default function LeadDetailScreen() {
           <TouchableOpacity
             style={styles.actionButton}
             onPress={handleEmailPress}
-            disabled={!lead.customer_email}
           >
             <Mail size={20} color="#007AFF" strokeWidth={2} />
             <Text style={styles.actionButtonText}>Email</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton}>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={handleMessagePress}
+          >
             <MessageSquare size={20} color="#007AFF" strokeWidth={2} />
             <Text style={styles.actionButtonText}>Message</Text>
           </TouchableOpacity>
