@@ -26,9 +26,10 @@ import PortfolioSocialStep from '../components/registration/PortfolioSocialStep'
 import { pickMultipleImages, uploadMultipleBusinessImages, uploadMultipleVerificationDocuments, UploadDocumentData, uploadBusinessImage, setCoverImage } from '../lib/businessApi';
 import { INDIAN_STATES } from '../constants/indianStates';
 import { TextInput } from '../components/TextInput';
-import { Dropdown } from '../components/Dropdown';
+import Dropdown from '../components/Dropdown';
 import Logo from '../components/Logo';
 import { validateEmail, getEmailError } from '../lib/validation';
+import { createPackage } from '../lib/packageApi';
 
 interface BusinessData {
   businessName: string;
@@ -41,6 +42,8 @@ interface BusinessData {
   selectedEventIds?: string[];
   businessDescription: string;
   yearsOfExperience: string;
+  basePrice: string;
+  pricingUnit: string;
   businessAddress: string;
   city: string;
   state: string;
@@ -163,7 +166,9 @@ export default function BusinessRegistrationScreen() {
       const hasEvents = !!(businessData.selectedEventIds && businessData.selectedEventIds.length > 0);
       const hasDescription = !!(businessData.businessDescription?.trim());
       const hasExperience = !!(businessData.yearsOfExperience?.trim());
-      return hasCategory && hasEvents && hasDescription && hasExperience;
+      const hasBasePrice = !!(businessData.basePrice?.trim());
+      const hasPricingUnit = !!(businessData.pricingUnit?.trim());
+      return hasCategory && hasEvents && hasDescription && hasExperience && hasBasePrice && hasPricingUnit;
     } else if (currentPage === 2) {
       // Location & Coverage step
       const hasAddress = !!(businessData.businessAddress?.trim());
@@ -245,6 +250,12 @@ export default function BusinessRegistrationScreen() {
       }
       if (!businessData.yearsOfExperience || !businessData.yearsOfExperience.trim()) {
         errors.yearsOfExperience = 'Years of experience is required';
+      }
+      if (!businessData.basePrice || !businessData.basePrice.trim()) {
+        errors.basePrice = 'Base price is required';
+      }
+      if (!businessData.pricingUnit || !businessData.pricingUnit.trim()) {
+        errors.pricingUnit = 'Pricing unit is required';
       }
     } else if (currentPage === 2) {
       // Location & Coverage step
@@ -410,6 +421,14 @@ export default function BusinessRegistrationScreen() {
         delete updatedErrors.yearsOfExperience;
         hasChanges = true;
       }
+      if (data.basePrice !== undefined && data.basePrice.trim() && updatedErrors.basePrice) {
+        delete updatedErrors.basePrice;
+        hasChanges = true;
+      }
+      if (data.pricingUnit !== undefined && data.pricingUnit.trim() && updatedErrors.pricingUnit) {
+        delete updatedErrors.pricingUnit;
+        hasChanges = true;
+      }
       if (data.businessAddress !== undefined && data.businessAddress.trim() && updatedErrors.businessAddress) {
         delete updatedErrors.businessAddress;
         hasChanges = true;
@@ -502,6 +521,8 @@ export default function BusinessRegistrationScreen() {
           youtube_url: businessData.youtubeUrl || null,
           cover_photo_url: null, // Will be set after uploading cover image
           years_experience: parseYearsOfExperience(businessData.yearsOfExperience || '0'),
+          base_price: businessData.basePrice ? parseFloat(businessData.basePrice) : null,
+          pricing_unit: businessData.pricingUnit || null,
           gst_number: businessData.gstNumber || null,
           status: 'pending',
           subscription_status: 'trial',
@@ -626,6 +647,26 @@ export default function BusinessRegistrationScreen() {
 
         if (mappingError) {
           console.error('Error inserting category mappings:', mappingError);
+        }
+      }
+
+      // Step 7: Create default package with pricing info
+      if (businessData.basePrice && businessData.pricingUnit) {
+        try {
+          // Use 'Standard Package' as default name
+          await createPackage({
+            business_id: createdBusiness.id,
+            package_name: 'Standard Package',
+            package_type: 'fixed', // Default type, can be updated later
+            base_price: parseFloat(businessData.basePrice),
+            price_unit: businessData.pricingUnit,
+            included_services: [],
+            is_active: true,
+            sort_order: 0,
+          });
+        } catch (pkgError) {
+          console.error('Error creating default package:', pkgError);
+          // Continue execution, don't block success just because package creation failed (though it shouldn't)
         }
       }
 

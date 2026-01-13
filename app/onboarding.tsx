@@ -45,18 +45,21 @@ const ONBOARDING_DATA = [
   },
 ];
 
+import { StatusBar } from 'expo-status-bar';
+
 export default function OnboardingScreen() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [splashHidden, setSplashHidden] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { width: screenWidth, height: windowHeight } = useWindowDimensions();
+  const screenWidth = Dimensions.get('screen').width;
   const screenHeight = Dimensions.get('screen').height;
 
   // Responsive sizes based on screen height
-  const logoSize = screenHeight < 600 ? 80 : screenHeight < 700 ? 110 : 140;
-  const iconSize = screenHeight < 600 ? 40 : screenHeight < 700 ? 52 : 64;
+  const logoSize = screenHeight < 650 ? 70 : screenHeight < 750 ? 100 : 130;
+  const iconSize = screenHeight < 650 ? 36 : screenHeight < 750 ? 48 : 60;
+  const skipTop = Math.max(insets.top, 20);
 
   // Hide splash screen when onboarding screen mounts
   useEffect(() => {
@@ -67,12 +70,11 @@ export default function OnboardingScreen() {
         setSplashHidden(true);
       } catch (error) {
         console.error('Error hiding splash screen:', error);
-        setSplashHidden(true); // Mark as attempted even if it fails
+        setSplashHidden(true);
       }
     };
     hideSplash();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only run once on mount
+  }, []);
 
   const handleNext = () => {
     if (currentIndex < ONBOARDING_DATA.length - 1) {
@@ -89,64 +91,30 @@ export default function OnboardingScreen() {
 
   const handleSkip = async () => {
     try {
-      console.log('Skip button pressed');
-      // Save onboarding status first
       await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
-      // Ensure splash screen is hidden
       if (!splashHidden) {
         await SplashScreen.hideAsync();
         setSplashHidden(true);
       }
-      // Small delay to ensure splash screen is fully hidden
       await new Promise(resolve => setTimeout(resolve, 300));
-      // Navigate to login - use replace for proper navigation
-      console.log('Navigating to login...');
       router.replace('/(auth)/login');
     } catch (error) {
       console.error('Error in handleSkip:', error);
-      // Even if there's an error, try to navigate
-      try {
-        await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
-        if (!splashHidden) {
-          await SplashScreen.hideAsync();
-          setSplashHidden(true);
-        }
-        await new Promise(resolve => setTimeout(resolve, 100));
-      } catch (e) {
-        // Ignore errors
-      }
       router.replace('/(auth)/login');
     }
   };
 
   const handleFinish = async () => {
     try {
-      console.log('Get Started button pressed');
-      // Save onboarding status first
       await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
-      // Ensure splash screen is hidden
       if (!splashHidden) {
         await SplashScreen.hideAsync();
         setSplashHidden(true);
       }
-      // Small delay to ensure splash screen is fully hidden
       await new Promise(resolve => setTimeout(resolve, 300));
-      // Navigate to login - use replace for proper navigation
-      console.log('Navigating to login...');
       router.replace('/(auth)/login');
     } catch (error) {
       console.error('Error in handleFinish:', error);
-      // Even if there's an error, try to navigate
-      try {
-        await AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
-        if (!splashHidden) {
-          await SplashScreen.hideAsync();
-          setSplashHidden(true);
-        }
-        await new Promise(resolve => setTimeout(resolve, 100));
-      } catch (e) {
-        // Ignore errors
-      }
       router.replace('/(auth)/login');
     }
   };
@@ -161,6 +129,7 @@ export default function OnboardingScreen() {
 
   return (
     <View style={styles.container}>
+      <StatusBar style="dark" translucent backgroundColor="transparent" />
       <ScrollView
         ref={scrollViewRef}
         horizontal
@@ -171,6 +140,7 @@ export default function OnboardingScreen() {
           setCurrentIndex(index);
         }}
         scrollEnabled={true}
+        bounces={false}
       >
         {ONBOARDING_DATA.map((item, index) => {
           const IconComponent = item.icon;
@@ -182,10 +152,10 @@ export default function OnboardingScreen() {
                 end={{ x: 0, y: 1 }}
                 style={styles.gradient}
               >
-                {/* Skip Button */}
+                {/* Skip Button - Absolute but safe */}
                 {index < ONBOARDING_DATA.length - 1 && (
                   <TouchableOpacity
-                    style={[styles.skipButton, { top: insets.top + 20 }]}
+                    style={[styles.skipButton, { top: skipTop }]}
                     onPress={handleSkip}
                     activeOpacity={0.7}
                   >
@@ -193,41 +163,46 @@ export default function OnboardingScreen() {
                   </TouchableOpacity>
                 )}
 
-                {/* Content */}
-                <View style={[styles.content, {
-                  paddingTop: insets.top + 30
-                }]}>
-                  {/* Logo */}
-                  <View style={styles.logoContainer}>
-                    <ExternalLogo size={logoSize} />
+                {/* Slide Content Layout */}
+                <View style={[styles.mainContainer, { paddingTop: insets.top }]}>
+                  {/* Content Area - Centers itself in available space */}
+                  <View style={styles.contentWrapper}>
+                    <ScrollView
+                      contentContainerStyle={styles.scrollContent}
+                      showsVerticalScrollIndicator={false}
+                      bounces={false}
+                    >
+                      <View style={styles.topContent}>
+                        <View style={styles.logoWrapper}>
+                          <ExternalLogo size={logoSize} />
+                        </View>
+
+                        <View style={styles.iconWrapper}>
+                          <View style={[styles.iconCircle, {
+                            width: iconSize * 2.2,
+                            height: iconSize * 2.2,
+                            borderRadius: (iconSize * 2.2) / 2
+                          }]}>
+                            <IconComponent size={iconSize} color="#000" strokeWidth={2} />
+                          </View>
+                        </View>
+
+                        <View style={styles.textWrapper}>
+                          <Text style={[styles.title, { fontSize: screenHeight < 750 ? 24 : 32 }]}>{item.title}</Text>
+                          <Text style={[styles.description, { fontSize: screenHeight < 750 ? 16 : 18 }]}>{item.description}</Text>
+                        </View>
+                      </View>
+                    </ScrollView>
                   </View>
 
-                  {/* Icon */}
-                  <View style={styles.iconContainer}>
-                    <View style={styles.iconCircle}>
-                      <IconComponent size={iconSize} color="#000" strokeWidth={2} />
-                    </View>
-                  </View>
-
-                  {/* Text Content */}
-                  <View style={styles.textContainer}>
-                    <Text style={styles.title}>{item.title}</Text>
-                    <Text style={styles.description}>{item.description}</Text>
-                  </View>
-
-                  {/* Footer Section - Anchored to bottom */}
-                  <View style={[
-                    styles.footer,
-                    { bottom: insets.bottom + Spacing.md }
-                  ]}>
-                    {/* Dots Indicator */}
+                  {/* Footer Area - Pinned to bottom but with safe padding */}
+                  <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) + 15 }]}>
                     <View style={styles.dotsContainer}>
                       {ONBOARDING_DATA.map((_, dotIndex) => (
                         <TouchableOpacity
                           key={dotIndex}
                           onPress={() => handleDotPress(dotIndex)}
                           style={styles.dotButton}
-                          activeOpacity={0.7}
                         >
                           <View
                             style={[
@@ -239,8 +214,7 @@ export default function OnboardingScreen() {
                       ))}
                     </View>
 
-                    {/* Next/Get Started Button */}
-                    <View style={styles.buttonContainer}>
+                    <View style={styles.buttonWrapper}>
                       <TouchableOpacity
                         style={styles.nextButton}
                         onPress={handleNext}
@@ -268,86 +242,81 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: 'transparent',
+    backgroundColor: '#fff',
   },
   slide: {
-    // width is handled inline
+    // width/height handled inline
   },
   gradient: {
-    width: '100%',
-    height: '100%',
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flex: 1,
   },
   skipButton: {
     position: 'absolute',
-    right: Spacing.xxxl,
+    right: Spacing.lg,
     zIndex: 10,
     padding: Spacing.md,
-    paddingHorizontal: Spacing.lg,
   },
   skipText: {
     color: '#000',
     fontSize: 16,
     fontWeight: '600',
   },
-  content: {
+  mainContainer: {
     flex: 1,
-    paddingHorizontal: Spacing.xxxl,
-    paddingBottom: height < 600 ? Spacing.lg : Spacing.xxxl,
   },
-  logoContainer: {
-    alignItems: 'center',
-    marginTop: height < 600 ? Spacing.sm : Spacing.xl,
-    marginBottom: height < 600 ? Spacing.md : Spacing.xxl,
+  contentWrapper: {
+    flex: 1,
+    justifyContent: 'center',
   },
-  iconContainer: {
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.md,
+  },
+  topContent: {
+    width: '100%',
     alignItems: 'center',
-    marginVertical: height < 600 ? Spacing.sm : Spacing.lg,
+  },
+  logoWrapper: {
+    marginBottom: Spacing.xl,
+    alignItems: 'center',
+  },
+  iconWrapper: {
+    marginBottom: Spacing.xl,
+    alignItems: 'center',
   },
   iconCircle: {
-    width: height < 600 ? 100 : height < 700 ? 120 : 140,
-    height: height < 600 ? 100 : height < 700 ? 120 : 140,
-    borderRadius: height < 600 ? 50 : height < 700 ? 60 : 70,
     backgroundColor: 'rgba(255, 255, 255, 0.9)',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: '#000',
-    ...Shadows.large,
+    ...Shadows.medium,
   },
-  textContainer: {
-    flex: 0,
-    justifyContent: 'center',
+  textWrapper: {
     alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-    marginTop: Spacing.md,
-    marginBottom: Spacing.lg,
+    paddingHorizontal: Spacing.md,
   },
   title: {
-    fontSize: height < 600 ? 22 : height < 700 ? 24 : 26,
-    fontWeight: '700',
+    fontWeight: '800',
     textAlign: 'center',
-    marginBottom: Spacing.sm,
+    color: '#000',
+    marginBottom: Spacing.md,
+    lineHeight: 38,
+    letterSpacing: -0.5,
   },
-
   description: {
-    fontSize: height < 600 ? 14 : height < 700 ? 16 : 18,
-    color: '#1a1a1a',
+    color: '#333',
     textAlign: 'center',
-    lineHeight: height < 600 ? 20 : 26,
+    lineHeight: 26,
+    opacity: 0.9,
   },
   footer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
+    width: '100%',
     alignItems: 'center',
+    paddingHorizontal: Spacing.xl,
   },
-
-
   dotsContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -362,23 +331,21 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
   },
   dotActive: {
     width: 24,
     backgroundColor: '#000',
   },
-  buttonContainer: {
+  buttonWrapper: {
     width: '100%',
-    paddingHorizontal: Spacing.xxxl,
   },
   nextButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.xxl,
+    backgroundColor: '#fff',
+    paddingVertical: 16,
     borderRadius: 30,
     borderWidth: 2,
     borderColor: '#000',
@@ -387,7 +354,7 @@ const styles = StyleSheet.create({
   },
   nextButtonText: {
     color: '#000',
-    fontSize: height < 600 ? 16 : 18,
+    fontSize: 18,
     fontWeight: '700',
   },
 });
