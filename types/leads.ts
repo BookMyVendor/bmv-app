@@ -47,7 +47,8 @@ export type ActivityType =
   | 'follow_up'
   | 'proposal_sent'
   | 'contract_signed'
-  | 'payment_received';
+  | 'payment_received'
+  | 'message';
 
 export interface LeadNote {
   id: string;
@@ -143,4 +144,5 @@ export const ACTIVITY_TYPE_LABELS: Record<ActivityType, string> = {
   proposal_sent: 'Proposal Sent',
   contract_signed: 'Contract Signed',
   payment_received: 'Payment Received',
+  message: 'Message Sent',
 };

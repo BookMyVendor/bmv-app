@@ -97,6 +97,37 @@ const parseExperienceToNumber = (experienceStr: string): number => {
   return 0;
 };
 
+const PRICING_MAPPING: Record<string, string[]> = {
+  'Cat': ['Per plate', 'Per event', 'Per day', 'Per live counter'], // Caterers
+  'Photo': ['Per day', 'Per event', 'Per hour'], // Photography / Videography
+  'Video': ['Per day', 'Per event', 'Per hour'],
+  'Decor': ['Per event', 'Per day', 'Per setup'], // Decoration / Mandap
+  'Mandap': ['Per event', 'Per day', 'Per setup'],
+  'Sound': ['Per event', 'Per day', 'Per hour', 'Per equipment set'], // Sound & Music
+  'Music': ['Per event', 'Per day', 'Per hour', 'Per equipment set'],
+  'Artist': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'], // Artists (DJs, Makeup, etc)
+  'DJ': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
+  'Makeup': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
+  'Mehndi': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
+  'Dancer': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
+  'Anchor': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
+  'Transport': ['Per trip', 'Per day', 'Per vehicle', 'Per hour'], // Transportation
+  'Travel': ['Per trip', 'Per day', 'Per vehicle', 'Per hour'],
+  'Housekeeping': ['Per day', 'Per shift', 'Per person', 'Per event'], // Housekeeping & Security
+  'Security': ['Per day', 'Per shift', 'Per person', 'Per event'],
+  'Venue': ['Per day', 'Per event', 'Per hour'], // Venues
+  'Cake': ['Per kg', 'Per cake', 'Per design'], // Cakes
+  'Ritual': ['Per ritual', 'Per event', 'Per day', 'Per consultation'], // Festival & Ritual Services
+  'Pandit': ['Per ritual', 'Per event', 'Per day', 'Per consultation'],
+  'Priest': ['Per ritual', 'Per event', 'Per day', 'Per consultation'],
+  'Rental': ['Per item', 'Per day', 'Per event', 'Per hour'], // Rentals
+  'Light': ['Per item', 'Per day', 'Per event', 'Per hour'], // Lighting (part of Rentals typically or Tech)
+  'Event Management': ['Per event', 'Per day', 'Percentage of event cost'], // Event Management Companies
+  'Planner': ['Per event', 'Per day', 'Percentage of event cost'],
+};
+
+const DEFAULT_PRICING_UNITS = ['Per event', 'Per day', 'Per hour'];
+
 type SectionType = 'offers' | 'gallery' | 'packages' | 'edit';
 
 export default function BusinessDetailsScreen() {
@@ -137,6 +168,7 @@ export default function BusinessDetailsScreen() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [packageToDelete, setPackageToDelete] = useState<any>(null);
   const [deleting, setDeleting] = useState(false);
+  const [defaultPackageId, setDefaultPackageId] = useState<string | null>(null);
 
   // Category selection state
   const [allBusinessCategories, setAllBusinessCategories] = useState<any[]>([]);
@@ -150,6 +182,7 @@ export default function BusinessDetailsScreen() {
   const [eventSearchQuery, setEventSearchQuery] = useState('');
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+  const [isPricingUnitDropdownOpen, setIsPricingUnitDropdownOpen] = useState(false);
   const [loadingCategories, setLoadingCategories] = useState(false);
 
   // Temporary modal state - only committed when Done is clicked
@@ -274,8 +307,31 @@ export default function BusinessDetailsScreen() {
       // Load verification documents
       await loadVerificationDocuments();
 
-      // Load packages
-      await loadPackages();
+      // Load packages and extract price info
+      // We manually call getBusinessPackages here so we can use the result immediately
+      const { getBusinessPackages } = await import('../lib/packageApi');
+      const { data: packagesData } = await getBusinessPackages(id);
+
+      const activePackages = (packagesData || []).filter((pkg: any) => pkg.is_active !== false);
+      setPackages(activePackages);
+
+      // If we have any packages, use the first one's price/unit for the edit form
+      // If we have a 'Standard Package', prefer that
+      let defaultPkg = activePackages.find((p: any) => p.package_name === 'Standard Package');
+      if (!defaultPkg && activePackages.length > 0) {
+        defaultPkg = activePackages[0];
+      }
+
+      if (defaultPkg) {
+        setDefaultPackageId(defaultPkg.id);
+        setEditData((prev: any) => ({
+          ...prev,
+          base_price: defaultPkg.base_price,
+          pricing_unit: defaultPkg.price_unit
+        }));
+      } else {
+        setDefaultPackageId(null);
+      }
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to load business details');
     } finally {
@@ -813,6 +869,7 @@ export default function BusinessDetailsScreen() {
     return childIds.map((id) => ({
       id,
       path: getCategoryPath(id, allBusinessCategories),
+      name: allBusinessCategories.find(c => c.id === id)?.name || ''
     }));
   }, [selectedCategoryIds, allBusinessCategories]);
 
@@ -826,6 +883,38 @@ export default function BusinessDetailsScreen() {
     }
     return `${selectedCategoriesWithPaths.length} sub-categories selected`;
   };
+
+  // Determine applicable pricing units based on selected service category
+  const pricingUnitOptions = React.useMemo(() => {
+    if (selectedCategoriesWithPaths.length === 0) return DEFAULT_PRICING_UNITS;
+
+    // Use the first selected category to determine units
+    const firstCatName = selectedCategoriesWithPaths[0].name || '';
+
+    // Find matching key in PRICING_MAPPING
+    const match = Object.keys(PRICING_MAPPING).find(key =>
+      firstCatName.toLowerCase().includes(key.toLowerCase())
+    );
+
+    if (match) {
+      return PRICING_MAPPING[match];
+    }
+
+    // Secondary check: look at root category if available
+    if (selectedRootCategoryId) {
+      const rootCat = allBusinessCategories.find(c => c.id === selectedRootCategoryId);
+      if (rootCat) {
+        const rootMatch = Object.keys(PRICING_MAPPING).find(key =>
+          rootCat.name.toLowerCase().includes(key.toLowerCase())
+        );
+        if (rootMatch) {
+          return PRICING_MAPPING[rootMatch];
+        }
+      }
+    }
+
+    return DEFAULT_PRICING_UNITS;
+  }, [selectedCategoriesWithPaths, allBusinessCategories, selectedRootCategoryId]);
 
   // Build hierarchical tree structure for event categories
   const buildEventCategoryTree = (categories: any[]): any[] => {
@@ -1649,10 +1738,39 @@ export default function BusinessDetailsScreen() {
     try {
       setSavingDetails(true);
 
+      // Extract base_price and pricing_unit from editData as they are not columns on vendor_businesses
+      const { base_price, pricing_unit, ...businessUpdateData } = editData;
+
       // Update business details
-      const { data, error } = await updateBusinessDetails(id, editData);
+      const { data, error } = await updateBusinessDetails(id, businessUpdateData);
       if (error) throw error;
       setBusiness(data);
+
+      // Handle Package Update/Creation using the extracted price fields
+      if (base_price && pricing_unit) {
+        const { createPackage, updatePackage } = await import('../lib/packageApi');
+
+        if (defaultPackageId) {
+          // Update existing package
+          await updatePackage(defaultPackageId, {
+            base_price: parseFloat(base_price),
+            price_unit: pricing_unit
+          });
+        } else {
+          // Create new default package
+          const { data: newPkg } = await createPackage({
+            business_id: id,
+            package_name: 'Standard Package',
+            package_type: 'fixed',
+            base_price: parseFloat(base_price),
+            price_unit: pricing_unit,
+            included_services: [],
+            is_active: true,
+            sort_order: 0
+          });
+          if (newPkg) setDefaultPackageId(newPkg.id);
+        }
+      }
 
       // Update category mappings
       // First, delete existing mappings
@@ -1895,6 +2013,7 @@ export default function BusinessDetailsScreen() {
             Gallery
           </Text>
         </TouchableOpacity>
+        {/*
         <TouchableOpacity
           style={[
             styles.tab,
@@ -1913,6 +2032,7 @@ export default function BusinessDetailsScreen() {
             Packages
           </Text>
         </TouchableOpacity>
+        */}
         <TouchableOpacity
           style={[
             styles.tab,
@@ -2050,7 +2170,8 @@ export default function BusinessDetailsScreen() {
           </View>
         )}
 
-        {activeSection === 'packages' && (
+        {/*
+        activeSection === 'packages' && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Pricing Packages</Text>
@@ -2087,7 +2208,8 @@ export default function BusinessDetailsScreen() {
               />
             )}
           </View>
-        )}
+        )
+        */}
 
         {/* Delete Confirmation Modal */}
         <Modal
@@ -2454,6 +2576,43 @@ export default function BusinessDetailsScreen() {
                   placeholder="Select experience"
                   onChange={(value: string) => setEditData({ ...editData, years_experience: parseExperienceToNumber(value) })}
                 />
+              </View>
+
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>Base Price (₹) *</Text>
+                <TextInput
+                  style={styles.editInput}
+                  value={editData.base_price ? String(editData.base_price) : ''}
+                  onChangeText={(text) => {
+                    const cleanText = text.replace(/[^0-9]/g, '');
+                    setEditData({ ...editData, base_price: cleanText });
+                  }}
+                  placeholder="Enter starting price"
+                  placeholderTextColor="#999"
+                  keyboardType="numeric"
+                  returnKeyType="next"
+                />
+              </View>
+
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>Pricing Unit *</Text>
+                <Dropdown
+                  options={pricingUnitOptions.map((unit) => ({
+                    label: unit,
+                    value: unit,
+                  }))}
+                  value={editData.pricing_unit || ''}
+                  placeholder="Select pricing unit"
+                  onChange={(value: string) => setEditData({ ...editData, pricing_unit: value })}
+                  open={isPricingUnitDropdownOpen}
+                  onOpenChange={setIsPricingUnitDropdownOpen}
+                  disabled={selectedCategoriesWithPaths.length === 0}
+                />
+                {selectedCategoriesWithPaths.length === 0 && (
+                  <Text style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                    Select a service category first
+                  </Text>
+                )}
               </View>
             </View>
 

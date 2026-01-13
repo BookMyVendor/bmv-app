@@ -91,8 +91,10 @@ export default function TermsAndConditionsScreen() {
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
-        <Logo size={48} style={styles.logo} />
-        <Text style={styles.title}>Terms & Conditions</Text>
+        <View style={styles.headerTitleRow}>
+          <Logo size={40} style={styles.logo} />
+          <Text style={styles.title}>Terms & Conditions</Text>
+        </View>
         <Text style={styles.subtitle}>Please read and accept to continue</Text>
       </View>
 
@@ -263,14 +265,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 12,
+  },
   logo: {
-    marginBottom: 12,
+    // marginBottom removed as it's now in a row
   },
   title: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: '700',
     color: '#1a1a1a',
-    marginBottom: 4,
+    flex: 1,
   },
   subtitle: {
     fontSize: 14,
