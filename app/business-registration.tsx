@@ -521,8 +521,6 @@ export default function BusinessRegistrationScreen() {
           youtube_url: businessData.youtubeUrl || null,
           cover_photo_url: null, // Will be set after uploading cover image
           years_experience: parseYearsOfExperience(businessData.yearsOfExperience || '0'),
-          base_price: businessData.basePrice ? parseFloat(businessData.basePrice) : null,
-          pricing_unit: businessData.pricingUnit || null,
           gst_number: businessData.gstNumber || null,
           status: 'pending',
           subscription_status: 'trial',
