@@ -98,32 +98,41 @@ const parseExperienceToNumber = (experienceStr: string): number => {
 };
 
 const PRICING_MAPPING: Record<string, string[]> = {
-  'Cat': ['Per plate', 'Per event', 'Per day', 'Per live counter'], // Caterers
-  'Photo': ['Per day', 'Per event', 'Per hour'], // Photography / Videography
-  'Video': ['Per day', 'Per event', 'Per hour'],
-  'Decor': ['Per event', 'Per day', 'Per setup'], // Decoration / Mandap
-  'Mandap': ['Per event', 'Per day', 'Per setup'],
-  'Sound': ['Per event', 'Per day', 'Per hour', 'Per equipment set'], // Sound & Music
-  'Music': ['Per event', 'Per day', 'Per hour', 'Per equipment set'],
-  'Artist': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'], // Artists (DJs, Makeup, etc)
-  'DJ': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
-  'Makeup': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
-  'Mehndi': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
-  'Dancer': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
-  'Anchor': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
-  'Transport': ['Per trip', 'Per day', 'Per vehicle', 'Per hour'], // Transportation
-  'Travel': ['Per trip', 'Per day', 'Per vehicle', 'Per hour'],
-  'Housekeeping': ['Per day', 'Per shift', 'Per person', 'Per event'], // Housekeeping & Security
-  'Security': ['Per day', 'Per shift', 'Per person', 'Per event'],
-  'Venue': ['Per day', 'Per event', 'Per hour'], // Venues
-  'Cake': ['Per kg', 'Per cake', 'Per design'], // Cakes
-  'Ritual': ['Per ritual', 'Per event', 'Per day', 'Per consultation'], // Festival & Ritual Services
-  'Pandit': ['Per ritual', 'Per event', 'Per day', 'Per consultation'],
-  'Priest': ['Per ritual', 'Per event', 'Per day', 'Per consultation'],
-  'Rental': ['Per item', 'Per day', 'Per event', 'Per hour'], // Rentals
-  'Light': ['Per item', 'Per day', 'Per event', 'Per hour'], // Lighting (part of Rentals typically or Tech)
-  'Event Management': ['Per event', 'Per day', 'Percentage of event cost'], // Event Management Companies
-  'Planner': ['Per event', 'Per day', 'Percentage of event cost'],
+  // Caterer
+  'Cat': ['Per plate', 'Per live counter'],
+
+  // Decoration
+  'Decor': ['Per day', 'Per event'],
+
+  // Photography
+  'Photo': ['Per hour', 'Per event', 'Cinematography'],
+
+  // Sound & Music
+  'Sound': ['Per event', 'Per hour'],
+
+  // Artist
+  'Artist': ['Per hour', 'Per person'],
+
+  // Transport
+  'Transport': ['Per event', 'Per km'],
+
+  // Housekeeping & Security
+  'Housekeeping': ['Per security personnel', 'Per hour'],
+
+  // Venues
+  'Venue': ['Per day'],
+
+  // Cakes
+  'Cake': ['Per kg', 'Customized'],
+
+  // Priest
+  'Priest': ['Per event'],
+
+  // Rentals
+  'Rental': ['Per event'],
+
+  // Event Management Companies
+  'Event Management': ['Per event'],
 };
 
 const DEFAULT_PRICING_UNITS = ['Per event', 'Per day', 'Per hour'];
