@@ -168,6 +168,7 @@ export default function BusinessDetailsScreen() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [packageToDelete, setPackageToDelete] = useState<any>(null);
   const [deleting, setDeleting] = useState(false);
+  const [defaultPackageId, setDefaultPackageId] = useState<string | null>(null);
 
   // Category selection state
   const [allBusinessCategories, setAllBusinessCategories] = useState<any[]>([]);
@@ -306,8 +307,31 @@ export default function BusinessDetailsScreen() {
       // Load verification documents
       await loadVerificationDocuments();
 
-      // Load packages
-      await loadPackages();
+      // Load packages and extract price info
+      // We manually call getBusinessPackages here so we can use the result immediately
+      const { getBusinessPackages } = await import('../lib/packageApi');
+      const { data: packagesData } = await getBusinessPackages(id);
+
+      const activePackages = (packagesData || []).filter((pkg: any) => pkg.is_active !== false);
+      setPackages(activePackages);
+
+      // If we have any packages, use the first one's price/unit for the edit form
+      // If we have a 'Standard Package', prefer that
+      let defaultPkg = activePackages.find((p: any) => p.package_name === 'Standard Package');
+      if (!defaultPkg && activePackages.length > 0) {
+        defaultPkg = activePackages[0];
+      }
+
+      if (defaultPkg) {
+        setDefaultPackageId(defaultPkg.id);
+        setEditData((prev: any) => ({
+          ...prev,
+          base_price: defaultPkg.base_price,
+          pricing_unit: defaultPkg.price_unit
+        }));
+      } else {
+        setDefaultPackageId(null);
+      }
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to load business details');
     } finally {
@@ -1714,10 +1738,39 @@ export default function BusinessDetailsScreen() {
     try {
       setSavingDetails(true);
 
+      // Extract base_price and pricing_unit from editData as they are not columns on vendor_businesses
+      const { base_price, pricing_unit, ...businessUpdateData } = editData;
+
       // Update business details
-      const { data, error } = await updateBusinessDetails(id, editData);
+      const { data, error } = await updateBusinessDetails(id, businessUpdateData);
       if (error) throw error;
       setBusiness(data);
+
+      // Handle Package Update/Creation using the extracted price fields
+      if (base_price && pricing_unit) {
+        const { createPackage, updatePackage } = await import('../lib/packageApi');
+
+        if (defaultPackageId) {
+          // Update existing package
+          await updatePackage(defaultPackageId, {
+            base_price: parseFloat(base_price),
+            price_unit: pricing_unit
+          });
+        } else {
+          // Create new default package
+          const { data: newPkg } = await createPackage({
+            business_id: id,
+            package_name: 'Standard Package',
+            package_type: 'fixed',
+            base_price: parseFloat(base_price),
+            price_unit: pricing_unit,
+            included_services: [],
+            is_active: true,
+            sort_order: 0
+          });
+          if (newPkg) setDefaultPackageId(newPkg.id);
+        }
+      }
 
       // Update category mappings
       // First, delete existing mappings
