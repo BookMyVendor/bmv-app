@@ -47,6 +47,37 @@ const EXPERIENCE_OPTIONS = [
   'More than 10 years',
 ];
 
+const PRICING_MAPPING: Record<string, string[]> = {
+  'Cat': ['Per plate', 'Per event', 'Per day', 'Per live counter'], // Caterers
+  'Photo': ['Per day', 'Per event', 'Per hour'], // Photography / Videography
+  'Video': ['Per day', 'Per event', 'Per hour'],
+  'Decor': ['Per event', 'Per day', 'Per setup'], // Decoration / Mandap
+  'Mandap': ['Per event', 'Per day', 'Per setup'],
+  'Sound': ['Per event', 'Per day', 'Per hour', 'Per equipment set'], // Sound & Music
+  'Music': ['Per event', 'Per day', 'Per hour', 'Per equipment set'],
+  'Artist': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'], // Artists (DJs, Makeup, etc)
+  'DJ': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
+  'Makeup': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
+  'Mehndi': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
+  'Dancer': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
+  'Anchor': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
+  'Transport': ['Per trip', 'Per day', 'Per vehicle', 'Per hour'], // Transportation
+  'Travel': ['Per trip', 'Per day', 'Per vehicle', 'Per hour'],
+  'Housekeeping': ['Per day', 'Per shift', 'Per person', 'Per event'], // Housekeeping & Security
+  'Security': ['Per day', 'Per shift', 'Per person', 'Per event'],
+  'Venue': ['Per day', 'Per event', 'Per hour'], // Venues
+  'Cake': ['Per kg', 'Per cake', 'Per design'], // Cakes
+  'Ritual': ['Per ritual', 'Per event', 'Per day', 'Per consultation'], // Festival & Ritual Services
+  'Pandit': ['Per ritual', 'Per event', 'Per day', 'Per consultation'],
+  'Priest': ['Per ritual', 'Per event', 'Per day', 'Per consultation'],
+  'Rental': ['Per item', 'Per day', 'Per event', 'Per hour'], // Rentals
+  'Light': ['Per item', 'Per day', 'Per event', 'Per hour'], // Lighting (part of Rentals typically or Tech)
+  'Event Management': ['Per event', 'Per day', 'Percentage of event cost'], // Event Management Companies
+  'Planner': ['Per event', 'Per day', 'Percentage of event cost'],
+};
+
+const DEFAULT_PRICING_UNITS = ['Per event', 'Per day', 'Per hour'];
+
 const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExperienceStepProps>(({
   data,
   onUpdate,
@@ -69,8 +100,11 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   const [isExperienceDropdownOpen, setIsExperienceDropdownOpen] = useState(false);
   const [expandedEventIds, setExpandedEventIds] = useState<Set<string>>(new Set());
 
+  const [isPricingUnitDropdownOpen, setIsPricingUnitDropdownOpen] = useState(false);
+
   // Refs for keyboard navigation
   const businessDescriptionRef = useRef<TextInput>(null);
+  const basePriceRef = useRef<TextInput>(null);
 
   // Expose method to focus next empty mandatory field
   useImperativeHandle(ref, () => ({
@@ -85,6 +119,10 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         businessDescriptionRef.current?.focus();
       } else if (!data.yearsOfExperience || !data.yearsOfExperience.trim()) {
         setIsExperienceDropdownOpen(true);
+      } else if (!data.basePrice || !data.basePrice.trim()) {
+        basePriceRef.current?.focus();
+      } else if (!data.pricingUnit || !data.pricingUnit.trim()) {
+        setIsPricingUnitDropdownOpen(true);
       }
     },
   }));
@@ -398,6 +436,14 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     });
   }, [selectedCategoryIds, selectedRootCategoryId, allBusinessCategories]);
 
+  // Sync selection to parent
+  useEffect(() => {
+    onUpdate({
+      selectedRootCategoryId,
+      selectedCategoryIds
+    });
+  }, [selectedRootCategoryId, selectedCategoryIds]);
+
   // Render category tree recursively
   const renderCategoryTree = (nodes: CategoryNode[], level: number = 0): React.ReactNode => {
     return nodes.map((node) => {
@@ -488,10 +534,14 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       return cat && cat.parent_category_id !== null;
     });
 
-    return childIds.map((id) => ({
-      id,
-      path: getCategoryPath(id, allBusinessCategories),
-    }));
+    return childIds.map((id) => {
+      const cat = allBusinessCategories.find(c => c.id === id);
+      return {
+        id,
+        path: getCategoryPath(id, allBusinessCategories),
+        name: cat?.name || ''
+      };
+    });
   }, [selectedCategoryIds, allBusinessCategories]);
 
   const handleChange = (field: string, value: any) => {
@@ -697,6 +747,42 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     }
     return `${selectedEventsWithPaths.length} sub-categories selected`;
   };
+
+  // Determine applicable pricing units based on selected service category
+  const pricingUnitOptions = useMemo(() => {
+    if (selectedCategoriesWithPaths.length === 0) return DEFAULT_PRICING_UNITS;
+
+    // Use the first selected category to determine units
+    // In a real app we might want to be smarter if multiple different types are selected
+    // but usually a business has a primary domain.
+    const firstCatName = selectedCategoriesWithPaths[0].name || '';
+
+    // Find matching key in PRICING_MAPPING
+    const match = Object.keys(PRICING_MAPPING).find(key =>
+      firstCatName.toLowerCase().includes(key.toLowerCase())
+    );
+
+    if (match) {
+      return PRICING_MAPPING[match];
+    }
+
+    // Secondary check: look at root category if available
+    if (selectedRootCategoryId) {
+      const rootCat = allBusinessCategories.find(c => c.id === selectedRootCategoryId);
+      if (rootCat) {
+        const rootMatch = Object.keys(PRICING_MAPPING).find(key =>
+          rootCat.name.toLowerCase().includes(key.toLowerCase())
+        );
+        if (rootMatch) {
+          return PRICING_MAPPING[rootMatch];
+        }
+      }
+    }
+
+    return DEFAULT_PRICING_UNITS;
+  }, [selectedCategoriesWithPaths, allBusinessCategories, selectedRootCategoryId]);
+
+
 
   if (loading) {
     return (
@@ -997,6 +1083,52 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           <Text style={styles.errorText}>{validationErrors.yearsOfExperience}</Text>
         )}
       </View>
+
+      <View style={styles.field}>
+        <Text style={styles.label}>Base Price (₹) *</Text>
+        <TextInput
+          ref={basePriceRef}
+          style={[
+            styles.input,
+            validationErrors.basePrice && styles.inputError
+          ]}
+          value={data.basePrice || ''}
+          onChangeText={(text) => {
+            // Only allow numeric input
+            const cleanText = text.replace(/[^0-9]/g, '');
+            handleChange('basePrice', cleanText);
+          }}
+          placeholder="Enter starting price (e.g. 5000)"
+          placeholderTextColor="#999"
+          keyboardType="numeric"
+          returnKeyType="next"
+        />
+        {validationErrors.basePrice && (
+          <Text style={styles.errorText}>{validationErrors.basePrice}</Text>
+        )}
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.label}>Pricing Unit *</Text>
+        <Dropdown
+          options={pricingUnitOptions.map((unit) => ({
+            label: unit,
+            value: unit,
+          }))}
+          value={data.pricingUnit || ''}
+          placeholder="Select pricing unit"
+          onChange={(value: string) => handleChange('pricingUnit', value)}
+          open={isPricingUnitDropdownOpen}
+          onOpenChange={setIsPricingUnitDropdownOpen}
+          disabled={!data.selectedCategoryIds || data.selectedCategoryIds.length === 0}
+        />
+        {(!data.selectedCategoryIds || data.selectedCategoryIds.length === 0) && (
+          <Text style={styles.helperText}>Select a service category first to see options</Text>
+        )}
+        {validationErrors.pricingUnit && (
+          <Text style={styles.errorText}>{validationErrors.pricingUnit}</Text>
+        )}
+      </View>
     </ScrollView>
   );
 });
@@ -1097,6 +1229,11 @@ const styles = StyleSheet.create({
     color: '#FF3B30',
     marginTop: 4,
     fontWeight: '500',
+  },
+  helperText: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
   },
   selectedContainer: {
     marginBottom: 16,
