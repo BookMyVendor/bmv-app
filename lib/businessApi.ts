@@ -696,7 +696,7 @@ export const pickImage = async (): Promise<{
   try {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      throw new Error('Permission to access media library is required');
+      throw new Error('Photo Library access is required. Go to Settings > Apps > BookMyVendors Business > Photos to enable.');
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -722,7 +722,7 @@ export const pickMultipleImages = async (): Promise<{
   try {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      throw new Error('Permission to access media library is required');
+      throw new Error('Photo Library access is required. Go to Settings > Apps > BookMyVendors Business > Photos to enable.');
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
