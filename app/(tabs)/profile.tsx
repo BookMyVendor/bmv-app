@@ -129,7 +129,7 @@ export default function ProfileScreen() {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
 
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Photo Library access is required. Go to Settings > Apps > BookMyVendors Business > Camera to enable.');
+      Alert.alert('Permission needed', 'Camera access is required. Go to Settings > Apps > BookMyVendors Business > Camera to enable.');
       return;
     }
 
