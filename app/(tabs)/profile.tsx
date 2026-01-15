@@ -99,7 +99,7 @@ export default function ProfileScreen() {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
       if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Please allow access to your photos');
+        Alert.alert('Permission needed', 'Photo Library access is required. Go to Settings > Apps > BookMyVendors Business > Photos to enable.');
         return;
       }
     }
@@ -129,7 +129,7 @@ export default function ProfileScreen() {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
 
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Please allow camera access');
+      Alert.alert('Permission needed', 'Photo Library access is required. Go to Settings > Apps > BookMyVendors Business > Camera to enable.');
       return;
     }
 
