@@ -10,10 +10,7 @@ export interface AccountDeletionError {
     message: string;
 }
 
-const deletionUrl = 'https://mhqbwnnnhezvitilzjvk.supabase.co/functions/v1/auth-vendor-delete-account';
-
 function getProjectRef(): string {
-    // Fallback if we ever need to derive; not used when deletionUrl is set
     const url = new URL(supabaseUrl);
     const hostname = url.hostname;
     const parts = hostname.split('.');
@@ -29,7 +26,7 @@ export async function confirmAccountDeletion({
     accessToken: string;
 }): Promise<{ data?: AccountDeletionResponse; error?: AccountDeletionError }> {
     try {
-        const url = deletionUrl || `https://${getProjectRef()}.supabase.co/functions/v1/auth-vendor-delete-account`;
+        const url = `https://${getProjectRef()}.supabase.co/functions/v1/auth-vendor-delete-account`;
 
         const response = await fetch(url, {
             method: 'POST',
