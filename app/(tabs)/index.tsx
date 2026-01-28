@@ -92,12 +92,26 @@ export default function DashboardScreen() {
     try {
       const { data, error } = await supabaseCore
         .from('vendor_businesses')
-        .select('*')
+        .select(`
+          *,
+          vendor_business_category_mappings (
+            categories (
+              name
+            )
+          )
+        `)
         .eq('vendor_id', user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setBusinesses(data || []);
+
+      const formattedBusinesses = (data || []).map((business: any) => ({
+        ...business,
+        business_description: business.description,
+        vendor_service_category: business.vendor_business_category_mappings?.[0]?.categories?.name || 'General',
+      }));
+
+      setBusinesses(formattedBusinesses);
     } catch (error) {
       console.error('Error fetching businesses:', error);
     } finally {
@@ -415,10 +429,19 @@ export default function DashboardScreen() {
                     }
                   >
                     {business.cover_photo_url ? (
-                      <Image
-                        source={{ uri: business.cover_photo_url }}
-                        style={styles.businessImage}
-                      />
+                      <View style={styles.businessImageContainer}>
+                        <Image
+                          source={{ uri: business.cover_photo_url }}
+                          style={styles.businessImageBackground}
+                          blurRadius={15}
+                          resizeMode="cover"
+                        />
+                        <Image
+                          source={{ uri: business.cover_photo_url }}
+                          style={styles.businessImage}
+                          resizeMode="contain"
+                        />
+                      </View>
                     ) : (
                       <LinearGradient
                         colors={[Colors.secondary.main, Colors.secondary.light]}
@@ -701,9 +724,23 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
   },
+  businessImageContainer: {
+    width: '100%',
+    height: 160,
+    backgroundColor: '#f0f0f0',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  businessImageBackground: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+    opacity: 0.7,
+  },
   businessImage: {
     width: '100%',
-    height: 140,
+    height: '100%',
+    zIndex: 1,
   },
   businessImagePlaceholder: {
     width: '100%',

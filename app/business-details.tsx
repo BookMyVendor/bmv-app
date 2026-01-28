@@ -35,6 +35,7 @@ import {
   FileText,
   AlertCircle,
   Package,
+  MoreVertical,
 } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { supabaseCore } from '../lib/supabase';
@@ -178,6 +179,7 @@ export default function BusinessDetailsScreen() {
   const [packageToDelete, setPackageToDelete] = useState<any>(null);
   const [deleting, setDeleting] = useState(false);
   const [defaultPackageId, setDefaultPackageId] = useState<string | null>(null);
+  const [activeMenuImageId, setActiveMenuImageId] = useState<string | null>(null);
 
   // Category selection state
   const [allBusinessCategories, setAllBusinessCategories] = useState<any[]>([]);
@@ -1903,38 +1905,66 @@ export default function BusinessDetailsScreen() {
   const renderImageItem = ({ item }: { item: PortfolioImage }) => {
     const imageSource = item.image_base64 || item.image_url;
     const isCover = item.image_type === 'cover';
+    const isMenuOpen = activeMenuImageId === item.id;
 
     return (
-      <TouchableOpacity
-        style={styles.imageGridItem}
-        onPress={() => {
-          setPreviewImageUrl(imageSource);
-          setShowImagePreview(true);
-        }}
-      >
-        <Image source={{ uri: imageSource || undefined }} style={styles.galleryImage} />
-        {isCover && (
-          <View style={styles.coverBadge}>
-            <Text style={styles.coverBadgeText}>Cover</Text>
+      <View style={styles.imageGridItemContainer}>
+        <TouchableOpacity
+          style={styles.imageGridItem}
+          activeOpacity={0.9}
+          onPress={() => {
+            if (activeMenuImageId) {
+              setActiveMenuImageId(null);
+            } else {
+              setPreviewImageUrl(imageSource);
+              setShowImagePreview(true);
+            }
+          }}
+        >
+          <Image source={{ uri: imageSource || undefined }} style={styles.galleryImage} resizeMode="cover" />
+          {isCover && (
+            <View style={styles.coverBadge}>
+              <Text style={styles.coverBadgeText}>Cover</Text>
+            </View>
+          )}
+
+          {/* Gradient overlay for text readability if needed, but kept clean for now */}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.menuButton}
+          onPress={() => setActiveMenuImageId(isMenuOpen ? null : item.id)}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <View style={styles.menuButtonCircle}>
+            <MoreVertical size={18} color="#fff" />
+          </View>
+        </TouchableOpacity>
+
+        {isMenuOpen && (
+          <View style={styles.menuOptions}>
+            <TouchableOpacity
+              style={styles.menuOptionItem}
+              onPress={() => {
+                setActiveMenuImageId(null);
+                handleSetCoverImage(item);
+              }}
+            >
+              <Text style={styles.menuOptionText}>Set Cover Image</Text>
+            </TouchableOpacity>
+            <View style={styles.menuDivider} />
+            <TouchableOpacity
+              style={styles.menuOptionItem}
+              onPress={() => {
+                setActiveMenuImageId(null);
+                handleDeleteImage(item);
+              }}
+            >
+              <Text style={[styles.menuOptionText, styles.menuDeleteText]}>Delete</Text>
+            </TouchableOpacity>
           </View>
         )}
-        <View style={styles.imageActions}>
-          {!isCover && (
-            <TouchableOpacity
-              style={[styles.imageActionButton, styles.setCoverButton]}
-              onPress={() => handleSetCoverImage(item)}
-            >
-              <Tag size={14} color="#fff" />
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            style={[styles.imageActionButton, styles.deleteImageButton]}
-            onPress={() => handleDeleteImage(item)}
-          >
-            <Trash2 size={14} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      </TouchableOpacity>
+      </View>
     );
   };
 
@@ -2171,7 +2201,7 @@ export default function BusinessDetailsScreen() {
                 data={images}
                 renderItem={renderImageItem}
                 keyExtractor={(item) => item.id}
-                numColumns={3}
+                numColumns={2}
                 columnWrapperStyle={styles.imageRow}
                 scrollEnabled={false}
               />
@@ -3458,9 +3488,15 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 8,
   },
-  imageGridItem: {
+  imageGridItemContainer: {
     flex: 1,
     aspectRatio: 1,
+    position: 'relative',
+    margin: 4,
+  },
+  imageGridItem: {
+    width: '100%',
+    height: '100%',
     borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: '#f0f0f0',
@@ -3469,43 +3505,67 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  deleteImageButton: {
-    backgroundColor: 'rgba(239, 68, 68, 0.8)',
+  menuButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    zIndex: 10,
+  },
+  menuButtonCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  menuOptions: {
+    position: 'absolute',
+    top: 45,
+    right: 8,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 20,
+    minWidth: 160,
+  },
+  menuOptionItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  menuOptionText: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '600',
+  },
+  menuDeleteText: {
+    color: '#FF3B30',
+  },
+  menuDivider: {
+    height: 1,
+    backgroundColor: '#f0f0f0',
+    marginVertical: 2,
   },
   coverBadge: {
     position: 'absolute',
-    top: 4,
-    left: 4,
+    top: 8,
+    left: 8,
     backgroundColor: '#2563EB',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 4,
-    zIndex: 2,
+    zIndex: 5,
   },
   coverBadgeText: {
     color: '#fff',
     fontSize: 10,
     fontWeight: '700',
     textTransform: 'uppercase',
-  },
-  imageActions: {
-    position: 'absolute',
-    bottom: 4,
-    right: 4,
-    flexDirection: 'row',
-    gap: 4,
-    zIndex: 2,
-  },
-  imageActionButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  setCoverButton: {
-    backgroundColor: 'rgba(37, 99, 235, 0.8)',
   },
   editSection: {
     backgroundColor: '#fff',
