@@ -5,13 +5,18 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  TouchableWithoutFeedback,
+  Keyboard,
+  Dimensions,
+  SafeAreaView as RNSafeAreaView,
   ScrollView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Smartphone } from 'lucide-react-native';
+import { Smartphone, HelpCircle, UserCircle, ShieldCheck, Zap, ChevronRight, Users } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../contexts/AuthContext';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
@@ -19,6 +24,12 @@ import ExternalLogo from '../../components/ExternalLogo';
 import { sendOTP, resendOTP } from '../../lib/otpAuthApi';
 
 
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const IS_SMALL_SCREEN = SCREEN_HEIGHT < 700;
+const CONTENT_TOP_PADDING = IS_SMALL_SCREEN
+  ? SCREEN_HEIGHT * 0.08
+  : SCREEN_HEIGHT * 0.12;
+const LOGO_SIZE = IS_SMALL_SCREEN ? 120 : 160;
 
 export default function LoginScreen() {
   const [phone, setPhone] = useState('');
@@ -179,120 +190,208 @@ export default function LoginScreen() {
   /* -------------------- UI -------------------- */
 
   return (
-    <LinearGradient colors={[Colors.background.primary, '#FFFFFF']} style={styles.container}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+    <LinearGradient colors={[Colors.background.primary, '#FDFBF7']} style={styles.container}>
+      {/* Decorative Background Elements */}
+      <View style={styles.decorCircle1} />
+      <View style={styles.decorCircle2} />
+      <View style={styles.decorCircle3} />
+      <View style={styles.decorCircle4} />
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.content}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ flexGrow: 1 }}
+              keyboardShouldPersistTaps="handled"
+            >
+              <View style={styles.innerContent}>
+                {/* MAIN CONTENT (fills space) */}
+                <View style={{ flex: 1, paddingBottom: 20 }}>
+                  <View style={styles.headerContainer}>
+                    <Text style={styles.titleSmall}>Welcome to</Text>
+                    <ExternalLogo size={LOGO_SIZE} />
+                  </View>
 
-            <View style={styles.headerContainer}>
-              <Text style={styles.titleSmall}>Welcome to</Text>
-              <ExternalLogo size={260} />
-            </View>
+                  <View style={styles.formCard}>
+                    {/* Step Indicator */}
+                    <View style={styles.stepIndicatorContainer}>
+                      <View style={[styles.stepDot, step === 'phone' ? styles.stepDotActive : styles.stepDotInactive]} />
+                      <View style={[styles.stepDot, step === 'otp' ? styles.stepDotActive : styles.stepDotInactive]} />
+                    </View>
 
-            {step === 'phone' ? (
-              <>
-                <View style={styles.inputContainer}>
-                  <Smartphone size={20} color="#FFA500" />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Mobile Number"
-                    keyboardType="phone-pad"
-                    value={phone}
-                    onChangeText={(text) => {
-                      const digitsOnly = text.replace(/\D/g, '');
-                      if (digitsOnly.length <= 10) {
-                        setPhone(digitsOnly);
-                      }
-                    }}
-                    maxLength={10}
-                    returnKeyType="send"
-                    onSubmitEditing={handleSendOTP}
-                  />
+                    {step === 'phone' ? (
+                      <>
+                        <Text style={styles.formTitle}>Enter Mobile Number</Text>
+                        <View style={styles.inputContainer}>
+                          <Smartphone size={20} color="#FFA500" />
+                          <TextInput
+                            style={styles.input}
+                            placeholder="Mobile Number"
+                            keyboardType="phone-pad"
+                            value={phone}
+                            onChangeText={(text) => {
+                              const digitsOnly = text.replace(/\D/g, '');
+                              if (digitsOnly.length <= 10) {
+                                setPhone(digitsOnly);
+                              }
+                            }}
+                            maxLength={10}
+                            returnKeyType="send"
+                            onSubmitEditing={handleSendOTP}
+                          />
+                        </View>
 
-                </View>
-
-                <TouchableOpacity
-                  style={[styles.button, loading && styles.buttonDisabled]}
-                  onPress={handleSendOTP}
-                  disabled={loading}
-                >
-                  <LinearGradient colors={['#FFA500', '#FF8C00']} style={styles.buttonGradient}>
-                    {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Send OTP</Text>}
-                  </LinearGradient>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <View style={styles.otpHeader}>
-                  <Text style={styles.otpLabel}>Enter 6-digit OTP sent to</Text>
-                  <Text style={styles.phoneNumberDisplay}>{formatPhoneNumber(phone)}</Text>
-                </View>
-
-                <TextInput
-                  style={styles.otpInput}
-                  keyboardType="number-pad"
-                  maxLength={6}
-                  value={otp}
-                  onChangeText={(val) => setOtp(val.replace(/\D/g, ''))}
-                  textAlign="center"
-                  autoFocus={true}
-                  returnKeyType="done"
-                  onSubmitEditing={handleVerifyOTP}
-                />
-
-                {otpAttemptsRemaining !== null && (
-                  <Text style={styles.attemptsText}>
-                    {otpAttemptsRemaining} attempt(s) remaining
-                  </Text>
-                )}
-
-                <TouchableOpacity
-                  style={[styles.button, loading && styles.buttonDisabled]}
-                  onPress={handleVerifyOTP}
-                  disabled={loading}
-                >
-                  <LinearGradient colors={['#87CEEB', '#6BB6FF']} style={styles.buttonGradient}>
-                    {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Verify OTP</Text>}
-                  </LinearGradient>
-                </TouchableOpacity>
-
-                <View style={styles.otpFooter}>
-                  <TouchableOpacity
-                    onPress={() => {
-                      setStep('phone');
-                      setOtp('');
-                      setError('');
-                    }}
-                    disabled={loading}
-                  >
-                    <Text style={[styles.footerLink, loading && styles.disabledLink]}>Change Phone Number</Text>
-                  </TouchableOpacity>
-
-                  <View>
-                    {resendCountdown > 0 ? (
-                      <Text style={styles.resendText}>
-                        Resend in <Text style={styles.countdownText}>{resendCountdown}s</Text>
-                      </Text>
+                        <TouchableOpacity
+                          style={[styles.button, loading && styles.buttonDisabled]}
+                          onPress={handleSendOTP}
+                          disabled={loading}
+                        >
+                          <LinearGradient colors={['#FFA500', '#FF8C00']} style={styles.buttonGradient}>
+                            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Send OTP</Text>}
+                          </LinearGradient>
+                        </TouchableOpacity>
+                      </>
                     ) : (
-                      <TouchableOpacity onPress={handleResendOTP} disabled={loading}>
-                        <Text style={[styles.footerLink, loading && styles.disabledLink]}>Resend OTP</Text>
-                      </TouchableOpacity>
+                      <>
+                        <Text style={styles.formTitle}>Verify OTP</Text>
+                        <View style={styles.otpHeader}>
+                          <Text style={styles.otpLabel}>Enter 6-digit OTP sent to</Text>
+                          <Text style={styles.phoneNumberDisplay}>{formatPhoneNumber(phone)}</Text>
+                        </View>
+
+                        <TextInput
+                          style={styles.otpInput}
+                          keyboardType="number-pad"
+                          maxLength={6}
+                          value={otp}
+                          onChangeText={(val) => setOtp(val.replace(/\D/g, ''))}
+                          textAlign="center"
+                          autoFocus={true}
+                          returnKeyType="done"
+                          onSubmitEditing={handleVerifyOTP}
+                        />
+
+                        {otpAttemptsRemaining !== null && (
+                          <Text style={styles.attemptsText}>
+                            {otpAttemptsRemaining} attempt(s) remaining
+                          </Text>
+                        )}
+
+                        <TouchableOpacity
+                          style={[styles.button, loading && styles.buttonDisabled]}
+                          onPress={handleVerifyOTP}
+                          disabled={loading}
+                        >
+                          <LinearGradient colors={['#87CEEB', '#6BB6FF']} style={styles.buttonGradient}>
+                            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Verify OTP</Text>}
+                          </LinearGradient>
+                        </TouchableOpacity>
+
+                        <View style={styles.otpFooter}>
+                          <TouchableOpacity
+                            onPress={() => {
+                              setStep('phone');
+                              setOtp('');
+                              setError('');
+                            }}
+                            disabled={loading}
+                          >
+                            <Text style={[styles.footerLink, loading && styles.disabledLink]}>Change Phone Number</Text>
+                          </TouchableOpacity>
+
+                          <View>
+                            {resendCountdown > 0 ? (
+                              <Text style={styles.resendText}>
+                                Resend in <Text style={styles.countdownText}>{resendCountdown}s</Text>
+                              </Text>
+                            ) : (
+                              <TouchableOpacity onPress={handleResendOTP} disabled={loading}>
+                                <Text style={[styles.footerLink, loading && styles.disabledLink]}>Resend OTP</Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        </View>
+                      </>
                     )}
                   </View>
+
+                  {error ? (
+                    <View style={styles.errorContainer}>
+                      <Text style={styles.errorText}>{error}</Text>
+                    </View>
+                  ) : null}
+
+                  {/* Process Step Timeline */}
+                  {step === 'phone' && (
+                    <>
+                      <View style={styles.processContainer}>
+                        <View style={styles.processLine} />
+                        <View style={styles.processItem}>
+                          <View style={styles.processIconContainer}>
+                            <UserCircle size={24} color={Colors.primary.main} />
+                          </View>
+                          <Text style={styles.processText}>Set up profile</Text>
+                        </View>
+
+                        <ChevronRight size={16} color="#CED4DA" style={styles.processArrow} />
+
+                        <View style={styles.processItem}>
+                          <View style={styles.processIconContainer}>
+                            <ShieldCheck size={24} color="#4CAF50" />
+                          </View>
+                          <Text style={styles.processText}>Get verified</Text>
+                        </View>
+
+                        <ChevronRight size={16} color="#CED4DA" style={styles.processArrow} />
+
+                        <View style={styles.processItem}>
+                          <View style={styles.processIconContainer}>
+                            <Zap size={24} color="#FFD700" />
+                          </View>
+                          <Text style={styles.processText}>Receive leads</Text>
+                        </View>
+                      </View>
+
+                      <Text style={styles.tagline}>Grow your event business. Get genuine leads.</Text>
+
+                      {/* Social Proof / Trust Banner */}
+                      <View style={styles.trustBanner}>
+                        <View style={styles.trustIconCircle}>
+                          <Users size={14} color="#FFF" />
+                        </View>
+                        <Text style={styles.trustText}>Building India's Largest Event Vendor Network</Text>
+                      </View>
+                    </>
+                  )}
                 </View>
-              </>
-            )}
 
-            {error ? (
-              <View style={styles.errorContainer}>
-                <Text style={styles.errorText}>{error}</Text>
+
               </View>
-            ) : null}
-
+            </ScrollView>
           </View>
-        </ScrollView>
+        </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
-    </LinearGradient>
+
+      {/* Bottom anchored support links */}
+      <SafeAreaView edges={['bottom']} style={styles.safeSupportContainer}>
+        <View style={styles.supportContainer}>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => {/* Add support link logic */ }}
+            style={styles.supportButton}
+          >
+            <HelpCircle size={16} color={Colors.primary.main} />
+            <Text style={styles.supportText}>
+              Need help? <Text style={styles.supportLink}>Contact Support</Text>
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    </LinearGradient >
   );
 }
 
@@ -300,19 +399,118 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scrollContent: { flexGrow: 1 },
-  content: { flex: 1, justifyContent: 'center', padding: Spacing.xxxl },
+  content: {
+    flex: 1,
+    paddingHorizontal: Spacing.xxxl,
+    paddingTop: CONTENT_TOP_PADDING,
+  },
+  innerContent: {
+    flex: 1,
+    width: '100%',
+  },
 
-  headerContainer: { alignItems: 'center', marginBottom: Spacing.xl },
-  titleSmall: { fontSize: 22, fontWeight: '600' },
+  decorCircle1: {
+    position: 'absolute',
+    top: -50,
+    right: -50,
+    width: 250,
+    height: 250,
+    borderRadius: 125,
+    backgroundColor: '#d9a966',
+    opacity: 0.3,
+  },
+  decorCircle2: {
+    position: 'absolute',
+    bottom: -80,
+    left: -80,
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundColor: '#9fbfda',
+    opacity: 0.4,
+  },
+  decorCircle3: {
+    position: 'absolute',
+    top: '25%',
+    left: -40,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#bfa3cf',
+    opacity: 0.3,
+  },
+  decorCircle4: {
+    position: 'absolute',
+    bottom: '20%',
+    right: -30,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#a7cbb6',
+    opacity: 0.3,
+  },
+
+  headerContainer: { alignItems: 'center', marginBottom: Spacing.md },
+  titleSmall: {
+    fontSize: 18,
+    fontWeight: '500',
+    color: Colors.text.secondary,
+    marginBottom: Spacing.xs
+  },
+  tagline: {
+    marginTop: Spacing.xl,
+    fontSize: 15,
+    color: Colors.text.secondary,
+    fontWeight: '600',
+    textAlign: 'center',
+    paddingHorizontal: Spacing.md,
+  },
+
+  formCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 24,
+    padding: Spacing.xl,
+    ...Shadows.medium,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
+  },
+
+  formTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.text.primary,
+    marginBottom: Spacing.lg,
+    textAlign: 'center',
+  },
+
+  stepIndicatorContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: Spacing.lg,
+    gap: 8,
+  },
+  stepDot: {
+    height: 4,
+    width: 24,
+    borderRadius: 2,
+  },
+  stepDotActive: {
+    backgroundColor: Colors.primary.main,
+  },
+  stepDotInactive: {
+    backgroundColor: '#E9ECEF',
+  },
 
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#F8F9FA',
     borderWidth: 1,
+    borderColor: '#E9ECEF',
     borderRadius: 12,
-    paddingHorizontal: 12,
+    paddingHorizontal: 15,
     marginBottom: Spacing.lg,
+    ...Shadows.small,
   },
 
   input: {
@@ -416,6 +614,100 @@ const styles = StyleSheet.create({
 
   buttonDisabled: {
     opacity: 0.6,
+  },
+
+  processContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: Spacing.xxl,
+    paddingHorizontal: Spacing.sm,
+    position: 'relative',
+  },
+  processLine: {
+    position: 'absolute',
+    top: 12,
+    left: '15%',
+    right: '15%',
+    height: 1,
+    backgroundColor: '#E9ECEF',
+    zIndex: -1,
+  },
+  processItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  processIconContainer: {
+    backgroundColor: '#FDFBF7',
+    paddingHorizontal: 8,
+  },
+  processText: {
+    fontSize: 10,
+    color: Colors.text.secondary,
+    marginTop: 8,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  processArrow: {
+    marginTop: -20,
+    marginHorizontal: -8,
+  },
+
+  trustBanner: {
+    marginTop: Spacing.xxl,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
+    alignSelf: 'center',
+    ...Shadows.small,
+  },
+  trustIconCircle: {
+    backgroundColor: Colors.primary.main,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  trustText: {
+    fontSize: 13,
+    color: Colors.text.primary,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+
+  safeSupportContainer: {
+    backgroundColor: 'transparent',
+  },
+  supportContainer: {
+    width: '100%',
+    paddingBottom: Platform.OS === 'ios' ? 10 : 20,
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  supportButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+  },
+  supportText: {
+    marginLeft: 8,
+    fontSize: 13,
+    color: Colors.text.secondary,
+  },
+  supportLink: {
+    color: Colors.primary.main,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
 
   errorContainer: {
