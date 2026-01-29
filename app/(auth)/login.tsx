@@ -21,6 +21,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '../../contexts/AuthContext';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
 import ExternalLogo from '../../components/ExternalLogo';
+import ScreenBackground from '../../components/ScreenBackground';
 import { sendOTP, resendOTP } from '../../lib/otpAuthApi';
 
 
@@ -190,13 +191,7 @@ export default function LoginScreen() {
   /* -------------------- UI -------------------- */
 
   return (
-    <LinearGradient colors={[Colors.background.primary, '#FDFBF7']} style={styles.container}>
-      {/* Decorative Background Elements */}
-      <View style={styles.decorCircle1} />
-      <View style={styles.decorCircle2} />
-      <View style={styles.decorCircle3} />
-      <View style={styles.decorCircle4} />
-
+    <ScreenBackground style={styles.container}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
@@ -391,7 +386,7 @@ export default function LoginScreen() {
           </TouchableOpacity>
         </View>
       </SafeAreaView>
-    </LinearGradient >
+    </ScreenBackground >
   );
 }
 
@@ -407,47 +402,6 @@ const styles = StyleSheet.create({
   innerContent: {
     flex: 1,
     width: '100%',
-  },
-
-  decorCircle1: {
-    position: 'absolute',
-    top: -50,
-    right: -50,
-    width: 250,
-    height: 250,
-    borderRadius: 125,
-    backgroundColor: '#d9a966',
-    opacity: 0.3,
-  },
-  decorCircle2: {
-    position: 'absolute',
-    bottom: -80,
-    left: -80,
-    width: 300,
-    height: 300,
-    borderRadius: 150,
-    backgroundColor: '#9fbfda',
-    opacity: 0.4,
-  },
-  decorCircle3: {
-    position: 'absolute',
-    top: '25%',
-    left: -40,
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#bfa3cf',
-    opacity: 0.3,
-  },
-  decorCircle4: {
-    position: 'absolute',
-    bottom: '20%',
-    right: -30,
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#a7cbb6',
-    opacity: 0.3,
   },
 
   headerContainer: { alignItems: 'center', marginBottom: Spacing.md },

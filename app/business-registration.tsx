@@ -24,12 +24,11 @@ import LocationCoverageStep, { LocationCoverageStepRef } from '../components/reg
 import VerificationStep, { VerificationStepRef } from '../components/registration/VerificationStep';
 import PortfolioSocialStep from '../components/registration/PortfolioSocialStep';
 import { pickMultipleImages, uploadMultipleBusinessImages, uploadMultipleVerificationDocuments, UploadDocumentData, uploadBusinessImage, setCoverImage } from '../lib/businessApi';
-import { INDIAN_STATES } from '../constants/indianStates';
-import { TextInput } from '../components/TextInput';
 import Dropdown from '../components/Dropdown';
 import Logo from '../components/Logo';
 import { validateEmail, getEmailError } from '../lib/validation';
 import { createPackage } from '../lib/packageApi';
+import ScreenBackground from '../components/ScreenBackground';
 
 interface BusinessData {
   businessName: string;
@@ -741,105 +740,104 @@ export default function BusinessRegistrationScreen() {
   ];
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-    >
-      <View style={styles.header}>
-        <View style={styles.headerTop}>
-          <Logo size={48} style={styles.headerLogo} />
-          <View style={styles.headerTextContainer}>
-            <Text style={styles.title}>{steps[currentPage].title}</Text>
-            <Text style={styles.subtitle}>{steps[currentPage].subtitle}</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.cancelButton}
-            onPress={handleCancel}
-            activeOpacity={0.7}
-            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-            accessibilityLabel="Close registration"
-            accessibilityRole="button"
-            disabled={submitting}
-          >
-            <X size={24} color="#666" strokeWidth={2.5} />
-          </TouchableOpacity>
-        </View>
-        <View style={styles.progressContainer}>
-          {Array.from({ length: totalSteps }).map((_, index) => (
-            <View
-              key={index}
-              style={[
-                styles.progressDot,
-                index <= currentPage && styles.progressDotActive,
-              ]}
-            />
-          ))}
-        </View>
-      </View>
-
-      <ScrollView
-        ref={scrollViewRef}
-        style={styles.pager}
-        contentContainerStyle={styles.pagerContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+    <ScreenBackground style={{ flex: 1 }}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
-        {steps[currentPage].component}
-      </ScrollView>
-
-      <View style={[styles.footer, { paddingBottom: 16 + insets.bottom }]}>
-        {currentPage > 0 && (
-          <TouchableOpacity
-            style={styles.secondaryButton}
-            onPress={handlePrevious}
-          >
-            <ChevronLeft size={20} color="#007AFF" />
-            <Text style={styles.secondaryButtonText}>Previous</Text>
-          </TouchableOpacity>
-        )}
-
-        {currentPage < totalSteps - 1 ? (
-          areMandatoryFieldsFilled() ? (
-            <TouchableOpacity style={styles.primaryButton} onPress={handleNext}>
-              <Text style={styles.primaryButtonText}>Next Step</Text>
-              <ChevronRight size={20} color="#fff" />
+        <View style={styles.header}>
+          <View style={styles.headerTop}>
+            <Logo size={48} style={styles.headerLogo} />
+            <View style={styles.headerTextContainer}>
+              <Text style={styles.title}>{steps[currentPage].title}</Text>
+              <Text style={styles.subtitle}>{steps[currentPage].subtitle}</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={handleCancel}
+              activeOpacity={0.7}
+              hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+              accessibilityLabel="Close registration"
+              accessibilityRole="button"
+              disabled={submitting}
+            >
+              <X size={24} color="#666" strokeWidth={2.5} />
             </TouchableOpacity>
-          ) : (
-            <TouchableOpacity style={styles.nextFieldButton} onPress={handleNextField}>
-              <Text style={styles.nextFieldButtonText}>Continue</Text>
-              <ChevronRight size={20} color="#007AFF" />
+          </View>
+          <View style={styles.progressContainer}>
+            {Array.from({ length: totalSteps }).map((_, index) => (
+              <View
+                key={index}
+                style={[
+                  styles.progressDot,
+                  index <= currentPage && styles.progressDotActive,
+                ]}
+              />
+            ))}
+          </View>
+        </View>
+
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.pager}
+          contentContainerStyle={styles.pagerContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {steps[currentPage].component}
+        </ScrollView>
+
+        <View style={[styles.footer, { paddingBottom: 16 + insets.bottom }]}>
+          {currentPage > 0 && (
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={handlePrevious}
+            >
+              <ChevronLeft size={20} color="#007AFF" />
+              <Text style={styles.secondaryButtonText}>Previous</Text>
             </TouchableOpacity>
-          )
-        ) : (
-          <TouchableOpacity
-            style={[styles.primaryButton, submitting && styles.buttonDisabled]}
-            onPress={handleSubmit}
-            disabled={submitting}
-          >
-            {submitting ? (
-              <ActivityIndicator color="#fff" />
+          )}
+
+          {currentPage < totalSteps - 1 ? (
+            areMandatoryFieldsFilled() ? (
+              <TouchableOpacity style={styles.primaryButton} onPress={handleNext}>
+                <Text style={styles.primaryButtonText}>Next Step</Text>
+                <ChevronRight size={20} color="#fff" />
+              </TouchableOpacity>
             ) : (
-              <Text style={styles.primaryButtonText}>Submit Registration</Text>
-            )}
-          </TouchableOpacity>
-        )}
-      </View>
-    </KeyboardAvoidingView>
+              <TouchableOpacity style={styles.nextFieldButton} onPress={handleNextField}>
+                <Text style={styles.nextFieldButtonText}>Continue</Text>
+                <ChevronRight size={20} color="#007AFF" />
+              </TouchableOpacity>
+            )
+          ) : (
+            <TouchableOpacity
+              style={[styles.primaryButton, submitting && styles.buttonDisabled]}
+              onPress={handleSubmit}
+              disabled={submitting}
+            >
+              {submitting ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.primaryButtonText}>Submit Registration</Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
+      </KeyboardAvoidingView>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
   },
   header: {
     paddingHorizontal: 24,
     paddingTop: 60,
     paddingBottom: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
   },
   headerTop: {
     flexDirection: 'row',
@@ -904,8 +902,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingVertical: 16,
     paddingHorizontal: 24,
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: 12,

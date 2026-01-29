@@ -24,6 +24,7 @@ import {
 import Dropdown from '../components/Dropdown';
 import Logo from '../components/Logo';
 import { validateEmail, getEmailError } from '../lib/validation';
+import ScreenBackground from '../components/ScreenBackground';
 
 export default function LeadFormScreen() {
   const router = useRouter();
@@ -323,7 +324,7 @@ export default function LeadFormScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <ScreenBackground style={{ flex: 1 }}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <ArrowLeft size={24} color="#007AFF" strokeWidth={2} />
@@ -644,7 +645,7 @@ export default function LeadFormScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </View>
+    </ScreenBackground>
   );
 
 }
@@ -652,7 +653,6 @@ export default function LeadFormScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
   loadingContainer: {
     flex: 1,
@@ -664,12 +664,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#fff',
     paddingHorizontal: 20,
     paddingTop: 60,
     paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
   },
   backBtn: {
     padding: 4,

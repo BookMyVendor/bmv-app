@@ -29,6 +29,7 @@ import Logo from '../../components/Logo';
 import { sendOTP, resendOTP } from '../../lib/otpAuthApi';
 import { confirmAccountDeletion } from '../../lib/accountDeletionApi';
 import { getAccessToken } from '../../lib/tokenStorage';
+import ScreenBackground from '../../components/ScreenBackground';
 
 const profileSchema = Yup.object().shape({
   firstName: Yup.string().required('First name is required'),
@@ -553,7 +554,7 @@ export default function ProfileScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <ScreenBackground style={styles.container}>
       <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
         <View style={styles.headerLeft}>
           <Logo size={38} style={styles.headerLogo} />
@@ -802,14 +803,13 @@ export default function ProfileScreen() {
           </Formik>
         </ScrollView>
       </KeyboardAvoidingView>
-    </View>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: 'rgba(138, 151, 209, 0.02)',
   },
   header: {
     flexDirection: 'row',

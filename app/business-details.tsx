@@ -68,6 +68,7 @@ import Logo from '../components/Logo';
 import Dropdown from '../components/Dropdown';
 import PackageList from '../components/packages/PackageList';
 import { Colors } from '../constants/theme';
+import ScreenBackground from '../components/ScreenBackground';
 
 const EXPERIENCE_OPTIONS = [
   'Less than 1 year',
@@ -1985,7 +1986,7 @@ export default function BusinessDetailsScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <ScreenBackground style={styles.container}>
       <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
         <TouchableOpacity
           style={styles.backBtn}
@@ -3209,14 +3210,13 @@ export default function BusinessDetailsScreen() {
           )}
         </View>
       </Modal>
-    </View>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
   loadingContainer: {
     flex: 1,
@@ -3231,10 +3231,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-start',
-    backgroundColor: '#fff',
     paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
     zIndex: 10,
   },
   backBtn: {

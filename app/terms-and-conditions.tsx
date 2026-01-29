@@ -14,6 +14,7 @@ import { Check } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { supabaseCore } from '../lib/supabase';
 import Logo from '../components/Logo';
+import ScreenBackground from '../components/ScreenBackground';
 
 const TERMS_ACCEPTANCE_KEY = 'vendor_terms_accepted';
 
@@ -89,7 +90,7 @@ export default function TermsAndConditionsScreen() {
 
 
   return (
-    <View style={styles.container}>
+    <ScreenBackground style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
         <View style={styles.headerTitleRow}>
           <Logo size={40} style={styles.logo} />
@@ -250,20 +251,17 @@ export default function TermsAndConditionsScreen() {
           )}
         </TouchableOpacity>
       </View>
-    </View>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
   },
   header: {
     paddingHorizontal: 24,
     paddingBottom: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
   },
   headerTitleRow: {
     flexDirection: 'row',
@@ -361,9 +359,6 @@ const styles = StyleSheet.create({
   },
   footer: {
     padding: 24,
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    backgroundColor: '#fff',
   },
   acceptButton: {
     backgroundColor: '#007AFF',
