@@ -193,6 +193,7 @@ export default function BusinessDetailsScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [eventSearchQuery, setEventSearchQuery] = useState('');
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [isRootDropdownOpen, setIsRootDropdownOpen] = useState(false);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [isPricingUnitDropdownOpen, setIsPricingUnitDropdownOpen] = useState(false);
   const [loadingCategories, setLoadingCategories] = useState(false);
@@ -335,7 +336,7 @@ export default function BusinessDetailsScreen() {
       }
 
       if (defaultPkg) {
-        setDefaultPackageId(defaultPkg.id);
+        setDefaultPackageId(defaultPkg.id ?? null);
         setEditData((prev: any) => ({
           ...prev,
           base_price: defaultPkg.base_price,
@@ -637,13 +638,33 @@ export default function BusinessDetailsScreen() {
     return filterCategories(categoryTree, searchQuery);
   }, [categoryTree, searchQuery]);
 
-  // Handle root category selection
+  // Root categories for dropdown (top-level nodes from tree)
+  const rootCategoriesForDropdown = React.useMemo(() => {
+    return categoryTree;
+  }, [categoryTree]);
+
+  // Subtree for selected root only (for sub-categories modal)
+  const subtreeForSelectedRoot = React.useMemo(() => {
+    if (!selectedRootCategoryId) return null;
+    return categoryTree.find((n: any) => n.id === selectedRootCategoryId) || null;
+  }, [categoryTree, selectedRootCategoryId]);
+
+  // Filtered subtree children for modal (search scoped to selected root)
+  const filteredSubtreeChildren = React.useMemo(() => {
+    if (!subtreeForSelectedRoot) return [];
+    const filtered = filterCategories([subtreeForSelectedRoot], searchQuery);
+    return filtered[0] ? filtered[0].children : [];
+  }, [subtreeForSelectedRoot, searchQuery]);
+
+  // Handle root category selection (from dropdown)
   const handleRootSelection = (categoryId: string) => {
     setSelectedRootCategoryId(categoryId);
-    // Clear all previous selections when root changes
     setSelectedCategoryIds([]);
-    // Expand the selected root to show children
     setExpandedCategoryIds(new Set([categoryId]));
+    if (isCategoryModalOpen) {
+      setIsCategoryModalOpen(false);
+      setTempSelectedCategoryIds([]);
+    }
   };
 
   // Handle child category selection
@@ -788,26 +809,18 @@ export default function BusinessDetailsScreen() {
     });
   };
 
-  // Render category tree for modal (uses temp state)
-  const renderCategoryTreeForModal = (nodes: any[], level: number = 0): React.ReactNode => {
+  // Render sub-category tree for modal (checkboxes only, temp state; used under selected root)
+  const renderSubCategoryTreeForModal = (nodes: any[], level: number = 0): React.ReactNode => {
     return nodes.map((node) => {
-      const isRoot = node.category_level === 1 || node.parent_category_id === null;
       const isSelected = tempSelectedCategoryIds.includes(node.id);
       const isExpanded = expandedCategoryIds.has(node.id);
       const hasChildren = node.children.length > 0;
-      const isRootSelected = tempSelectedRootCategoryId === node.id;
 
       return (
         <View key={node.id} style={styles.categoryItem}>
           <TouchableOpacity
             style={[styles.categoryRow, { paddingLeft: level * 20 + 12 }]}
-            onPress={() => {
-              if (isRoot) {
-                handleTempRootSelection(node.id);
-              } else {
-                toggleTempCategorySelection(node.id);
-              }
-            }}
+            onPress={() => toggleTempCategorySelection(node.id)}
             activeOpacity={0.7}
           >
             {hasChildren && (
@@ -827,42 +840,25 @@ export default function BusinessDetailsScreen() {
             )}
             {!hasChildren && <View style={styles.expandButton} />}
 
-            {isRoot ? (
-              <View style={styles.radioButton}>
-                {isRootSelected ? (
-                  <View style={styles.radioButtonSelected}>
-                    <View style={styles.radioButtonInner} />
-                  </View>
-                ) : (
-                  <View style={styles.radioButtonOuter} />
-                )}
-              </View>
-            ) : (
-              <View style={styles.checkbox}>
-                {isSelected ? (
-                  <View style={styles.checkboxSelected}>
-                    <Check size={14} color="#fff" strokeWidth={3} />
-                  </View>
-                ) : (
-                  <View style={styles.checkboxUnselected} />
-                )}
-              </View>
-            )}
+            <View style={styles.checkbox}>
+              {isSelected ? (
+                <View style={styles.checkboxSelected}>
+                  <Check size={14} color="#fff" strokeWidth={3} />
+                </View>
+              ) : (
+                <View style={styles.checkboxUnselected} />
+              )}
+            </View>
 
             {node.icon && <Text style={styles.categoryIcon}>{node.icon}</Text>}
-            <Text
-              style={[
-                styles.categoryName,
-                (isRootSelected || isSelected) && styles.categoryNameSelected,
-              ]}
-            >
+            <Text style={[styles.categoryName, isSelected && styles.categoryNameSelected]}>
               {node.name}
             </Text>
           </TouchableOpacity>
 
           {hasChildren && isExpanded && (
             <View style={styles.childrenContainer}>
-              {renderCategoryTreeForModal(node.children, level + 1)}
+              {renderSubCategoryTreeForModal(node.children, level + 1)}
             </View>
           )}
         </View>
@@ -886,15 +882,6 @@ export default function BusinessDetailsScreen() {
   }, [selectedCategoryIds, allBusinessCategories]);
 
   // Get display text for dropdown
-  const getDropdownDisplayText = (): string => {
-    if (selectedCategoriesWithPaths.length === 0) {
-      return 'Select service category';
-    }
-    if (selectedCategoriesWithPaths.length === 1) {
-      return selectedCategoriesWithPaths[0].path;
-    }
-    return `${selectedCategoriesWithPaths.length} sub-categories selected`;
-  };
 
   // Determine applicable pricing units based on selected service category
   const pricingUnitOptions = React.useMemo(() => {
@@ -1099,23 +1086,19 @@ export default function BusinessDetailsScreen() {
     });
   };
 
-  // Modal handlers for category selection
+  // Modal handlers for sub-categories only (root is chosen via dropdown)
   const handleCategoryModalOpen = () => {
-    // Copy current selections to temp state when modal opens
-    setTempSelectedRootCategoryId(selectedRootCategoryId);
+    if (!selectedRootCategoryId) return;
     setTempSelectedCategoryIds([...selectedCategoryIds]);
     setIsCategoryModalOpen(true);
   };
 
   const handleCategoryModalClose = () => {
-    // Discard temp changes when X is clicked
     setIsCategoryModalOpen(false);
-    // Reset search
     setSearchQuery('');
   };
 
   const handleCategoryModalDone = () => {
-    // Validate: at least one sub-category (child) must be selected
     const hasSubCategory = tempSelectedCategoryIds.some(id => {
       const cat = allBusinessCategories.find(c => c.id === id);
       return cat && cat.parent_category_id !== null;
@@ -1126,48 +1109,39 @@ export default function BusinessDetailsScreen() {
       return;
     }
 
-    // Commit temp selections to actual state
-    setSelectedRootCategoryId(tempSelectedRootCategoryId);
     setSelectedCategoryIds([...tempSelectedCategoryIds]);
     setIsCategoryModalOpen(false);
-    // Reset search
     setSearchQuery('');
-  };
-
-  // Temp handlers for category selection in modal
-  const handleTempRootSelection = (categoryId: string) => {
-    setTempSelectedRootCategoryId(categoryId);
-    // Clear all previous selections when root changes
-    setTempSelectedCategoryIds([]);
-    // Expand the selected root to show children
-    setExpandedCategoryIds(new Set([categoryId]));
   };
 
   const toggleTempCategorySelection = (categoryId: string) => {
     setTempSelectedCategoryIds((prev) => {
       if (prev.includes(categoryId)) {
-        // Collapse when deselecting
         setExpandedCategoryIds((expanded) => {
-          const newExpanded = new Set(expanded);
-          if (newExpanded.has(categoryId)) {
-            newExpanded.delete(categoryId);
-          }
-          return newExpanded;
+          const next = new Set(expanded);
+          next.delete(categoryId);
+          return next;
         });
         return prev.filter((id) => id !== categoryId);
-      } else {
-        // Find the category and expand it if it has children
-        const category = allBusinessCategories.find((c) => c.id === categoryId);
-        if (category) {
-          const hasChildren = allBusinessCategories.some(
-            (c) => c.parent_category_id === categoryId
-          );
-          if (hasChildren) {
-            setExpandedCategoryIds((expanded) => new Set([...expanded, categoryId]));
-          }
-        }
-        return [...prev, categoryId];
       }
+      const category = allBusinessCategories.find((c) => c.id === categoryId);
+      if (category) {
+        const parentChain: string[] = [];
+        let currentParentId: string | null = category.parent_category_id;
+        while (currentParentId) {
+          parentChain.push(currentParentId);
+          const parent = allBusinessCategories.find((c) => c.id === currentParentId);
+          currentParentId = parent?.parent_category_id || null;
+        }
+        if (parentChain.length > 0) {
+          setExpandedCategoryIds((expanded) => new Set([...expanded, ...parentChain]));
+        }
+        const hasChildren = allBusinessCategories.some((c) => c.parent_category_id === categoryId);
+        if (hasChildren) {
+          setExpandedCategoryIds((expanded) => new Set([...expanded, categoryId]));
+        }
+      }
+      return [...prev, categoryId];
     });
   };
 
@@ -1780,7 +1754,7 @@ export default function BusinessDetailsScreen() {
             is_active: true,
             sort_order: 0
           });
-          if (newPkg) setDefaultPackageId(newPkg.id);
+          if (newPkg) setDefaultPackageId(newPkg.id ?? null);
         }
       }
 
@@ -2387,33 +2361,60 @@ export default function BusinessDetailsScreen() {
               <Text style={styles.editSectionTitle}>Services & Experience</Text>
 
               <View style={styles.editField}>
-                <Text style={styles.editLabel}>Service Category *</Text>
+                <Text style={styles.editLabel}>Service Category (root) *</Text>
+                <Dropdown
+                  options={rootCategoriesForDropdown.map((n: any) => ({
+                    label: n.icon ? `${n.icon} ${n.name}` : n.name,
+                    value: n.id,
+                  }))}
+                  value={selectedRootCategoryId || ''}
+                  placeholder="Select a category"
+                  onChange={(value: string) => handleRootSelection(value)}
+                  open={isRootDropdownOpen}
+                  onOpenChange={setIsRootDropdownOpen}
+                />
+              </View>
 
-                {/* Dropdown Trigger */}
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>Sub-categories *</Text>
                 <TouchableOpacity
-                  style={styles.dropdownTrigger}
-                  onPress={handleCategoryModalOpen}
+                  style={[
+                    styles.dropdownTrigger,
+                    !selectedRootCategoryId && styles.dropdownTriggerDisabled,
+                  ]}
+                  onPress={() => selectedRootCategoryId && handleCategoryModalOpen()}
                   activeOpacity={0.7}
+                  disabled={!selectedRootCategoryId}
                 >
-                  <Text style={[styles.dropdownText, !selectedRootCategoryId && styles.placeholder]}>
-                    {getDropdownDisplayText()}
+                  <Text
+                    style={[
+                      styles.dropdownText,
+                      !selectedRootCategoryId && styles.placeholder,
+                      selectedRootCategoryId && selectedCategoriesWithPaths.length === 0 && styles.placeholder,
+                    ]}
+                  >
+                    {!selectedRootCategoryId
+                      ? 'Select a category first'
+                      : selectedCategoriesWithPaths.length === 0
+                        ? 'Select sub-categories'
+                        : selectedCategoriesWithPaths.length === 1
+                          ? selectedCategoriesWithPaths[0].path
+                          : `${selectedCategoriesWithPaths.length} sub-categories selected`}
                   </Text>
-                  <ChevronDown size={20} color="#666" />
+                  <ChevronDown size={20} color={selectedRootCategoryId ? '#666' : '#ccc'} />
                 </TouchableOpacity>
 
-                {/* Selected Categories Display */}
                 {selectedCategoriesWithPaths.length > 0 && (
                   <View style={styles.selectedContainer}>
                     <Text style={styles.selectedLabel}>
-                      Selected Categories ({selectedCategoriesWithPaths.length}):
+                      Selected ({selectedCategoriesWithPaths.length}):
                     </Text>
                     {selectedCategoriesWithPaths.map((item) => (
                       <View key={item.id} style={styles.selectedChip}>
                         <Text style={styles.selectedChipText}>{item.path}</Text>
                         <TouchableOpacity
                           onPress={() => {
-                            const totalSelected = selectedCategoryIds.length + (selectedRootCategoryId ? 1 : 0);
-                            if (totalSelected <= 1) {
+                            if (selectedCategoryIds.length <= 1) {
                               Alert.alert('Validation Error', 'At least one service category must be selected.');
                               return;
                             }
@@ -2428,7 +2429,6 @@ export default function BusinessDetailsScreen() {
                   </View>
                 )}
 
-                {/* Category Selection Modal */}
                 <Modal
                   visible={isCategoryModalOpen}
                   transparent
@@ -2444,7 +2444,11 @@ export default function BusinessDetailsScreen() {
                       onPress={(e) => e.stopPropagation()}
                     >
                       <View style={styles.categoryModalHeader}>
-                        <Text style={styles.categoryModalTitle}>Select Service Category</Text>
+                        <Text style={styles.categoryModalTitle}>
+                          {subtreeForSelectedRoot
+                            ? `Sub-categories under ${subtreeForSelectedRoot.name}`
+                            : 'Select sub-categories'}
+                        </Text>
                         <TouchableOpacity
                           onPress={handleCategoryModalClose}
                           style={styles.closeButton}
@@ -2453,25 +2457,27 @@ export default function BusinessDetailsScreen() {
                         </TouchableOpacity>
                       </View>
 
-                      {/* Search Input */}
                       <TextInput
                         style={styles.modalSearchInput}
-                        placeholder="Search vendor categories..."
+                        placeholder="Search sub-categories..."
                         placeholderTextColor="#999"
                         value={searchQuery}
                         onChangeText={setSearchQuery}
                       />
 
-                      {/* Category Tree */}
                       <ScrollView
                         style={styles.modalCategoryTree}
-                        nestedScrollEnabled={true}
-                        showsVerticalScrollIndicator={true}
+                        nestedScrollEnabled
+                        showsVerticalScrollIndicator
                       >
-                        {filteredTree.length === 0 ? (
-                          <Text style={styles.emptyText}>No categories found</Text>
+                        {filteredSubtreeChildren.length === 0 ? (
+                          <Text style={styles.emptyText}>
+                            {subtreeForSelectedRoot?.children?.length === 0
+                              ? 'No sub-categories'
+                              : 'No matching sub-categories'}
+                          </Text>
                         ) : (
-                          renderCategoryTreeForModal(filteredTree)
+                          renderSubCategoryTreeForModal(filteredSubtreeChildren)
                         )}
                       </ScrollView>
 
@@ -3796,6 +3802,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     marginBottom: 16,
+  },
+  dropdownTriggerDisabled: {
+    backgroundColor: '#f0f0f0',
+    borderColor: '#e8e8e8',
+    opacity: 0.9,
   },
   dropdownText: {
     fontSize: 16,
