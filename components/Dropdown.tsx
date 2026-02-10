@@ -22,6 +22,7 @@ interface DropdownProps {
   onChange?: (value: string) => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  disabled?: boolean;
 }
 
 export default function Dropdown({
@@ -34,11 +35,13 @@ export default function Dropdown({
   onChange,
   open: controlledOpen,
   onOpenChange,
+  disabled = false,
 }: DropdownProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
-  
+
   const setIsOpen = (open: boolean) => {
+    if (disabled) return;
     if (controlledOpen === undefined) {
       setInternalOpen(open);
     }
@@ -77,16 +80,25 @@ export default function Dropdown({
     <View>
       {label && <Text style={styles.label}>{label}</Text>}
       <TouchableOpacity
-        style={[styles.dropdown, error && styles.dropdownError]}
+        style={[
+          styles.dropdown,
+          error && styles.dropdownError,
+          disabled && styles.dropdownDisabled
+        ]}
         onPress={() => setIsOpen(true)}
-        activeOpacity={0.7}
+        activeOpacity={disabled ? 1 : 0.7}
+        disabled={disabled}
       >
-        <Text style={[styles.dropdownText, !value && styles.placeholder]}>
+        <Text style={[
+          styles.dropdownText,
+          !value && styles.placeholder,
+          disabled && styles.textDisabled
+        ]}>
           {displayValue || placeholder}
         </Text>
         <ChevronDown
           size={20}
-          color="#666"
+          color={disabled ? "#ccc" : "#666"}
           style={[styles.chevron, isOpen && styles.chevronOpen]}
         />
       </TouchableOpacity>
@@ -242,5 +254,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: 'bold',
+  },
+  dropdownDisabled: {
+    backgroundColor: '#f5f5f5',
+    borderColor: '#e0e0e0',
+  },
+  textDisabled: {
+    color: '#ccc',
   },
 });

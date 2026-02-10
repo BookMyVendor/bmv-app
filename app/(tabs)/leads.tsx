@@ -25,6 +25,7 @@ import FilterModal from '../../components/FilterModal';
 import { Lead, STATUS_OPTIONS, PRIORITY_OPTIONS } from '../../types/leads';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
 import Logo from '../../components/Logo';
+import ScreenBackground from '../../components/ScreenBackground';
 
 
 const EVENT_TYPES = [
@@ -438,7 +439,7 @@ export default function LeadsScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <ScreenBackground style={styles.container}>
       <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
         <View style={styles.headerLeft}>
           <Logo size={38} style={styles.headerLogo} />
@@ -738,14 +739,13 @@ export default function LeadsScreen() {
           </LinearGradient>
         </TouchableOpacity>
       )}
-    </View>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    // backgroundColor: 'rgba(138, 151, 209, 0.02)',
   },
   header: {
     flexDirection: 'row',

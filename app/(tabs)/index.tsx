@@ -18,6 +18,7 @@ import { STATUS_OPTIONS, LeadStatus } from '../../types/leads';
 import FilterChip from '../../components/FilterChip';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
 import Logo from '../../components/Logo';
+import ScreenBackground from '../../components/ScreenBackground';
 
 interface Business {
   id: string;
@@ -92,12 +93,26 @@ export default function DashboardScreen() {
     try {
       const { data, error } = await supabaseCore
         .from('vendor_businesses')
-        .select('*')
+        .select(`
+          *,
+          vendor_business_category_mappings (
+            categories (
+              name
+            )
+          )
+        `)
         .eq('vendor_id', user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setBusinesses(data || []);
+
+      const formattedBusinesses = (data || []).map((business: any) => ({
+        ...business,
+        business_description: business.description,
+        vendor_service_category: business.vendor_business_category_mappings?.[0]?.categories?.name || 'General',
+      }));
+
+      setBusinesses(formattedBusinesses);
     } catch (error) {
       console.error('Error fetching businesses:', error);
     } finally {
@@ -215,7 +230,7 @@ export default function DashboardScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <ScreenBackground style={styles.container}>
       <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
         <View style={styles.headerLeft}>
           <Logo size={38} style={styles.headerLogo} />
@@ -224,7 +239,7 @@ export default function DashboardScreen() {
       </View>
 
 
-      <ScrollView contentContainerStyle={[styles.content, { backgroundColor: 'rgba(138, 151, 209, 0.02)' }]}>
+      <ScrollView contentContainerStyle={[styles.content]}>
         <View style={styles.statsSection}>
           <Text style={styles.sectionTitle}>Lead Statistics</Text>
 
@@ -415,10 +430,19 @@ export default function DashboardScreen() {
                     }
                   >
                     {business.cover_photo_url ? (
-                      <Image
-                        source={{ uri: business.cover_photo_url }}
-                        style={styles.businessImage}
-                      />
+                      <View style={styles.businessImageContainer}>
+                        <Image
+                          source={{ uri: business.cover_photo_url }}
+                          style={styles.businessImageBackground}
+                          blurRadius={15}
+                          resizeMode="cover"
+                        />
+                        <Image
+                          source={{ uri: business.cover_photo_url }}
+                          style={styles.businessImage}
+                          resizeMode="contain"
+                        />
+                      </View>
                     ) : (
                       <LinearGradient
                         colors={[Colors.secondary.main, Colors.secondary.light]}
@@ -494,14 +518,13 @@ export default function DashboardScreen() {
           </View>
         </View>
       </ScrollView>
-    </View>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background.secondary,
   },
   loadingContainer: {
     flex: 1,
@@ -701,9 +724,23 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
   },
+  businessImageContainer: {
+    width: '100%',
+    height: 160,
+    backgroundColor: '#f0f0f0',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  businessImageBackground: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+    opacity: 0.7,
+  },
   businessImage: {
     width: '100%',
-    height: 140,
+    height: '100%',
+    zIndex: 1,
   },
   businessImagePlaceholder: {
     width: '100%',

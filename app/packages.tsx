@@ -16,6 +16,7 @@ import { getBusinessPackages, togglePackageStatus } from '../lib/packageApi';
 import PackageList from '../components/packages/PackageList';
 import { Colors, Shadows, BorderRadius, Spacing } from '../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ScreenBackground from '../components/ScreenBackground';
 
 export default function PackagesScreen() {
   const router = useRouter();
@@ -105,7 +106,7 @@ export default function PackagesScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <ScreenBackground style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <ArrowLeft size={24} color={Colors.text.primary} />
@@ -137,20 +138,18 @@ export default function PackagesScreen() {
           loading={loading}
         />
       </View>
-    </View>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background.primary,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: Colors.background.primary,
   },
   header: {
     flexDirection: 'row',
@@ -158,10 +157,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,
-    backgroundColor: Colors.neutral.white,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.neutral.lighter,
-    ...Shadows.sm,
   },
   backButton: {
     padding: Spacing.xs,

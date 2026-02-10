@@ -27,6 +27,7 @@ import CategoryFieldsForm from '../components/packages/CategoryFieldsForm';
 import { getTemplatesForCategory, applyTemplate, PackageTemplate } from '../lib/packageTemplates';
 import { Colors, Shadows, BorderRadius, Spacing } from '../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ScreenBackground from '../components/ScreenBackground';
 
 const STEPS = ['Category', 'Template', 'Type', 'Details', 'Pricing', 'Category Fields', 'Services', 'Review'];
 
@@ -555,61 +556,63 @@ export default function PackageFormScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <View style={[styles.header, { paddingTop: insets.top }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <ArrowLeft size={24} color={Colors.text.primary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>
-          {isEditMode ? 'Edit Package' : 'Create Package'}
-        </Text>
-        <View style={styles.headerRight} />
-      </View>
+    <ScreenBackground style={styles.container}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <View style={[styles.header, { paddingTop: insets.top }]}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <ArrowLeft size={24} color={Colors.text.primary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>
+            {isEditMode ? 'Edit Package' : 'Create Package'}
+          </Text>
+          <View style={styles.headerRight} />
+        </View>
 
-      <View style={styles.progressBar}>
-        {STEPS.map((step, index) => (
-          <View
-            key={index}
-            style={[
-              styles.progressStep,
-              index <= currentStep && styles.progressStepActive,
-            ]}
-          />
-        ))}
-      </View>
+        <View style={styles.progressBar}>
+          {STEPS.map((step, index) => (
+            <View
+              key={index}
+              style={[
+                styles.progressStep,
+                index <= currentStep && styles.progressStepActive,
+              ]}
+            />
+          ))}
+        </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {renderStepContent()}
-      </ScrollView>
+        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+          {renderStepContent()}
+        </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom }]}>
-        {currentStep > 0 && (
+        <View style={[styles.footer, { paddingBottom: insets.bottom }]}>
+          {currentStep > 0 && (
+            <TouchableOpacity
+              style={[styles.button, styles.buttonSecondary]}
+              onPress={handlePrevious}
+              disabled={saving}
+            >
+              <Text style={styles.buttonSecondaryText}>Previous</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
-            style={[styles.button, styles.buttonSecondary]}
-            onPress={handlePrevious}
+            style={[styles.button, styles.buttonPrimary, currentStep === 0 && styles.buttonFull]}
+            onPress={currentStep === STEPS.length - 1 ? handleSave : handleNext}
             disabled={saving}
           >
-            <Text style={styles.buttonSecondaryText}>Previous</Text>
+            {saving ? (
+              <ActivityIndicator color={Colors.neutral.white} />
+            ) : (
+              <Text style={styles.buttonPrimaryText}>
+                {currentStep === STEPS.length - 1 ? (isEditMode ? 'Update' : 'Create') : 'Next'}
+              </Text>
+            )}
           </TouchableOpacity>
-        )}
-        <TouchableOpacity
-          style={[styles.button, styles.buttonPrimary, currentStep === 0 && styles.buttonFull]}
-          onPress={currentStep === STEPS.length - 1 ? handleSave : handleNext}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator color={Colors.neutral.white} />
-          ) : (
-            <Text style={styles.buttonPrimaryText}>
-              {currentStep === STEPS.length - 1 ? (isEditMode ? 'Update' : 'Create') : 'Next'}
-            </Text>
-          )}
-        </TouchableOpacity>
-      </View>
-    </KeyboardAvoidingView>
+        </View>
+      </KeyboardAvoidingView>
+    </ScreenBackground>
   );
 }
 
@@ -619,13 +622,11 @@ import { PACKAGE_TYPE_CONFIGS } from '../lib/packageConfig';
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background.primary,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: Colors.background.primary,
   },
   header: {
     flexDirection: 'row',
@@ -633,10 +634,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,
-    backgroundColor: Colors.neutral.white,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.neutral.lighter,
-    ...Shadows.sm,
   },
   backButton: {
     padding: Spacing.xs,

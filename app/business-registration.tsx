@@ -24,11 +24,11 @@ import LocationCoverageStep, { LocationCoverageStepRef } from '../components/reg
 import VerificationStep, { VerificationStepRef } from '../components/registration/VerificationStep';
 import PortfolioSocialStep from '../components/registration/PortfolioSocialStep';
 import { pickMultipleImages, uploadMultipleBusinessImages, uploadMultipleVerificationDocuments, UploadDocumentData, uploadBusinessImage, setCoverImage } from '../lib/businessApi';
-import { INDIAN_STATES } from '../constants/indianStates';
-import { TextInput } from '../components/TextInput';
-import { Dropdown } from '../components/Dropdown';
+import Dropdown from '../components/Dropdown';
 import Logo from '../components/Logo';
 import { validateEmail, getEmailError } from '../lib/validation';
+import { createPackage } from '../lib/packageApi';
+import ScreenBackground from '../components/ScreenBackground';
 
 interface BusinessData {
   businessName: string;
@@ -41,6 +41,8 @@ interface BusinessData {
   selectedEventIds?: string[];
   businessDescription: string;
   yearsOfExperience: string;
+  basePrice: string;
+  pricingUnit: string;
   businessAddress: string;
   city: string;
   state: string;
@@ -163,7 +165,9 @@ export default function BusinessRegistrationScreen() {
       const hasEvents = !!(businessData.selectedEventIds && businessData.selectedEventIds.length > 0);
       const hasDescription = !!(businessData.businessDescription?.trim());
       const hasExperience = !!(businessData.yearsOfExperience?.trim());
-      return hasCategory && hasEvents && hasDescription && hasExperience;
+      const hasBasePrice = !!(businessData.basePrice?.trim());
+      const hasPricingUnit = !!(businessData.pricingUnit?.trim());
+      return hasCategory && hasEvents && hasDescription && hasExperience && hasBasePrice && hasPricingUnit;
     } else if (currentPage === 2) {
       // Location & Coverage step
       const hasAddress = !!(businessData.businessAddress?.trim());
@@ -245,6 +249,12 @@ export default function BusinessRegistrationScreen() {
       }
       if (!businessData.yearsOfExperience || !businessData.yearsOfExperience.trim()) {
         errors.yearsOfExperience = 'Years of experience is required';
+      }
+      if (!businessData.basePrice || !businessData.basePrice.trim()) {
+        errors.basePrice = 'Base price is required';
+      }
+      if (!businessData.pricingUnit || !businessData.pricingUnit.trim()) {
+        errors.pricingUnit = 'Pricing unit is required';
       }
     } else if (currentPage === 2) {
       // Location & Coverage step
@@ -408,6 +418,14 @@ export default function BusinessRegistrationScreen() {
       }
       if (data.yearsOfExperience !== undefined && data.yearsOfExperience.trim() && updatedErrors.yearsOfExperience) {
         delete updatedErrors.yearsOfExperience;
+        hasChanges = true;
+      }
+      if (data.basePrice !== undefined && data.basePrice.trim() && updatedErrors.basePrice) {
+        delete updatedErrors.basePrice;
+        hasChanges = true;
+      }
+      if (data.pricingUnit !== undefined && data.pricingUnit.trim() && updatedErrors.pricingUnit) {
+        delete updatedErrors.pricingUnit;
         hasChanges = true;
       }
       if (data.businessAddress !== undefined && data.businessAddress.trim() && updatedErrors.businessAddress) {
@@ -629,6 +647,26 @@ export default function BusinessRegistrationScreen() {
         }
       }
 
+      // Step 7: Create default package with pricing info
+      if (businessData.basePrice && businessData.pricingUnit) {
+        try {
+          // Use 'Standard Package' as default name
+          await createPackage({
+            business_id: createdBusiness.id,
+            package_name: 'Standard Package',
+            package_type: 'fixed', // Default type, can be updated later
+            base_price: parseFloat(businessData.basePrice),
+            price_unit: businessData.pricingUnit,
+            included_services: [],
+            is_active: true,
+            sort_order: 0,
+          });
+        } catch (pkgError) {
+          console.error('Error creating default package:', pkgError);
+          // Continue execution, don't block success just because package creation failed (though it shouldn't)
+        }
+      }
+
       // Clear saved form data before navigating
       await clearSavedData();
       router.replace('/(tabs)');
@@ -702,105 +740,104 @@ export default function BusinessRegistrationScreen() {
   ];
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-    >
-      <View style={styles.header}>
-        <View style={styles.headerTop}>
-          <Logo size={48} style={styles.headerLogo} />
-          <View style={styles.headerTextContainer}>
-            <Text style={styles.title}>{steps[currentPage].title}</Text>
-            <Text style={styles.subtitle}>{steps[currentPage].subtitle}</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.cancelButton}
-            onPress={handleCancel}
-            activeOpacity={0.7}
-            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-            accessibilityLabel="Close registration"
-            accessibilityRole="button"
-            disabled={submitting}
-          >
-            <X size={24} color="#666" strokeWidth={2.5} />
-          </TouchableOpacity>
-        </View>
-        <View style={styles.progressContainer}>
-          {Array.from({ length: totalSteps }).map((_, index) => (
-            <View
-              key={index}
-              style={[
-                styles.progressDot,
-                index <= currentPage && styles.progressDotActive,
-              ]}
-            />
-          ))}
-        </View>
-      </View>
-
-      <ScrollView
-        ref={scrollViewRef}
-        style={styles.pager}
-        contentContainerStyle={styles.pagerContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+    <ScreenBackground style={{ flex: 1 }}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
-        {steps[currentPage].component}
-      </ScrollView>
-
-      <View style={[styles.footer, { paddingBottom: 16 + insets.bottom }]}>
-        {currentPage > 0 && (
-          <TouchableOpacity
-            style={styles.secondaryButton}
-            onPress={handlePrevious}
-          >
-            <ChevronLeft size={20} color="#007AFF" />
-            <Text style={styles.secondaryButtonText}>Previous</Text>
-          </TouchableOpacity>
-        )}
-
-        {currentPage < totalSteps - 1 ? (
-          areMandatoryFieldsFilled() ? (
-            <TouchableOpacity style={styles.primaryButton} onPress={handleNext}>
-              <Text style={styles.primaryButtonText}>Next Step</Text>
-              <ChevronRight size={20} color="#fff" />
+        <View style={styles.header}>
+          <View style={styles.headerTop}>
+            <Logo size={48} style={styles.headerLogo} />
+            <View style={styles.headerTextContainer}>
+              <Text style={styles.title}>{steps[currentPage].title}</Text>
+              <Text style={styles.subtitle}>{steps[currentPage].subtitle}</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={handleCancel}
+              activeOpacity={0.7}
+              hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+              accessibilityLabel="Close registration"
+              accessibilityRole="button"
+              disabled={submitting}
+            >
+              <X size={24} color="#666" strokeWidth={2.5} />
             </TouchableOpacity>
-          ) : (
-            <TouchableOpacity style={styles.nextFieldButton} onPress={handleNextField}>
-              <Text style={styles.nextFieldButtonText}>Continue</Text>
-              <ChevronRight size={20} color="#007AFF" />
+          </View>
+          <View style={styles.progressContainer}>
+            {Array.from({ length: totalSteps }).map((_, index) => (
+              <View
+                key={index}
+                style={[
+                  styles.progressDot,
+                  index <= currentPage && styles.progressDotActive,
+                ]}
+              />
+            ))}
+          </View>
+        </View>
+
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.pager}
+          contentContainerStyle={styles.pagerContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {steps[currentPage].component}
+        </ScrollView>
+
+        <View style={[styles.footer, { paddingBottom: 16 + insets.bottom }]}>
+          {currentPage > 0 && (
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={handlePrevious}
+            >
+              <ChevronLeft size={20} color="#007AFF" />
+              <Text style={styles.secondaryButtonText}>Previous</Text>
             </TouchableOpacity>
-          )
-        ) : (
-          <TouchableOpacity
-            style={[styles.primaryButton, submitting && styles.buttonDisabled]}
-            onPress={handleSubmit}
-            disabled={submitting}
-          >
-            {submitting ? (
-              <ActivityIndicator color="#fff" />
+          )}
+
+          {currentPage < totalSteps - 1 ? (
+            areMandatoryFieldsFilled() ? (
+              <TouchableOpacity style={styles.primaryButton} onPress={handleNext}>
+                <Text style={styles.primaryButtonText}>Next Step</Text>
+                <ChevronRight size={20} color="#fff" />
+              </TouchableOpacity>
             ) : (
-              <Text style={styles.primaryButtonText}>Submit Registration</Text>
-            )}
-          </TouchableOpacity>
-        )}
-      </View>
-    </KeyboardAvoidingView>
+              <TouchableOpacity style={styles.nextFieldButton} onPress={handleNextField}>
+                <Text style={styles.nextFieldButtonText}>Continue</Text>
+                <ChevronRight size={20} color="#007AFF" />
+              </TouchableOpacity>
+            )
+          ) : (
+            <TouchableOpacity
+              style={[styles.primaryButton, submitting && styles.buttonDisabled]}
+              onPress={handleSubmit}
+              disabled={submitting}
+            >
+              {submitting ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.primaryButtonText}>Submit Registration</Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
+      </KeyboardAvoidingView>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
   },
   header: {
     paddingHorizontal: 24,
     paddingTop: 60,
     paddingBottom: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
   },
   headerTop: {
     flexDirection: 'row',
@@ -865,8 +902,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingVertical: 16,
     paddingHorizontal: 24,
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: 12,

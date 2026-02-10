@@ -18,14 +18,18 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { Camera, LogOut, Save } from 'lucide-react-native';
+import { Camera, LogOut, Save, ShieldAlert, Trash2 } from 'lucide-react-native';
 import { Formik } from 'formik';
 import * as Yup from 'yup';
 import { useAuth } from '../../contexts/AuthContext';
-import { supabaseCore, supabaseCrm } from '../../lib/supabase';
+import { supabaseCore, supabaseCms } from '../../lib/supabase';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
 import { validateEmail } from '../../lib/validation';
 import Logo from '../../components/Logo';
+import { sendOTP, resendOTP } from '../../lib/otpAuthApi';
+import { confirmAccountDeletion } from '../../lib/accountDeletionApi';
+import { getAccessToken } from '../../lib/tokenStorage';
+import ScreenBackground from '../../components/ScreenBackground';
 
 const profileSchema = Yup.object().shape({
   firstName: Yup.string().required('First name is required'),
@@ -38,15 +42,144 @@ const profileSchema = Yup.object().shape({
 });
 
 export default function ProfileScreen() {
-  const { user, profile, signOut, refreshProfile } = useAuth();
+  const { user, profile, signOut, refreshProfile, verifyOTP: authVerifyOTP } = useAuth();
   const insets = useSafeAreaInsets();
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [deletionLoading, setDeletionLoading] = useState(false);
+  const [deletionOtp, setDeletionOtp] = useState('');
+  const [deletionStep, setDeletionStep] = useState<'idle' | 'otp'>('idle');
+  const [deletionError, setDeletionError] = useState('');
+  const [resendCountdown, setResendCountdown] = useState(0);
+  const [infoMessage, setInfoMessage] = useState('');
+  const [showDeletionCard, setShowDeletionCard] = useState(false);
   const router = useRouter();
 
   // Refs for keyboard navigation
   const lastNameRef = useRef<TextInput>(null);
   const emailRef = useRef<TextInput>(null);
+
+  const formattedPhone = () => {
+    const digits = profile?.phone?.replace(/\D/g, '') || '';
+    if (!digits) return '';
+    if (digits.length === 10) return `+91${digits}`;
+    if (digits.startsWith('91')) return `+${digits}`;
+    return `+${digits}`;
+  };
+
+  const handleRequestDeletionOtp = async () => {
+    const phone = formattedPhone();
+    if (!phone) {
+      setDeletionError('Phone number is missing from your profile.');
+      return;
+    }
+
+    setDeletionLoading(true);
+    setDeletionError('');
+    setInfoMessage('');
+    setDeletionOtp('');
+    const { error } = await sendOTP(phone);
+    setDeletionLoading(false);
+
+    if (error) {
+      setDeletionError(error.message || 'Failed to send code.');
+      if (error.retryAfter) setResendCountdown(error.retryAfter);
+      return;
+    }
+
+    setDeletionStep('otp');
+    setResendCountdown(30);
+    setInfoMessage('Enter the code sent to your phone to confirm deletion.');
+  };
+
+  const handleResendDeletionOtp = async () => {
+    if (resendCountdown > 0 || deletionLoading) return;
+    const phone = formattedPhone();
+    if (!phone) return;
+
+    setDeletionLoading(true);
+    setDeletionError('');
+    const { error } = await resendOTP(phone);
+    setDeletionLoading(false);
+
+    if (error) {
+      setDeletionError(error.message || 'Failed to resend code.');
+      if (error.retryAfter) setResendCountdown(error.retryAfter);
+      return;
+    }
+
+    setResendCountdown(60);
+    setInfoMessage('New code sent. Please check your messages.');
+  };
+
+  const handleConfirmDeletion = async () => {
+    if (deletionOtp.length !== 6) {
+      setDeletionError('Please enter the 6-digit code.');
+      return;
+    }
+
+    setDeletionLoading(true);
+    setDeletionError('');
+    setInfoMessage('Verifying code...');
+    const phone = formattedPhone();
+
+    // Re-verify OTP to confirm user intent and obtain fresh access token
+    const verifyResult = await authVerifyOTP(phone, deletionOtp);
+    if (verifyResult.error) {
+      const code = (verifyResult.error as any).code;
+      if (code === 'OTP_EXPIRED' || code === 'OTP_NOT_FOUND') {
+        setDeletionError('Code expired. Please request a new one.');
+        setDeletionStep('idle');
+        setDeletionOtp('');
+        setDeletionLoading(false);
+        return;
+      }
+      if (code === 'MAX_ATTEMPTS_EXCEEDED') {
+        setDeletionError('Maximum attempts exceeded.');
+        setDeletionStep('idle');
+        setDeletionOtp('');
+        setDeletionLoading(false);
+        return;
+      }
+      if (code === 'INVALID_OTP') {
+        setDeletionError('Invalid code. Try again.');
+        setDeletionOtp('');
+        setDeletionLoading(false);
+        return;
+      }
+      setDeletionError(verifyResult.error.message || 'Failed to verify code.');
+      setDeletionLoading(false);
+      return;
+    }
+
+    setInfoMessage('Deleting account...');
+    const accessToken = await getAccessToken();
+    if (!accessToken) {
+      setDeletionError('Could not retrieve access token. Please try again.');
+      setDeletionLoading(false);
+      return;
+    }
+
+    const { error } = await confirmAccountDeletion({ accessToken });
+    setDeletionLoading(false);
+
+    if (error) {
+      setDeletionError(error.message || 'Deletion failed.');
+      return;
+    }
+
+    setInfoMessage('Account deleted. You will be signed out.');
+    await signOut();
+    router.replace('/');
+  };
+
+  const resetDeletionFlow = () => {
+    setDeletionStep('idle');
+    setDeletionOtp('');
+    setDeletionError('');
+    setInfoMessage('');
+    setResendCountdown(0);
+  };
 
   // Fetch image URL from file_storage when profile loads
   useEffect(() => {
@@ -69,6 +202,18 @@ export default function ProfileScreen() {
 
     fetchImageUrl();
   }, [profile?.image_file_id]);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout | undefined;
+    if (resendCountdown > 0) {
+      timer = setInterval(() => {
+        setResendCountdown((prev) => (prev > 0 ? prev - 1 : 0));
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [resendCountdown]);
 
   const resizeImage = async (uri: string): Promise<string> => {
     try {
@@ -409,7 +554,7 @@ export default function ProfileScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <ScreenBackground style={styles.container}>
       <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
         <View style={styles.headerLeft}>
           <Logo size={38} style={styles.headerLogo} />
@@ -561,19 +706,110 @@ export default function ProfileScreen() {
                     )}
                   </LinearGradient>
                 </TouchableOpacity>
+
+                <View style={styles.dangerCardContainer}>
+                  {!showDeletionCard ? (
+                    <TouchableOpacity
+                      style={[styles.dangerButton, styles.fullWidthButton]}
+                      onPress={() => {
+                        resetDeletionFlow();
+                        setShowDeletionCard(true);
+                      }}
+                      activeOpacity={0.9}
+                    >
+                      <Trash2 size={18} color={Colors.neutral.white} />
+                      <Text style={styles.dangerButtonText}>Delete Account</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.dangerCard}>
+                      <View style={styles.dangerHeader}>
+                        <ShieldAlert size={20} color={Colors.error.main} />
+                        <Text style={styles.dangerTitle}>Delete Account</Text>
+                      </View>
+                      <Text style={styles.dangerText}>
+                        Deleting your account will remove your profile and associated data. <Text style={styles.irreversibleText}>This action is irreversible.</Text>
+                      </Text>
+
+                      {infoMessage ? <Text style={styles.infoText}>{infoMessage}</Text> : null}
+                      {deletionError ? <Text style={styles.errorText}>{deletionError}</Text> : null}
+
+                      {deletionStep === 'idle' ? (
+                        <TouchableOpacity
+                          style={[styles.dangerButton, deletionLoading && styles.buttonDisabled]}
+                          onPress={handleRequestDeletionOtp}
+                          disabled={deletionLoading}
+                          activeOpacity={0.9}
+                        >
+                          {deletionLoading ? (
+                            <ActivityIndicator color={Colors.neutral.white} />
+                          ) : (
+                            <>
+                              <Trash2 size={18} color={Colors.neutral.white} />
+                              <Text style={styles.dangerButtonText}>Request Deletion Code</Text>
+                            </>
+                          )}
+                        </TouchableOpacity>
+                      ) : (
+                        <View style={styles.otpBlock}>
+                          <Text style={styles.otpLabel}>Enter the 6-digit code sent to {formattedPhone()}</Text>
+                          <TextInput
+                            style={styles.input}
+                            keyboardType="number-pad"
+                            maxLength={6}
+                            value={deletionOtp}
+                            onChangeText={(text) => setDeletionOtp(text.replace(/\D/g, ''))}
+                            placeholder="123456"
+                          />
+                          <View style={styles.otpActions}>
+                            <TouchableOpacity
+                              style={[styles.dangerButton, deletionLoading && styles.buttonDisabled]}
+                              onPress={handleConfirmDeletion}
+                              disabled={deletionLoading}
+                              activeOpacity={0.9}
+                            >
+                              {deletionLoading ? (
+                                <ActivityIndicator color={Colors.neutral.white} />
+                              ) : (
+                                <Text style={styles.dangerButtonText}>Confirm Deletion</Text>
+                              )}
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.secondaryLink}
+                              onPress={() => {
+                                resetDeletionFlow();
+                                setShowDeletionCard(false);
+                              }}
+                              disabled={deletionLoading}
+                            >
+                              <Text style={styles.secondaryLinkText}>Cancel</Text>
+                            </TouchableOpacity>
+                          </View>
+                          <View style={styles.resendRow}>
+                            {resendCountdown > 0 ? (
+                              <Text style={styles.resendText}>Resend code in {resendCountdown}s</Text>
+                            ) : (
+                              <TouchableOpacity onPress={handleResendDeletionOtp} disabled={deletionLoading}>
+                                <Text style={styles.secondaryLinkText}>Resend code</Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        </View>
+                      )}
+                    </View>
+                  )}
+                </View>
               </>
             )}
           </Formik>
         </ScrollView>
       </KeyboardAvoidingView>
-    </View>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: 'rgba(138, 151, 209, 0.02)',
   },
   header: {
     flexDirection: 'row',
@@ -709,6 +945,84 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+  dangerCardContainer: {
+    marginTop: Spacing.xl,
+    gap: Spacing.md,
+  },
+  dangerCard: {
+    backgroundColor: '#fff7f7',
+    borderRadius: BorderRadius.md,
+    padding: Spacing.lg,
+    borderWidth: 1,
+    borderColor: '#ffd7d7',
+    gap: Spacing.sm,
+  },
+  dangerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  dangerTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.error.main,
+  },
+  dangerText: {
+    color: Colors.text.secondary,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  dangerButton: {
+    backgroundColor: Colors.error.main,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.lg,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+  },
+  fullWidthButton: {
+    width: '100%',
+  },
+  dangerButtonText: {
+    color: Colors.neutral.white,
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  otpBlock: {
+    gap: Spacing.sm,
+  },
+  otpLabel: {
+    fontSize: 14,
+    color: Colors.text.secondary,
+  },
+  otpActions: {
+    gap: Spacing.sm,
+  },
+  resendRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  resendText: {
+    color: Colors.text.secondary,
+  },
+  secondaryLink: {
+    alignSelf: 'flex-start',
+  },
+  secondaryLinkText: {
+    color: Colors.text.secondary,
+    textDecorationLine: 'underline',
+    fontWeight: '600',
+  },
+  infoText: {
+    color: Colors.success.main,
+    fontSize: 13,
+  },
+  irreversibleText: {
+    color: Colors.error.main,
+    fontWeight: '700',
   },
   errorText: {
     color: '#FF3B30',

@@ -35,6 +35,7 @@ import {
   FileText,
   AlertCircle,
   Package,
+  MoreVertical,
 } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { supabaseCore } from '../lib/supabase';
@@ -67,6 +68,7 @@ import Logo from '../components/Logo';
 import Dropdown from '../components/Dropdown';
 import PackageList from '../components/packages/PackageList';
 import { Colors } from '../constants/theme';
+import ScreenBackground from '../components/ScreenBackground';
 
 const EXPERIENCE_OPTIONS = [
   'Less than 1 year',
@@ -96,6 +98,46 @@ const parseExperienceToNumber = (experienceStr: string): number => {
   if (experienceStr === 'More than 10 years') return 10;
   return 0;
 };
+
+const PRICING_MAPPING: Record<string, string[]> = {
+  // Caterer
+  'Cat': ['Per plate', 'Per live counter'],
+
+  // Decoration
+  'Decor': ['Per day', 'Per event'],
+
+  // Photography
+  'Photo': ['Per hour', 'Per event', 'Cinematography'],
+
+  // Sound & Music
+  'Sound': ['Per event', 'Per hour'],
+
+  // Artist
+  'Artist': ['Per hour', 'Per person'],
+
+  // Transport
+  'Transport': ['Per event', 'Per km'],
+
+  // Housekeeping & Security
+  'Housekeeping': ['Per security personnel', 'Per hour'],
+
+  // Venues
+  'Venue': ['Per day'],
+
+  // Cakes
+  'Cake': ['Per kg', 'Customized'],
+
+  // Priest
+  'Priest': ['Per event'],
+
+  // Rentals
+  'Rental': ['Per event'],
+
+  // Event Management Companies
+  'Event Management': ['Per event'],
+};
+
+const DEFAULT_PRICING_UNITS = ['Per event', 'Per day', 'Per hour'];
 
 type SectionType = 'offers' | 'gallery' | 'packages' | 'edit';
 
@@ -137,6 +179,8 @@ export default function BusinessDetailsScreen() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [packageToDelete, setPackageToDelete] = useState<any>(null);
   const [deleting, setDeleting] = useState(false);
+  const [defaultPackageId, setDefaultPackageId] = useState<string | null>(null);
+  const [activeMenuImageId, setActiveMenuImageId] = useState<string | null>(null);
 
   // Category selection state
   const [allBusinessCategories, setAllBusinessCategories] = useState<any[]>([]);
@@ -150,6 +194,7 @@ export default function BusinessDetailsScreen() {
   const [eventSearchQuery, setEventSearchQuery] = useState('');
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+  const [isPricingUnitDropdownOpen, setIsPricingUnitDropdownOpen] = useState(false);
   const [loadingCategories, setLoadingCategories] = useState(false);
 
   // Temporary modal state - only committed when Done is clicked
@@ -274,8 +319,31 @@ export default function BusinessDetailsScreen() {
       // Load verification documents
       await loadVerificationDocuments();
 
-      // Load packages
-      await loadPackages();
+      // Load packages and extract price info
+      // We manually call getBusinessPackages here so we can use the result immediately
+      const { getBusinessPackages } = await import('../lib/packageApi');
+      const { data: packagesData } = await getBusinessPackages(id);
+
+      const activePackages = (packagesData || []).filter((pkg: any) => pkg.is_active !== false);
+      setPackages(activePackages);
+
+      // If we have any packages, use the first one's price/unit for the edit form
+      // If we have a 'Standard Package', prefer that
+      let defaultPkg = activePackages.find((p: any) => p.package_name === 'Standard Package');
+      if (!defaultPkg && activePackages.length > 0) {
+        defaultPkg = activePackages[0];
+      }
+
+      if (defaultPkg) {
+        setDefaultPackageId(defaultPkg.id);
+        setEditData((prev: any) => ({
+          ...prev,
+          base_price: defaultPkg.base_price,
+          pricing_unit: defaultPkg.price_unit
+        }));
+      } else {
+        setDefaultPackageId(null);
+      }
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to load business details');
     } finally {
@@ -813,6 +881,7 @@ export default function BusinessDetailsScreen() {
     return childIds.map((id) => ({
       id,
       path: getCategoryPath(id, allBusinessCategories),
+      name: allBusinessCategories.find(c => c.id === id)?.name || ''
     }));
   }, [selectedCategoryIds, allBusinessCategories]);
 
@@ -826,6 +895,38 @@ export default function BusinessDetailsScreen() {
     }
     return `${selectedCategoriesWithPaths.length} sub-categories selected`;
   };
+
+  // Determine applicable pricing units based on selected service category
+  const pricingUnitOptions = React.useMemo(() => {
+    if (selectedCategoriesWithPaths.length === 0) return DEFAULT_PRICING_UNITS;
+
+    // Use the first selected category to determine units
+    const firstCatName = selectedCategoriesWithPaths[0].name || '';
+
+    // Find matching key in PRICING_MAPPING
+    const match = Object.keys(PRICING_MAPPING).find(key =>
+      firstCatName.toLowerCase().includes(key.toLowerCase())
+    );
+
+    if (match) {
+      return PRICING_MAPPING[match];
+    }
+
+    // Secondary check: look at root category if available
+    if (selectedRootCategoryId) {
+      const rootCat = allBusinessCategories.find(c => c.id === selectedRootCategoryId);
+      if (rootCat) {
+        const rootMatch = Object.keys(PRICING_MAPPING).find(key =>
+          rootCat.name.toLowerCase().includes(key.toLowerCase())
+        );
+        if (rootMatch) {
+          return PRICING_MAPPING[rootMatch];
+        }
+      }
+    }
+
+    return DEFAULT_PRICING_UNITS;
+  }, [selectedCategoriesWithPaths, allBusinessCategories, selectedRootCategoryId]);
 
   // Build hierarchical tree structure for event categories
   const buildEventCategoryTree = (categories: any[]): any[] => {
@@ -1649,10 +1750,39 @@ export default function BusinessDetailsScreen() {
     try {
       setSavingDetails(true);
 
+      // Extract base_price and pricing_unit from editData as they are not columns on vendor_businesses
+      const { base_price, pricing_unit, ...businessUpdateData } = editData;
+
       // Update business details
-      const { data, error } = await updateBusinessDetails(id, editData);
+      const { data, error } = await updateBusinessDetails(id, businessUpdateData);
       if (error) throw error;
       setBusiness(data);
+
+      // Handle Package Update/Creation using the extracted price fields
+      if (base_price && pricing_unit) {
+        const { createPackage, updatePackage } = await import('../lib/packageApi');
+
+        if (defaultPackageId) {
+          // Update existing package
+          await updatePackage(defaultPackageId, {
+            base_price: parseFloat(base_price),
+            price_unit: pricing_unit
+          });
+        } else {
+          // Create new default package
+          const { data: newPkg } = await createPackage({
+            business_id: id,
+            package_name: 'Standard Package',
+            package_type: 'fixed',
+            base_price: parseFloat(base_price),
+            price_unit: pricing_unit,
+            included_services: [],
+            is_active: true,
+            sort_order: 0
+          });
+          if (newPkg) setDefaultPackageId(newPkg.id);
+        }
+      }
 
       // Update category mappings
       // First, delete existing mappings
@@ -1776,38 +1906,66 @@ export default function BusinessDetailsScreen() {
   const renderImageItem = ({ item }: { item: PortfolioImage }) => {
     const imageSource = item.image_base64 || item.image_url;
     const isCover = item.image_type === 'cover';
+    const isMenuOpen = activeMenuImageId === item.id;
 
     return (
-      <TouchableOpacity
-        style={styles.imageGridItem}
-        onPress={() => {
-          setPreviewImageUrl(imageSource);
-          setShowImagePreview(true);
-        }}
-      >
-        <Image source={{ uri: imageSource || undefined }} style={styles.galleryImage} />
-        {isCover && (
-          <View style={styles.coverBadge}>
-            <Text style={styles.coverBadgeText}>Cover</Text>
+      <View style={styles.imageGridItemContainer}>
+        <TouchableOpacity
+          style={styles.imageGridItem}
+          activeOpacity={0.9}
+          onPress={() => {
+            if (activeMenuImageId) {
+              setActiveMenuImageId(null);
+            } else {
+              setPreviewImageUrl(imageSource);
+              setShowImagePreview(true);
+            }
+          }}
+        >
+          <Image source={{ uri: imageSource || undefined }} style={styles.galleryImage} resizeMode="cover" />
+          {isCover && (
+            <View style={styles.coverBadge}>
+              <Text style={styles.coverBadgeText}>Cover</Text>
+            </View>
+          )}
+
+          {/* Gradient overlay for text readability if needed, but kept clean for now */}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.menuButton}
+          onPress={() => setActiveMenuImageId(isMenuOpen ? null : item.id)}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <View style={styles.menuButtonCircle}>
+            <MoreVertical size={18} color="#fff" />
+          </View>
+        </TouchableOpacity>
+
+        {isMenuOpen && (
+          <View style={styles.menuOptions}>
+            <TouchableOpacity
+              style={styles.menuOptionItem}
+              onPress={() => {
+                setActiveMenuImageId(null);
+                handleSetCoverImage(item);
+              }}
+            >
+              <Text style={styles.menuOptionText}>Set Cover Image</Text>
+            </TouchableOpacity>
+            <View style={styles.menuDivider} />
+            <TouchableOpacity
+              style={styles.menuOptionItem}
+              onPress={() => {
+                setActiveMenuImageId(null);
+                handleDeleteImage(item);
+              }}
+            >
+              <Text style={[styles.menuOptionText, styles.menuDeleteText]}>Delete</Text>
+            </TouchableOpacity>
           </View>
         )}
-        <View style={styles.imageActions}>
-          {!isCover && (
-            <TouchableOpacity
-              style={[styles.imageActionButton, styles.setCoverButton]}
-              onPress={() => handleSetCoverImage(item)}
-            >
-              <Tag size={14} color="#fff" />
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            style={[styles.imageActionButton, styles.deleteImageButton]}
-            onPress={() => handleDeleteImage(item)}
-          >
-            <Trash2 size={14} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      </TouchableOpacity>
+      </View>
     );
   };
 
@@ -1828,7 +1986,7 @@ export default function BusinessDetailsScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <ScreenBackground style={styles.container}>
       <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
         <TouchableOpacity
           style={styles.backBtn}
@@ -1895,6 +2053,7 @@ export default function BusinessDetailsScreen() {
             Gallery
           </Text>
         </TouchableOpacity>
+        {/*
         <TouchableOpacity
           style={[
             styles.tab,
@@ -1913,6 +2072,7 @@ export default function BusinessDetailsScreen() {
             Packages
           </Text>
         </TouchableOpacity>
+        */}
         <TouchableOpacity
           style={[
             styles.tab,
@@ -2042,7 +2202,7 @@ export default function BusinessDetailsScreen() {
                 data={images}
                 renderItem={renderImageItem}
                 keyExtractor={(item) => item.id}
-                numColumns={3}
+                numColumns={2}
                 columnWrapperStyle={styles.imageRow}
                 scrollEnabled={false}
               />
@@ -2050,7 +2210,8 @@ export default function BusinessDetailsScreen() {
           </View>
         )}
 
-        {activeSection === 'packages' && (
+        {/*
+        activeSection === 'packages' && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Pricing Packages</Text>
@@ -2087,7 +2248,8 @@ export default function BusinessDetailsScreen() {
               />
             )}
           </View>
-        )}
+        )
+        */}
 
         {/* Delete Confirmation Modal */}
         <Modal
@@ -2454,6 +2616,43 @@ export default function BusinessDetailsScreen() {
                   placeholder="Select experience"
                   onChange={(value: string) => setEditData({ ...editData, years_experience: parseExperienceToNumber(value) })}
                 />
+              </View>
+
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>Base Price (₹) *</Text>
+                <TextInput
+                  style={styles.editInput}
+                  value={editData.base_price ? String(editData.base_price) : ''}
+                  onChangeText={(text) => {
+                    const cleanText = text.replace(/[^0-9]/g, '');
+                    setEditData({ ...editData, base_price: cleanText });
+                  }}
+                  placeholder="Enter starting price"
+                  placeholderTextColor="#999"
+                  keyboardType="numeric"
+                  returnKeyType="next"
+                />
+              </View>
+
+              <View style={styles.editField}>
+                <Text style={styles.editLabel}>Pricing Unit *</Text>
+                <Dropdown
+                  options={pricingUnitOptions.map((unit) => ({
+                    label: unit,
+                    value: unit,
+                  }))}
+                  value={editData.pricing_unit || ''}
+                  placeholder="Select pricing unit"
+                  onChange={(value: string) => setEditData({ ...editData, pricing_unit: value })}
+                  open={isPricingUnitDropdownOpen}
+                  onOpenChange={setIsPricingUnitDropdownOpen}
+                  disabled={selectedCategoriesWithPaths.length === 0}
+                />
+                {selectedCategoriesWithPaths.length === 0 && (
+                  <Text style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                    Select a service category first
+                  </Text>
+                )}
               </View>
             </View>
 
@@ -3011,14 +3210,13 @@ export default function BusinessDetailsScreen() {
           )}
         </View>
       </Modal>
-    </View>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
   loadingContainer: {
     flex: 1,
@@ -3033,10 +3231,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-start',
-    backgroundColor: '#fff',
     paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
     zIndex: 10,
   },
   backBtn: {
@@ -3290,9 +3485,15 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 8,
   },
-  imageGridItem: {
+  imageGridItemContainer: {
     flex: 1,
     aspectRatio: 1,
+    position: 'relative',
+    margin: 4,
+  },
+  imageGridItem: {
+    width: '100%',
+    height: '100%',
     borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: '#f0f0f0',
@@ -3301,43 +3502,67 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  deleteImageButton: {
-    backgroundColor: 'rgba(239, 68, 68, 0.8)',
+  menuButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    zIndex: 10,
+  },
+  menuButtonCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  menuOptions: {
+    position: 'absolute',
+    top: 45,
+    right: 8,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 20,
+    minWidth: 160,
+  },
+  menuOptionItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  menuOptionText: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '600',
+  },
+  menuDeleteText: {
+    color: '#FF3B30',
+  },
+  menuDivider: {
+    height: 1,
+    backgroundColor: '#f0f0f0',
+    marginVertical: 2,
   },
   coverBadge: {
     position: 'absolute',
-    top: 4,
-    left: 4,
+    top: 8,
+    left: 8,
     backgroundColor: '#2563EB',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 4,
-    zIndex: 2,
+    zIndex: 5,
   },
   coverBadgeText: {
     color: '#fff',
     fontSize: 10,
     fontWeight: '700',
     textTransform: 'uppercase',
-  },
-  imageActions: {
-    position: 'absolute',
-    bottom: 4,
-    right: 4,
-    flexDirection: 'row',
-    gap: 4,
-    zIndex: 2,
-  },
-  imageActionButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  setCoverButton: {
-    backgroundColor: 'rgba(37, 99, 235, 0.8)',
   },
   editSection: {
     backgroundColor: '#fff',

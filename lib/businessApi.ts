@@ -271,7 +271,7 @@ export const getBusinessImages = async (
       .order('sort_order', { ascending: true });
 
     if (error) throw error;
-    
+
     // Transform data to match PortfolioImage interface
     const transformedData = data?.map((item: any) => ({
       id: item.id,
@@ -696,7 +696,7 @@ export const pickImage = async (): Promise<{
   try {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      throw new Error('Permission to access media library is required');
+      throw new Error('Photo Library access is required. Go to Settings > Apps > BookMyVendors Business > Permissions > Photos to enable.');
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -722,7 +722,7 @@ export const pickMultipleImages = async (): Promise<{
   try {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      throw new Error('Permission to access media library is required');
+      throw new Error('Photo Library access is required. Go to Settings > Apps > BookMyVendors Business > Permissions > Photos to enable.');
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -1050,8 +1050,8 @@ export const getBusinessVerificationDocuments = async (
 
     // Transform data with manual join
     const transformedData: VerificationDocument[] = documents.map((item: any) => {
-      const docType = item.document_type_id 
-        ? documentTypesMap.get(item.document_type_id) 
+      const docType = item.document_type_id
+        ? documentTypesMap.get(item.document_type_id)
         : null;
       const fileStorage = item.file_storage;
 

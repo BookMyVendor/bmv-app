@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import * as Linking from 'expo-linking';
 import {
   View,
   Text,
@@ -8,7 +9,6 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
-  Linking,
   Platform,
   KeyboardAvoidingView,
 } from 'react-native';
@@ -19,6 +19,7 @@ import { supabaseCore, supabaseCrm } from '../lib/supabase';
 import Logo from '../components/Logo';
 import { Lead, LeadActivity, STATUS_OPTIONS } from '../types/leads';
 import { getTimeAgo, formatEventDate } from '../lib/timeUtils';
+import ScreenBackground from '../components/ScreenBackground';
 
 export default function LeadDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -132,27 +133,69 @@ export default function LeadDetailScreen() {
     }
   };
 
-  const handleCallPress = () => {
+  const handleCallPress = async () => {
+    console.log('[DEBUG] handleCallPress triggered');
     if (lead?.customer_phone) {
       const phoneUrl = `tel:${lead.customer_phone}`;
-      Linking.canOpenURL(phoneUrl).then((supported) => {
-        if (supported) {
-          Linking.openURL(phoneUrl);
-          logActivity('call', 'Called customer', `Phone call to ${lead.customer_phone}`);
-        }
-      });
+      console.log('[DEBUG] Prepared phone URL:', phoneUrl);
+      try {
+        await Linking.openURL(phoneUrl);
+        await logActivity('call', 'Called customer', `Phone call to ${lead.customer_phone}`);
+      } catch (error) {
+        console.error('[DEBUG] Error opening dialer:', error);
+        Alert.alert('Error', 'Failed to open dialer. Your device might not support phone calls.');
+      }
+    } else {
+      console.log('[DEBUG] No customer phone found');
+      Alert.alert('Info', 'No phone number available for this lead');
     }
   };
 
-  const handleEmailPress = () => {
+  const handleEmailPress = async () => {
+    console.log('[DEBUG] handleEmailPress triggered');
+    console.log('[DEBUG] Current Lead Data:', JSON.stringify(lead, null, 2));
+
     if (lead?.customer_email) {
       const emailUrl = `mailto:${lead.customer_email}`;
-      Linking.canOpenURL(emailUrl).then((supported) => {
-        if (supported) {
-          Linking.openURL(emailUrl);
-          logActivity('email', 'Sent email', `Email sent to ${lead.customer_email}`);
-        }
-      });
+      console.log('[DEBUG] Prepared email URL:', emailUrl);
+
+      try {
+        console.log('[DEBUG] Calling Linking.openURL(emailUrl)...');
+        // Use expo-linking's openURL
+        const success = await Linking.openURL(emailUrl);
+        console.log('[DEBUG] Linking.openURL promise resolved, success:', success);
+
+        await logActivity('email', 'Sent email', `Email sent to ${lead.customer_email}`);
+      } catch (error) {
+        console.error('[DEBUG] catch error in handleEmailPress:', error);
+        Alert.alert('Error', 'Failed to open email client. Please make sure you have an email app installed.');
+      }
+    } else {
+      console.log('[DEBUG] No customer email found. lead.customer_email is:', lead?.customer_email);
+      Alert.alert('Info', 'No email address available for this lead');
+    }
+  };
+
+  const handleMessagePress = async () => {
+    console.log('[DEBUG] handleMessagePress triggered');
+    if (lead?.customer_phone) {
+      // Clean phone number: remove non-numeric characters
+      const cleanPhone = lead.customer_phone.replace(/\D/g, '');
+      // Add India country code if not present (assuming default is India for this app)
+      const phoneWithCountry = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+
+      const whatsappUrl = `https://wa.me/${phoneWithCountry}`;
+      console.log('[DEBUG] Prepared WhatsApp URL:', whatsappUrl);
+      try {
+        await Linking.openURL(whatsappUrl);
+        await logActivity('message', 'WhatsApp message', `WhatsApp chat opened for ${lead.customer_phone}`);
+      } catch (error) {
+        console.error('[DEBUG] Error opening WhatsApp:', error);
+        Alert.alert('Error', 'Failed to open WhatsApp. Please make sure it is installed.');
+      }
+    } else {
+      console.log('[DEBUG] No customer phone found for WhatsApp');
+      Alert.alert('Info', 'No phone number available for this lead');
     }
   };
 
@@ -185,10 +228,10 @@ export default function LeadDetailScreen() {
       await logActivity(
         'message',
         'Status changed',
-        `Status changed from ${lead.lead_status || lead.status} to ${newStatus}`
+        `Status changed from ${lead.lead_status} to ${newStatus}`
       );
 
-      setLead({ ...lead, lead_status: newStatus as any, status: newStatus as any });
+      setLead({ ...lead, lead_status: newStatus as any });
       Alert.alert('Success', 'Status updated successfully');
     } catch (error) {
       console.error('Error updating status:', error);
@@ -321,335 +364,337 @@ export default function LeadDetailScreen() {
   const statusInfo = getStatusInfo(lead.lead_status);
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-    >
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <ArrowLeft size={24} color="#007AFF" strokeWidth={2} />
-        </TouchableOpacity>
-        <Logo size={38} style={styles.headerLogo} />
-        <Text style={styles.headerTitle}>Lead Details</Text>
-      </View>
-
-      <View style={styles.heroCard}>
-        <View style={styles.heroHeader}>
-          <View style={styles.heroLeft}>
-            <Text style={styles.heroName}>{lead.customer_name}</Text>
-            <Text style={styles.heroBusiness}>{lead.business_name}</Text>
-          </View>
-          <View style={styles.badges}>
-            <View
-              style={[styles.statusBadge, { backgroundColor: statusInfo.color + '20' }]}
-            >
-              <Text style={[styles.statusText, { color: statusInfo.color }]}>
-                {statusInfo.label}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.quickActions}>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={handleCallPress}
-            disabled={!lead.customer_phone}
-          >
-            <Phone size={20} color="#007AFF" strokeWidth={2} />
-            <Text style={styles.actionButtonText}>Call</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={handleEmailPress}
-            disabled={!lead.customer_email}
-          >
-            <Mail size={20} color="#007AFF" strokeWidth={2} />
-            <Text style={styles.actionButtonText}>Email</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton}>
-            <MessageSquare size={20} color="#007AFF" strokeWidth={2} />
-            <Text style={styles.actionButtonText}>Message</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <View style={styles.tabs}>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'overview' && styles.activeTab]}
-          onPress={() => setActiveTab('overview')}
-        >
-          <Text
-            style={[styles.tabText, activeTab === 'overview' && styles.activeTabText]}
-          >
-            Overview
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'activity' && styles.activeTab]}
-          onPress={() => setActiveTab('activity')}
-        >
-          <Text
-            style={[styles.tabText, activeTab === 'activity' && styles.activeTabText]}
-          >
-            Activity
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'notes' && styles.activeTab]}
-          onPress={() => setActiveTab('notes')}
-        >
-          <Text style={[styles.tabText, activeTab === 'notes' && styles.activeTabText]}>
-            Notes
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
+    <ScreenBackground style={{ flex: 1 }}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        {activeTab === 'overview' && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Contact Information</Text>
-            </View>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <ArrowLeft size={24} color="#007AFF" strokeWidth={2} />
+          </TouchableOpacity>
+          <Logo size={38} style={styles.headerLogo} />
+          <Text style={styles.headerTitle}>Lead Details</Text>
+        </View>
 
-            <View style={styles.infoCard}>
-              <View style={styles.infoRow}>
-                <Phone size={20} color="#666" />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>Phone</Text>
-                  <Text style={styles.infoValue}>{lead.customer_phone}</Text>
-                </View>
+        <View style={styles.heroCard}>
+          <View style={styles.heroHeader}>
+            <View style={styles.heroLeft}>
+              <Text style={styles.heroName}>{lead.customer_name}</Text>
+              <Text style={styles.heroBusiness}>{lead.business_name}</Text>
+            </View>
+            <View style={styles.badges}>
+              <View
+                style={[styles.statusBadge, { backgroundColor: statusInfo.color + '20' }]}
+              >
+                <Text style={[styles.statusText, { color: statusInfo.color }]}>
+                  {statusInfo.label}
+                </Text>
               </View>
-
-              {lead.customer_email && (
-                <View style={styles.infoRow}>
-                  <Mail size={20} color="#666" />
-                  <View style={styles.infoContent}>
-                    <Text style={styles.infoLabel}>Email</Text>
-                    <Text style={styles.infoValue}>{lead.customer_email}</Text>
-                  </View>
-                </View>
-              )}
-            </View>
-
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Event Details</Text>
-            </View>
-
-            <View style={styles.infoCard}>
-              <View style={styles.infoRow}>
-                <Calendar size={20} color="#666" />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>Event Type</Text>
-                  <Text style={styles.infoValue}>{lead.event_type}</Text>
-                </View>
-              </View>
-
-              {lead.event_date && (
-                <View style={styles.infoRow}>
-                  <Clock size={20} color="#666" />
-                  <View style={styles.infoContent}>
-                    <Text style={styles.infoLabel}>Event Date</Text>
-                    <Text style={styles.infoValue}>
-                      {formatEventDate(lead.event_date)}
-                    </Text>
-                  </View>
-                </View>
-              )}
-
-              {lead.event_location && (
-                <View style={styles.infoRow}>
-                  <MapPin size={20} color="#666" />
-                  <View style={styles.infoContent}>
-                    <Text style={styles.infoLabel}>Event Location</Text>
-                    <Text style={styles.infoValue}>{lead.event_location}</Text>
-                  </View>
-                </View>
-              )}
-
-              {lead.event_duration_hours && (
-                <View style={styles.infoRow}>
-                  <Clock size={20} color="#666" />
-                  <View style={styles.infoContent}>
-                    <Text style={styles.infoLabel}>Duration</Text>
-                    <Text style={styles.infoValue}>{lead.event_duration_hours} hours</Text>
-                  </View>
-                </View>
-              )}
-
-              {lead.guest_count && (
-                <View style={styles.infoRow}>
-                  <Users size={20} color="#666" />
-                  <View style={styles.infoContent}>
-                    <Text style={styles.infoLabel}>Guest Count</Text>
-                    <Text style={styles.infoValue}>{lead.guest_count} guests</Text>
-                  </View>
-                </View>
-              )}
-
-              {lead.budget_range && (
-                <View style={styles.infoRow}>
-                  <Text style={{ fontSize: 20, color: '#666', fontWeight: '600' }}>₹</Text>
-                  <View style={styles.infoContent}>
-                    <Text style={styles.infoLabel}>Budget Range</Text>
-                    <Text style={styles.infoValue}>₹ {lead.budget_range}</Text>
-                  </View>
-                </View>
-              )}
-
-            </View>
-
-            {lead.requirements && (
-              <>
-                <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>Requirements</Text>
-                </View>
-                <View style={styles.messageCard}>
-                  <Text style={styles.messageText}>{lead.requirements}</Text>
-                </View>
-              </>
-            )}
-
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Change Status</Text>
-            </View>
-
-            <View style={styles.statusGrid}>
-              {STATUS_OPTIONS.map((status) => (
-                <TouchableOpacity
-                  key={status.value}
-                  style={[
-                    styles.statusOption,
-                    lead.lead_status === status.value && styles.statusOptionActive,
-                    { borderColor: status.color },
-                  ]}
-                  onPress={() => handleStatusChange(status.value)}
-                >
-                  <Text
-                    style={[
-                      styles.statusOptionText,
-                      lead.lead_status === status.value && { color: status.color },
-                    ]}
-                  >
-                    {status.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
             </View>
           </View>
-        )}
 
-        {activeTab === 'activity' && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Activity Timeline</Text>
-              <Text style={styles.activityCount}>{activities.length} activities</Text>
-            </View>
+          <View style={styles.quickActions}>
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={handleCallPress}
+            >
+              <Phone size={20} color="#007AFF" strokeWidth={2} />
+              <Text style={styles.actionButtonText}>Call</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={handleEmailPress}
+            >
+              <Mail size={20} color="#007AFF" strokeWidth={2} />
+              <Text style={styles.actionButtonText}>Email</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={handleMessagePress}
+            >
+              <MessageSquare size={20} color="#007AFF" strokeWidth={2} />
+              <Text style={styles.actionButtonText}>Message</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
-            {activities.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Clock size={48} color="#ddd" />
-                <Text style={styles.emptyStateText}>No activities yet</Text>
+        <View style={styles.tabs}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'overview' && styles.activeTab]}
+            onPress={() => setActiveTab('overview')}
+          >
+            <Text
+              style={[styles.tabText, activeTab === 'overview' && styles.activeTabText]}
+            >
+              Overview
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'activity' && styles.activeTab]}
+            onPress={() => setActiveTab('activity')}
+          >
+            <Text
+              style={[styles.tabText, activeTab === 'activity' && styles.activeTabText]}
+            >
+              Activity
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'notes' && styles.activeTab]}
+            onPress={() => setActiveTab('notes')}
+          >
+            <Text style={[styles.tabText, activeTab === 'notes' && styles.activeTabText]}>
+              Notes
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {activeTab === 'overview' && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Contact Information</Text>
               </View>
-            ) : (
-              <View style={styles.timeline}>
-                {activities.map((activity, index) => (
-                  <View key={activity.id} style={styles.timelineItem}>
-                    <View style={styles.timelineDot}>
-                      {getActivityIcon(activity.activity_type)}
-                    </View>
-                    {index < activities.length - 1 && <View style={styles.timelineLine} />}
-                    <View style={styles.activityCard}>
-                      <View style={styles.activityHeader}>
-                        <Text style={styles.activityTitle}>{activity.title}</Text>
-                        <Text style={styles.activityTime}>
-                          {getTimeAgo(activity.created_at)}
-                        </Text>
-                      </View>
-                      {activity.description && (
-                        <Text style={styles.activityDescription}>
-                          {activity.description}
-                        </Text>
-                      )}
+
+              <View style={styles.infoCard}>
+                <View style={styles.infoRow}>
+                  <Phone size={20} color="#666" />
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoLabel}>Phone</Text>
+                    <Text style={styles.infoValue}>{lead.customer_phone}</Text>
+                  </View>
+                </View>
+
+                {lead.customer_email && (
+                  <View style={styles.infoRow}>
+                    <Mail size={20} color="#666" />
+                    <View style={styles.infoContent}>
+                      <Text style={styles.infoLabel}>Email</Text>
+                      <Text style={styles.infoValue}>{lead.customer_email}</Text>
                     </View>
                   </View>
+                )}
+              </View>
+
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Event Details</Text>
+              </View>
+
+              <View style={styles.infoCard}>
+                <View style={styles.infoRow}>
+                  <Calendar size={20} color="#666" />
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoLabel}>Event Type</Text>
+                    <Text style={styles.infoValue}>{lead.event_type}</Text>
+                  </View>
+                </View>
+
+                {lead.event_date && (
+                  <View style={styles.infoRow}>
+                    <Clock size={20} color="#666" />
+                    <View style={styles.infoContent}>
+                      <Text style={styles.infoLabel}>Event Date</Text>
+                      <Text style={styles.infoValue}>
+                        {formatEventDate(lead.event_date)}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+                {lead.event_location && (
+                  <View style={styles.infoRow}>
+                    <MapPin size={20} color="#666" />
+                    <View style={styles.infoContent}>
+                      <Text style={styles.infoLabel}>Event Location</Text>
+                      <Text style={styles.infoValue}>{lead.event_location}</Text>
+                    </View>
+                  </View>
+                )}
+
+                {lead.event_duration_hours && (
+                  <View style={styles.infoRow}>
+                    <Clock size={20} color="#666" />
+                    <View style={styles.infoContent}>
+                      <Text style={styles.infoLabel}>Duration</Text>
+                      <Text style={styles.infoValue}>{lead.event_duration_hours} hours</Text>
+                    </View>
+                  </View>
+                )}
+
+                {lead.guest_count && (
+                  <View style={styles.infoRow}>
+                    <Users size={20} color="#666" />
+                    <View style={styles.infoContent}>
+                      <Text style={styles.infoLabel}>Guest Count</Text>
+                      <Text style={styles.infoValue}>{lead.guest_count} guests</Text>
+                    </View>
+                  </View>
+                )}
+
+                {lead.budget_range && (
+                  <View style={styles.infoRow}>
+                    <Text style={{ fontSize: 20, color: '#666', fontWeight: '600' }}>₹</Text>
+                    <View style={styles.infoContent}>
+                      <Text style={styles.infoLabel}>Budget Range</Text>
+                      <Text style={styles.infoValue}>₹ {lead.budget_range}</Text>
+                    </View>
+                  </View>
+                )}
+
+              </View>
+
+              {lead.requirements && (
+                <>
+                  <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionTitle}>Requirements</Text>
+                  </View>
+                  <View style={styles.messageCard}>
+                    <Text style={styles.messageText}>{lead.requirements}</Text>
+                  </View>
+                </>
+              )}
+
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Change Status</Text>
+              </View>
+
+              <View style={styles.statusGrid}>
+                {STATUS_OPTIONS.map((status) => (
+                  <TouchableOpacity
+                    key={status.value}
+                    style={[
+                      styles.statusOption,
+                      lead.lead_status === status.value && styles.statusOptionActive,
+                      { borderColor: status.color },
+                    ]}
+                    onPress={() => handleStatusChange(status.value)}
+                  >
+                    <Text
+                      style={[
+                        styles.statusOptionText,
+                        lead.lead_status === status.value && { color: status.color },
+                      ]}
+                    >
+                      {status.label}
+                    </Text>
+                  </TouchableOpacity>
                 ))}
               </View>
-            )}
-          </View>
-        )}
-
-        {activeTab === 'notes' && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Add Note</Text>
             </View>
+          )}
 
-            <View style={styles.noteInputCard}>
-              <TextInput
-                style={styles.noteInput}
-                placeholder="Add a note about this lead..."
-                placeholderTextColor="#999"
-                value={newNote}
-                onChangeText={setNewNote}
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
-              />
-              <TouchableOpacity
-                style={[styles.saveNoteButton, !newNote.trim() && styles.disabledButton]}
-                onPress={handleSaveNote}
-                disabled={!newNote.trim() || savingNote}
-              >
-                {savingNote ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.saveNoteButtonText}>Save Note</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Notes History</Text>
-            </View>
-
-            {activities.filter((a) => a.activity_type === 'message').length === 0 ? (
-              <View style={styles.emptyState}>
-                <FileText size={48} color="#ddd" />
-                <Text style={styles.emptyStateText}>No notes yet</Text>
+          {activeTab === 'activity' && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Activity Timeline</Text>
+                <Text style={styles.activityCount}>{activities.length} activities</Text>
               </View>
-            ) : (
-              <View style={styles.notesList}>
-                {activities
-                  .filter((a) => a.activity_type === 'message')
-                  .map((note) => (
-                    <View key={note.id} style={styles.noteCard}>
-                      <View style={styles.noteHeader}>
-                        <FileText size={16} color="#007AFF" />
-                        <Text style={styles.noteTime}>{getTimeAgo(note.created_at)}</Text>
+
+              {activities.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Clock size={48} color="#ddd" />
+                  <Text style={styles.emptyStateText}>No activities yet</Text>
+                </View>
+              ) : (
+                <View style={styles.timeline}>
+                  {activities.map((activity, index) => (
+                    <View key={activity.id} style={styles.timelineItem}>
+                      <View style={styles.timelineDot}>
+                        {getActivityIcon(activity.activity_type)}
                       </View>
-                      <Text style={styles.noteContent}>{note.description}</Text>
+                      {index < activities.length - 1 && <View style={styles.timelineLine} />}
+                      <View style={styles.activityCard}>
+                        <View style={styles.activityHeader}>
+                          <Text style={styles.activityTitle}>{activity.title}</Text>
+                          <Text style={styles.activityTime}>
+                            {getTimeAgo(activity.created_at)}
+                          </Text>
+                        </View>
+                        {activity.description && (
+                          <Text style={styles.activityDescription}>
+                            {activity.description}
+                          </Text>
+                        )}
+                      </View>
                     </View>
                   ))}
+                </View>
+              )}
+            </View>
+          )}
+
+          {activeTab === 'notes' && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Add Note</Text>
               </View>
-            )}
-          </View>
-        )}
-      </ScrollView>
-    </KeyboardAvoidingView>
+
+              <View style={styles.noteInputCard}>
+                <TextInput
+                  style={styles.noteInput}
+                  placeholder="Add a note about this lead..."
+                  placeholderTextColor="#999"
+                  value={newNote}
+                  onChangeText={setNewNote}
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                />
+                <TouchableOpacity
+                  style={[styles.saveNoteButton, !newNote.trim() && styles.disabledButton]}
+                  onPress={handleSaveNote}
+                  disabled={!newNote.trim() || savingNote}
+                >
+                  {savingNote ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.saveNoteButtonText}>Save Note</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Notes History</Text>
+              </View>
+
+              {activities.filter((a) => a.activity_type === 'message').length === 0 ? (
+                <View style={styles.emptyState}>
+                  <FileText size={48} color="#ddd" />
+                  <Text style={styles.emptyStateText}>No notes yet</Text>
+                </View>
+              ) : (
+                <View style={styles.notesList}>
+                  {activities
+                    .filter((a) => a.activity_type === 'message')
+                    .map((note) => (
+                      <View key={note.id} style={styles.noteCard}>
+                        <View style={styles.noteHeader}>
+                          <FileText size={16} color="#007AFF" />
+                          <Text style={styles.noteTime}>{getTimeAgo(note.created_at)}</Text>
+                        </View>
+                        <Text style={styles.noteContent}>{note.description}</Text>
+                      </View>
+                    ))}
+                </View>
+              )}
+            </View>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
   loadingContainer: {
     flex: 1,
@@ -685,12 +730,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#fff',
     paddingHorizontal: 20,
     paddingTop: 60,
     paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
   },
   backBtn: {
     padding: 4,
