@@ -49,7 +49,7 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
   }));
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <View style={styles.content}>
       <View style={styles.field}>
         <Text style={styles.label}>Business Name *</Text>
         <TextInput
@@ -155,7 +155,7 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
           <Text style={styles.errorText}>{validationErrors.phoneNumber}</Text>
         )}
       </View>
-    </ScrollView>
+    </View>
   );
 });
 
@@ -166,7 +166,6 @@ export default BasicInformationStep;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
   },
   content: {
     padding: 24,

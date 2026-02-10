@@ -76,6 +76,8 @@ export default function BusinessRegistrationScreen() {
   const locationStepRef = useRef<LocationCoverageStepRef>(null);
   const verificationStepRef = useRef<VerificationStepRef>(null);
   const scrollViewRef = useRef<ScrollView>(null);
+  const [contentHeight, setContentHeight] = useState(0);
+  const [containerHeight, setContainerHeight] = useState(0);
   const insets = useSafeAreaInsets();
 
   // Save form data to AsyncStorage whenever it changes
@@ -606,7 +608,7 @@ export default function BusinessRegistrationScreen() {
       }
 
       // Step 6: Insert category mappings
-      const categoryMappings = [];
+      const categoryMappings: any[] = [];
 
       // Add selected business category IDs (including root categories)
       const allSelectedCategoryIds = [...(businessData.selectedCategoryIds || [])];
@@ -743,8 +745,8 @@ export default function BusinessRegistrationScreen() {
     <ScreenBackground style={{ flex: 1 }}>
       <KeyboardAvoidingView
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
       >
         <View style={styles.header}>
           <View style={styles.headerTop}>
@@ -784,11 +786,16 @@ export default function BusinessRegistrationScreen() {
           contentContainerStyle={styles.pagerContent}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          scrollEnabled={contentHeight > containerHeight}
+          onContentSizeChange={(_, h) => setContentHeight(h)}
+          onLayout={(e) => setContainerHeight(e.nativeEvent.layout.height)}
         >
-          {steps[currentPage].component}
+          <View style={{ flex: contentHeight > containerHeight ? 0 : 1, justifyContent: 'center' }}>
+            {steps[currentPage].component}
+          </View>
         </ScrollView>
 
-        <View style={[styles.footer, { paddingBottom: 16 + insets.bottom }]}>
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
           {currentPage > 0 && (
             <TouchableOpacity
               style={styles.secondaryButton}
@@ -900,7 +907,8 @@ const styles = StyleSheet.create({
   },
   footer: {
     flexDirection: 'row',
-    paddingVertical: 16,
+    paddingTop: 8,
+    paddingBottom: 16,
     paddingHorizontal: 24,
     alignItems: 'center',
     justifyContent: 'flex-end',

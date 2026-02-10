@@ -92,7 +92,7 @@ export default function PortfolioSocialStep({
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <View style={[styles.container, styles.content]}>
       <View style={styles.infoBox}>
         <Text style={styles.infoTitle}>Showcase Your Work</Text>
         <Text style={styles.infoText}>
@@ -265,14 +265,13 @@ export default function PortfolioSocialStep({
           💡 Tip: Complete social profiles receive 3x more customer inquiries
         </Text>
       </View>
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
   },
   content: {
     padding: 24,

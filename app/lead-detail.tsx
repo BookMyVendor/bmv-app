@@ -70,12 +70,27 @@ export default function LeadDetailScreen() {
       if (error) throw error;
 
       if (data) {
-        // Add business_name to the lead data
-        const leadWithBusiness = {
+        // Fetch category name if category_id exists
+        let eventType = 'Unknown Event';
+        if (data.category_id) {
+          const { data: categoryData } = await supabaseCore
+            .from('categories')
+            .select('name')
+            .eq('id', data.category_id)
+            .maybeSingle();
+
+          if (categoryData) {
+            eventType = categoryData.name;
+          }
+        }
+
+        // Add business_name and event_type to the lead data
+        const leadWithDetails = {
           ...data,
           business_name: businessMap.get(data.business_id) || 'Unknown Business',
+          event_type: eventType,
         };
-        setLead(leadWithBusiness as Lead);
+        setLead(leadWithDetails as Lead);
       } else {
         Alert.alert('Error', 'Lead not found');
         router.back();

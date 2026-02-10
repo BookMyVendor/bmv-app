@@ -197,6 +197,8 @@ export default function BusinessDetailsScreen() {
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [isPricingUnitDropdownOpen, setIsPricingUnitDropdownOpen] = useState(false);
   const [loadingCategories, setLoadingCategories] = useState(false);
+  const [isCategoriesExpanded, setIsCategoriesExpanded] = useState(false);
+  const [isEventsExpanded, setIsEventsExpanded] = useState(false);
 
   // Temporary modal state - only committed when Done is clicked
   const [tempSelectedRootCategoryId, setTempSelectedRootCategoryId] = useState<string | null>(null);
@@ -247,18 +249,28 @@ export default function BusinessDetailsScreen() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [businessRes, offersRes, imagesRes] = await Promise.all([
-        getBusinessDetails(id),
+
+      // 1. Fetch core business details FIRST and render immediately
+      const businessRes = await getBusinessDetails(id);
+
+      if (businessRes.error) throw businessRes.error;
+
+      setBusiness(businessRes.data);
+      setEditData(businessRes.data || {});
+
+      // CRITICAL: Stop loading here so the user sees the page content
+      setLoading(false);
+
+      // 2. Fetch everything else in parallel/sequence without blocking UI
+      const [offersRes, imagesRes] = await Promise.all([
         getOffers(id),
         getBusinessImages(id),
       ]);
 
-      if (businessRes.error) throw businessRes.error;
-      if (offersRes.error) throw offersRes.error;
-      if (imagesRes.error) throw imagesRes.error;
-
-      setBusiness(businessRes.data);
+      if (offersRes.error) console.error('Error fetching offers:', offersRes.error);
       setOffers(offersRes.data || []);
+
+      if (imagesRes.error) console.error('Error fetching images:', imagesRes.error);
 
       // Combine images from vendor_business_media with cover_photo_url from business
       let allImages = imagesRes.data || [];
@@ -287,16 +299,15 @@ export default function BusinessDetailsScreen() {
       }
 
       setImages(allImages);
-      setEditData(businessRes.data || {});
 
       // Load categories first, then mappings
-      await loadCategories();
+      const fetchedBusinessCategories = await loadCategories();
       // Load existing category mappings (this will set selectedCategoryIds)
       const { businessIds } = await loadCategoryMappings();
 
       // After mappings are loaded, determine root category
       if (businessIds.length > 0) {
-        const selectedCats = allBusinessCategories.filter((cat) =>
+        const selectedCats = fetchedBusinessCategories.filter((cat: any) =>
           businessIds.includes(cat.id)
         );
 
@@ -304,8 +315,9 @@ export default function BusinessDetailsScreen() {
         const firstSelectedCat = selectedCats[0];
         if (firstSelectedCat) {
           let current = firstSelectedCat;
+          // Traverse up to find the root
           while (current.parent_category_id) {
-            const parent = allBusinessCategories.find(c => c.id === current.parent_category_id);
+            const parent = fetchedBusinessCategories.find((c: any) => c.id === current.parent_category_id);
             if (!parent) break;
             current = parent;
           }
@@ -346,9 +358,14 @@ export default function BusinessDetailsScreen() {
         setDefaultPackageId(null);
       }
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to load business details');
+      console.error('Error loading business data:', error);
+      // Only show alert if we haven't loaded the business yet, otherwise it's a minor error
+      if (!business) {
+        Alert.alert('Error', error.message || 'Failed to load business details');
+      }
     } finally {
-      setLoading(false);
+      // Ensure specific loading states are off
+      if (!business) setLoading(false);
       setRefreshing(false);
     }
   };
@@ -405,6 +422,7 @@ export default function BusinessDetailsScreen() {
   };
 
   const loadCategories = async () => {
+    let businessCatsResult: any[] = [];
     try {
       setLoadingCategories(true);
 
@@ -419,7 +437,8 @@ export default function BusinessDetailsScreen() {
       if (businessError) {
         console.error('Error fetching business categories:', businessError);
       } else {
-        setAllBusinessCategories(businessCats || []);
+        businessCatsResult = businessCats || [];
+        setAllBusinessCategories(businessCatsResult);
       }
 
       // Fetch all event categories with hierarchy info
@@ -440,6 +459,7 @@ export default function BusinessDetailsScreen() {
     } finally {
       setLoadingCategories(false);
     }
+    return businessCatsResult;
   };
 
   const onRefresh = () => {
@@ -866,15 +886,22 @@ export default function BusinessDetailsScreen() {
     });
   };
 
-  // Get selected categories with full paths
+  // Get selected categories with full paths (only leaf-level selected items)
   const selectedCategoriesWithPaths = React.useMemo(() => {
-    // Only show child categories (those with parents)
-    const childIds = selectedCategoryIds.filter(id => {
+    // Only show selected categories that:
+    // 1. Have a parent (not root)
+    // 2. Don't have any selected children (leaf-level in selection)
+    const leafIds = selectedCategoryIds.filter(id => {
       const cat = allBusinessCategories.find(c => c.id === id);
-      return cat && cat.parent_category_id !== null;
+      if (!cat || cat.parent_category_id === null) return false;
+      // Check if any of its children are also selected
+      const hasSelectedChild = allBusinessCategories.some(
+        c => c.parent_category_id === id && selectedCategoryIds.includes(c.id)
+      );
+      return !hasSelectedChild;
     });
 
-    return childIds.map((id) => ({
+    return leafIds.map((id) => ({
       id,
       path: getCategoryPath(id, allBusinessCategories),
       name: allBusinessCategories.find(c => c.id === id)?.name || ''
@@ -1116,32 +1143,65 @@ export default function BusinessDetailsScreen() {
 
   const toggleTempCategorySelection = (categoryId: string) => {
     setTempSelectedCategoryIds((prev) => {
-      if (prev.includes(categoryId)) {
+      let newIds = [...prev];
+      const isSelected = prev.includes(categoryId);
+
+      // Helper to find all descendants recursively
+      const getDescendants = (parentId: string): string[] => {
+        let descendants: string[] = [];
+        const children = allBusinessCategories.filter(c => c.parent_category_id === parentId);
+        if (children.length > 0) {
+          children.forEach(child => {
+            descendants.push(child.id);
+            descendants = [...descendants, ...getDescendants(child.id)];
+          });
+        }
+        return descendants;
+      };
+
+      const descendants = getDescendants(categoryId);
+
+      if (isSelected) {
+        // Deselecting: remove id and all descendants
+        newIds = newIds.filter((id) => id !== categoryId && !descendants.includes(id));
+
         setExpandedCategoryIds((expanded) => {
           const next = new Set(expanded);
           next.delete(categoryId);
           return next;
         });
-        return prev.filter((id) => id !== categoryId);
+      } else {
+        // Selecting: add id and all descendants
+        if (!newIds.includes(categoryId)) newIds.push(categoryId);
+
+        descendants.forEach(childId => {
+          if (!newIds.includes(childId)) {
+            newIds.push(childId);
+          }
+        });
+
+        // Auto-expand the parent category to show selected children
+        setExpandedCategoryIds((expanded) => {
+          const newExpanded = new Set(expanded);
+          newExpanded.add(categoryId);
+          return newExpanded;
+        });
+
+        const category = allBusinessCategories.find((c) => c.id === categoryId);
+        if (category) {
+          const parentChain: string[] = [];
+          let currentParentId: string | null = category.parent_category_id;
+          while (currentParentId) {
+            parentChain.push(currentParentId);
+            const parent = allBusinessCategories.find((c) => c.id === currentParentId);
+            currentParentId = parent?.parent_category_id || null;
+          }
+          if (parentChain.length > 0) {
+            setExpandedCategoryIds((expanded) => new Set([...expanded, ...parentChain]));
+          }
+        }
       }
-      const category = allBusinessCategories.find((c) => c.id === categoryId);
-      if (category) {
-        const parentChain: string[] = [];
-        let currentParentId: string | null = category.parent_category_id;
-        while (currentParentId) {
-          parentChain.push(currentParentId);
-          const parent = allBusinessCategories.find((c) => c.id === currentParentId);
-          currentParentId = parent?.parent_category_id || null;
-        }
-        if (parentChain.length > 0) {
-          setExpandedCategoryIds((expanded) => new Set([...expanded, ...parentChain]));
-        }
-        const hasChildren = allBusinessCategories.some((c) => c.parent_category_id === categoryId);
-        if (hasChildren) {
-          setExpandedCategoryIds((expanded) => new Set([...expanded, categoryId]));
-        }
-      }
-      return [...prev, categoryId];
+      return newIds;
     });
   };
 
@@ -1181,7 +1241,20 @@ export default function BusinessDetailsScreen() {
   // Temp handler for event selection in modal
   const toggleTempEventSelection = (eventId: string) => {
     setTempSelectedEventIds((prev) => {
-      if (prev.includes(eventId)) {
+      let newIds = [...prev];
+      const isSelected = prev.includes(eventId);
+
+      if (isSelected) {
+        // Deselecting
+        newIds = newIds.filter((id) => id !== eventId);
+
+        // Also deselect all children if this is a parent category
+        const childCategories = allEventCategories.filter(c => c.parent_category_id === eventId);
+        if (childCategories.length > 0) {
+          const childIds = childCategories.map(c => c.id);
+          newIds = newIds.filter(id => !childIds.includes(id));
+        }
+
         // Collapse when deselecting
         setExpandedEventCategoryIds((expanded) => {
           const newExpanded = new Set(expanded);
@@ -1190,20 +1263,28 @@ export default function BusinessDetailsScreen() {
           }
           return newExpanded;
         });
-        return prev.filter((id) => id !== eventId);
       } else {
-        // Find the category and expand it if it has children
-        const category = allEventCategories.find((c) => c.id === eventId);
-        if (category) {
-          const hasChildren = allEventCategories.some(
-            (c) => c.parent_category_id === eventId
-          );
-          if (hasChildren) {
-            setExpandedEventCategoryIds((expanded) => new Set([...expanded, eventId]));
-          }
+        // Selecting
+        newIds.push(eventId);
+
+        // Also select all children if this is a parent category
+        const childCategories = allEventCategories.filter(c => c.parent_category_id === eventId);
+        if (childCategories.length > 0) {
+          childCategories.forEach(child => {
+            if (!newIds.includes(child.id)) {
+              newIds.push(child.id);
+            }
+          });
+
+          // Auto-expand the parent category to show selected children
+          setExpandedEventCategoryIds((expanded) => {
+            const newExpanded = new Set(expanded);
+            newExpanded.add(eventId);
+            return newExpanded;
+          });
         }
-        return [...prev, eventId];
       }
+      return newIds;
     });
   };
 
@@ -2361,7 +2442,7 @@ export default function BusinessDetailsScreen() {
               <Text style={styles.editSectionTitle}>Services & Experience</Text>
 
               <View style={styles.editField}>
-                <Text style={styles.editLabel}>Service Category (root) *</Text>
+                <Text style={styles.editLabel}>Business Category *</Text>
                 <Dropdown
                   options={rootCategoriesForDropdown.map((n: any) => ({
                     label: n.icon ? `${n.icon} ${n.name}` : n.name,
@@ -2376,7 +2457,7 @@ export default function BusinessDetailsScreen() {
               </View>
 
               <View style={styles.editField}>
-                <Text style={styles.editLabel}>Sub-categories *</Text>
+                <Text style={styles.editLabel}>Services Offered *</Text>
                 <TouchableOpacity
                   style={[
                     styles.dropdownTrigger,
@@ -2406,10 +2487,21 @@ export default function BusinessDetailsScreen() {
 
                 {selectedCategoriesWithPaths.length > 0 && (
                   <View style={styles.selectedContainer}>
-                    <Text style={styles.selectedLabel}>
-                      Selected ({selectedCategoriesWithPaths.length}):
-                    </Text>
-                    {selectedCategoriesWithPaths.map((item) => (
+                    <View style={styles.selectedHeader}>
+                      <Text style={styles.selectedLabel}>
+                        Selected ({selectedCategoriesWithPaths.length}):
+                      </Text>
+                      {selectedCategoriesWithPaths.length > 3 && (
+                        <TouchableOpacity onPress={() => setIsCategoriesExpanded(!isCategoriesExpanded)}>
+                          <ChevronDown
+                            size={20}
+                            color="#666"
+                            style={{ transform: [{ rotate: isCategoriesExpanded ? '180deg' : '0deg' }] }}
+                          />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                    {(isCategoriesExpanded ? selectedCategoriesWithPaths : selectedCategoriesWithPaths.slice(0, 3)).map((item) => (
                       <View key={item.id} style={styles.selectedChip}>
                         <Text style={styles.selectedChipText}>{item.path}</Text>
                         <TouchableOpacity
@@ -2446,8 +2538,8 @@ export default function BusinessDetailsScreen() {
                       <View style={styles.categoryModalHeader}>
                         <Text style={styles.categoryModalTitle}>
                           {subtreeForSelectedRoot
-                            ? `Sub-categories under ${subtreeForSelectedRoot.name}`
-                            : 'Select sub-categories'}
+                            ? `Services offered under ${subtreeForSelectedRoot.name}`
+                            : 'Select Services offered'}
                         </Text>
                         <TouchableOpacity
                           onPress={handleCategoryModalClose}
@@ -2512,10 +2604,21 @@ export default function BusinessDetailsScreen() {
                 {/* Selected Events Display */}
                 {selectedEventsWithPaths.length > 0 && (
                   <View style={styles.selectedContainer}>
-                    <Text style={styles.selectedLabel}>
-                      Selected Events ({selectedEventsWithPaths.length}):
-                    </Text>
-                    {selectedEventsWithPaths.map((item) => {
+                    <View style={styles.selectedHeader}>
+                      <Text style={[styles.selectedLabel, { marginBottom: 0 }]}>
+                        Selected Events ({selectedEventsWithPaths.length}):
+                      </Text>
+                      {selectedEventsWithPaths.length > 3 && (
+                        <TouchableOpacity onPress={() => setIsEventsExpanded(!isEventsExpanded)}>
+                          <ChevronDown
+                            size={20}
+                            color="#666"
+                            style={{ transform: [{ rotate: isEventsExpanded ? '180deg' : '0deg' }] }}
+                          />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                    {(isEventsExpanded ? selectedEventsWithPaths : selectedEventsWithPaths.slice(0, 3)).map((item) => {
                       const eventCategory = allEventCategories.find((c) => c.id === item.id);
                       return (
                         <View key={item.id} style={styles.selectedChip}>
@@ -3680,6 +3783,8 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#1a1a1a',
+    flex: 1,
+    marginRight: 12,
   },
   field: {
     marginBottom: 20,
@@ -3816,6 +3921,12 @@ const styles = StyleSheet.create({
   placeholder: {
     color: '#999',
   },
+  selectedHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   selectedContainer: {
     marginBottom: 16,
     padding: 12,
@@ -3866,8 +3977,10 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   closeButton: {
-    width: 32,
-    height: 32,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#f5f5f5',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -3906,20 +4019,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   categoryItem: {
-    marginBottom: 4,
+    marginBottom: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
   categoryRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
+    alignItems: 'flex-start',
+    paddingVertical: 12,
     paddingRight: 12,
+    minHeight: 44,
   },
   expandButton: {
     width: 24,
     height: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 4,
+    marginRight: 6,
+    marginTop: 0,
   },
   radioButton: {
     width: 24,
@@ -3952,24 +4069,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   checkbox: {
-    width: 20,
-    height: 20,
-    marginRight: 8,
+    width: 22,
+    height: 22,
+    marginRight: 10,
+    marginTop: 0,
+    flexShrink: 0,
   },
   checkboxSelected: {
-    width: 20,
-    height: 20,
+    width: 22,
+    height: 22,
     backgroundColor: '#007AFF',
-    borderRadius: 4,
+    borderRadius: 6,
     justifyContent: 'center',
     alignItems: 'center',
   },
   checkboxUnselected: {
-    width: 20,
-    height: 20,
+    width: 22,
+    height: 22,
     borderWidth: 2,
-    borderColor: '#ccc',
-    borderRadius: 4,
+    borderColor: '#d0d0d0',
+    borderRadius: 6,
     backgroundColor: '#fff',
   },
   categoryIcon: {
@@ -3977,16 +4096,20 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   categoryName: {
-    fontSize: 16,
-    color: '#1a1a1a',
+    fontSize: 15,
+    color: '#333',
     flex: 1,
+    flexWrap: 'wrap',
+    lineHeight: 22,
   },
   categoryNameSelected: {
     fontWeight: '600',
     color: '#007AFF',
   },
   childrenContainer: {
-    marginLeft: 20,
+    marginLeft: 12,
+    borderLeftWidth: 1,
+    borderLeftColor: '#e8e8e8',
   },
   emptyText: {
     padding: 20,

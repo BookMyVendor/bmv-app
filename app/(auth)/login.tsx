@@ -196,13 +196,13 @@ export default function LoginScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
       >
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={styles.content}>
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ flexGrow: 1 }}
-              keyboardShouldPersistTaps="handled"
-            >
+        <View style={styles.content}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ flexGrow: 1 }}
+            keyboardShouldPersistTaps="handled"
+          >
+            <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
               <View style={styles.innerContent}>
                 {/* MAIN CONTENT (fills space) */}
                 <View style={{ flex: 1, paddingBottom: 20 }}>
@@ -226,6 +226,7 @@ export default function LoginScreen() {
                           <TextInput
                             style={styles.input}
                             placeholder="Mobile Number"
+                            placeholderTextColor="#1a1a1a"
                             keyboardType="phone-pad"
                             value={phone}
                             onChangeText={(text) => {
@@ -366,9 +367,9 @@ export default function LoginScreen() {
 
 
               </View>
-            </ScrollView>
-          </View>
-        </TouchableWithoutFeedback>
+            </TouchableWithoutFeedback>
+          </ScrollView>
+        </View>
       </KeyboardAvoidingView>
 
       {/* Bottom anchored support links */}

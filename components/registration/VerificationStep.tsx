@@ -230,7 +230,7 @@ const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <View style={[styles.container, styles.content]}>
       <View style={styles.infoBox}>
         <Text style={styles.infoTitle}>Business Verification</Text>
         <Text style={styles.infoText}>
@@ -339,7 +339,7 @@ const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(
           • Protects your business identity
         </Text>
       </View>
-    </ScrollView>
+    </View>
   );
 });
 
@@ -350,7 +350,6 @@ export default VerificationStep;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
   },
   content: {
     padding: 24,

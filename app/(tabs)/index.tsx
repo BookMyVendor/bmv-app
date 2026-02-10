@@ -499,7 +499,7 @@ export default function DashboardScreen() {
           {/* Always show Register Business button */}
           <View style={styles.primaryButtonContainer}>
             <TouchableOpacity
-              style={[styles.primaryButton, businesses.length > 0 && styles.primaryButtonWithMargin]}
+              style={[styles.primaryButton, styles.primaryButtonWithMargin]}
               onPress={() => router.push('/business-registration')}
               activeOpacity={0.8}
             >
@@ -675,6 +675,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 32,
     alignItems: 'center',
+    marginBottom: 16,
   },
   emptyStateTitle: {
     fontSize: 18,
@@ -699,7 +700,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   primaryButtonWithMargin: {
-    marginTop: 16,
+    marginTop: 8,
   },
   primaryButtonGradient: {
     flexDirection: 'row',

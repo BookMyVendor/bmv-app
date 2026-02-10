@@ -54,7 +54,7 @@ function RootLayoutNav() {
       // This helps catch updates after terms acceptance
       checkStorage();
     }
-  }, [session?.id, profile?.id, checkStorage]);
+  }, [session?.user?.id, profile?.id, checkStorage]);
 
   // Also refresh when navigating away from terms screen
   useEffect(() => {
@@ -222,7 +222,7 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <AuthProvider>
         <RootLayoutNav />
-        <StatusBar style="auto" />
+        <StatusBar style="dark" />
       </AuthProvider>
     </SafeAreaProvider>
   );

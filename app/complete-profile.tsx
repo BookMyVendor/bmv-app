@@ -226,13 +226,17 @@ export default function CompleteProfileScreen() {
 
       // Upload to storage bucket
       const { error: uploadError } = await supabaseCore.storage
-        .from('profile_image')
+        .from('vendor-media')
         .upload(filePath, fileBytes, {
           contentType: mimeType,
         });
 
       if (uploadError) {
-        console.error('❌ Storage upload error:', uploadError);
+        console.error('❌ Storage upload error:', uploadError, {
+          bucket: 'vendor-media',
+          path: filePath,
+          mimeType
+        });
         throw uploadError;
       }
       console.log('✅ Image uploaded to storage');
@@ -249,7 +253,7 @@ export default function CompleteProfileScreen() {
           mime_type: mimeType,
           file_extension: fileExt,
           storage_provider: 'supabase',
-          storage_bucket: 'profile_image',
+          storage_bucket: 'vendor-media',
           upload_status: 'completed',
           uploaded_by_type: 'vendor',
           uploaded_by_id: user?.id,

@@ -158,7 +158,7 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <View style={[styles.container, styles.content]}>
       <View style={styles.field}>
         <Text style={styles.label}>Business Address *</Text>
         <TextInput
@@ -324,7 +324,7 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
           Enter your pincode to auto-fill city, locality, and state. This helps customers find vendors in their area.
         </Text>
       </View>
-    </ScrollView>
+    </View>
   );
 });
 
@@ -335,7 +335,6 @@ export default LocationCoverageStep;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
   },
   content: {
     padding: 24,

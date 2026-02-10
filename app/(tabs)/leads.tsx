@@ -69,6 +69,8 @@ export default function LeadsScreen() {
   const [showFilterScrollIndicator, setShowFilterScrollIndicator] = useState(false);
   const filterScrollViewRef = useRef<ScrollView>(null);
 
+  const hasLoadedLeads = useRef(false);
+
   useEffect(() => {
     if (params.statuses && typeof params.statuses === 'string') {
       const statusArray = params.statuses.split(',');
@@ -81,7 +83,7 @@ export default function LeadsScreen() {
 
   useEffect(() => {
     if (user?.id) {
-      fetchLeads();
+      fetchLeads(!hasLoadedLeads.current);
     }
   }, [user?.id]);
 
@@ -89,14 +91,16 @@ export default function LeadsScreen() {
   useFocusEffect(
     useCallback(() => {
       if (user?.id) {
-        fetchLeads();
+        fetchLeads(!hasLoadedLeads.current);
       }
     }, [user?.id])
   );
 
-  const fetchLeads = async () => {
+  const fetchLeads = async (showLoading = true) => {
     try {
-      setLoading(true);
+      if (showLoading) {
+        setLoading(true);
+      }
 
       const { data: businessData } = await supabaseCore
         .from('vendor_businesses')
@@ -105,7 +109,8 @@ export default function LeadsScreen() {
 
       if (!businessData || businessData.length === 0) {
         setLeads([]);
-        setLoading(false);
+        if (showLoading) setLoading(false);
+        hasLoadedLeads.current = true;
         return;
       }
 
@@ -164,6 +169,7 @@ export default function LeadsScreen() {
       console.log(`✅ Fetched ${leadsWithDetails.length} leads`);
       console.log('Sample lead IDs:', leadsWithDetails.slice(0, 3).map(l => l.id));
       setLeads(leadsWithDetails);
+      hasLoadedLeads.current = true;
     } catch (error) {
       console.error('❌ Error fetching leads:', error);
       Alert.alert('Error', 'Failed to load leads. Please try again.');
@@ -176,7 +182,7 @@ export default function LeadsScreen() {
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      await fetchLeads();
+      await fetchLeads(false);
     } finally {
       setRefreshing(false);
     }

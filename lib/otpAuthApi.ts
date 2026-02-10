@@ -62,6 +62,7 @@ export interface RefreshTokenResponse {
   success: boolean;
   accessToken: string;
   expiresIn: number; // seconds
+  refreshToken?: string; // New refresh token (if rotated)
 }
 
 export interface AuthError {
@@ -278,9 +279,13 @@ export async function refreshAccessToken(): Promise<{ data?: RefreshTokenRespons
     const responseData = data as RefreshTokenResponse;
 
     // Update stored tokens
+    // IMPORTANT: If the server returns a new refresh token (Token Rotation), we MUST store it
+    // effectively replacing the old one. If not returned, we keep the old one.
+    const newRefreshToken = responseData.refreshToken || refreshToken;
+
     await storeTokens({
       accessToken: responseData.accessToken,
-      refreshToken, // Keep the same refresh token
+      refreshToken: newRefreshToken,
       expiresIn: responseData.expiresIn,
     });
 

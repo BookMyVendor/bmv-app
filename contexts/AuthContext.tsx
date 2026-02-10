@@ -5,6 +5,8 @@ import { supabaseCore, supabaseCms, supabaseCrm } from '../lib/supabase';
 import { sendOTP, verifyOTP as verifyOTPApi, type VerifyOTPResponse } from '../lib/otpAuthApi';
 import {
   getAccessToken,
+  getRefreshToken,
+  getTokenExpiry,
   hasTokens,
   clearTokens,
   isTokenExpiredOrExpiringSoon,
@@ -94,37 +96,68 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const hasStoredTokens = await hasTokens();
         if (hasStoredTokens) {
-          // Check if token needs refresh
+          console.log('[AUTH] Stored tokens found, initializing session...');
+
+          // 1. Check if token needs refresh using our manual logic
           if (await isTokenExpiredOrExpiringSoon()) {
+            console.log('[AUTH] Token expiring soon, refreshing manually before init...');
             const refreshResult = await refreshAccessToken();
             if (!refreshResult.data) {
-              // Refresh failed, clear tokens
+              console.error('[AUTH] Manual refresh failed on boot, clearing session');
               await clearTokens();
               setLoading(false);
               return;
             }
           }
 
-          // Get user info from token (we'll need to decode or fetch from API)
-          // For now, try to get from Supabase session if available
-          const { data: { session } } = await supabaseCore.auth.getSession();
-          if (session?.user) {
-            setSession(session);
-            setUser(session.user);
-            await fetchProfile(session.user.id);
-          } else {
-            // If no Supabase session but we have tokens, we need to fetch user info
-            // This would require an API endpoint to get user from token
-            // For now, we'll rely on verifyOTP to set the user
+          // 2. Get the latest tokens from SecureStore
+          const accessToken = await getAccessToken();
+          const refreshTokenValue = await getRefreshToken();
+          const expiryTime = await getTokenExpiry();
+
+          if (accessToken) {
+            // 3. Reconstruct session from tokens
+            // First try to get the user from this token to ensure it's valid
+            const { data: { user: supabaseUser }, error: userError } = await supabaseCore.auth.getUser(accessToken);
+
+            if (supabaseUser && !userError) {
+              const session: Session = {
+                access_token: accessToken,
+                refresh_token: refreshTokenValue || '',
+                expires_at: expiryTime ? Math.floor(expiryTime / 1000) : Math.floor(Date.now() / 1000) + 3600,
+                expires_in: 3600,
+                token_type: 'bearer',
+                user: supabaseUser,
+              };
+
+              // 4. Sync this session to all clients IMMEDIATELY
+              // This overwrites any stale session in Supabase's internal AsyncStorage
+              await setSessionOnAllClients(session);
+
+              setSession(session);
+              setUser(session.user);
+              userRef.current = session.user;
+              await fetchProfile(session.user.id);
+              console.log('[AUTH] Session restored successfully from SecureStore');
+            } else {
+              console.error('[AUTH] Failed to get user from restored token:', userError);
+              // If we have tokens but can't get user, try fallback refresh or clear
+              const refreshResult = await refreshAccessToken();
+              if (refreshResult.error) {
+                await clearTokens();
+              }
+            }
           }
         } else {
-          // Check Supabase session as fallback
-          const { data: { session } } = await supabaseCore.auth.getSession();
-          if (session) {
-            setSession(session);
-            setUser(session.user);
-            if (session.user?.id) {
-              await fetchProfile(session.user.id);
+          // Fallback check for Supabase session directly (e.g. if SecureStore cleared but AsyncStorage didn't)
+          const { data: { session: sbSession } } = await supabaseCore.auth.getSession();
+          if (sbSession) {
+            console.log('[AUTH] Found Supabase session as fallback');
+            setSession(sbSession);
+            setUser(sbSession.user);
+            userRef.current = sbSession.user;
+            if (sbSession.user?.id) {
+              await fetchProfile(sbSession.user.id);
             }
           }
         }
@@ -480,13 +513,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const result = await refreshAccessToken();
       if (result.data && session) {
         // Update session with new expiry
+        // Update session with new expiry and refresh token if provided
         const updatedSession: Session = {
           ...session,
           access_token: result.data.accessToken,
+          refresh_token: result.data.refreshToken || session.refresh_token,
           expires_at: Math.floor(Date.now() / 1000) + result.data.expiresIn,
           expires_in: result.data.expiresIn,
         };
+
+        // Update local state
         setSession(updatedSession);
+
+        // Update all Supabase clients with fresh session
+        await setSessionOnAllClients(updatedSession);
+
+        console.log('[AUTH] Token refreshed successfully', {
+          expiresIn: result.data.expiresIn,
+          rotated: !!result.data.refreshToken
+        });
       }
     } catch (error) {
       console.error('Token refresh failed:', error);
