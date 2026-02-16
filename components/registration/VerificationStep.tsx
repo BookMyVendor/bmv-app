@@ -232,9 +232,13 @@ const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.infoBox}>
-        <Text style={styles.infoTitle}>Business Verification</Text>
+        <Text style={styles.infoTitle}>Get Verified, Get Noticed</Text>
         <Text style={styles.infoText}>
-          Adding verification details helps build trust with customers. PAN number and PAN card document upload are required. Other documents are optional.
+          Verified businesses earn more trust — and more bookings.{'\n\n'}
+          ✅ Customers prefer verified vendors{'\n'}
+          📈 Rank higher in search results{'\n'}
+          ⭐ Unlock premium features & badges{'\n'}
+          🔒 Protect your brand from impersonation
         </Text>
       </View>
 
@@ -330,15 +334,6 @@ const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(
         );
       })}
 
-      <View style={styles.tipBox}>
-        <Text style={styles.tipTitle}>💡 Why verify?</Text>
-        <Text style={styles.tipText}>
-          • Builds customer confidence{'\n'}
-          • Appears higher in search results{'\n'}
-          • Eligible for premium features{'\n'}
-          • Protects your business identity
-        </Text>
-      </View>
     </ScrollView>
   );
 });
