@@ -29,6 +29,7 @@ import Logo from '../components/Logo';
 import { validateEmail, getEmailError } from '../lib/validation';
 import { createPackage } from '../lib/packageApi';
 import ScreenBackground from '../components/ScreenBackground';
+import { stripCountryCode } from '../lib/formatters';
 
 interface BusinessData {
   businessName: string;
@@ -47,6 +48,7 @@ interface BusinessData {
   city: string;
   state: string;
   pincode?: string; // Add this
+  locality?: string; // Add this
   serviceRadiusKm?: number; // Add this
   operatingLocations?: string[]; // Add this (for future use)
   gstNumber: string;
@@ -130,7 +132,7 @@ export default function BusinessRegistrationScreen() {
         // Only set if not already set (don't overwrite user input or restored data)
         const updated: Partial<BusinessData> = { ...prev };
         if (!prev.phoneNumber && profile.phone) {
-          updated.phoneNumber = profile.phone;
+          updated.phoneNumber = stripCountryCode(profile.phone);
         }
         if (!prev.email && profile.email) {
           updated.email = profile.email;
@@ -139,6 +141,13 @@ export default function BusinessRegistrationScreen() {
       });
     }
   }, [profile, isRestored]);
+
+  const handleFieldFocus = () => {
+    // Add a small delay to ensure the keyboard has started showing
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 200);
+  };
 
   // Clear saved data when registration is successfully submitted
   const clearSavedData = async () => {
@@ -235,7 +244,7 @@ export default function BusinessRegistrationScreen() {
         errors.email = 'Please enter a valid email address';
       }
       if (!businessData.phoneNumber || !businessData.phoneNumber.trim()) {
-        errors.phoneNumber = 'Phone number is required';
+        errors.phoneNumber = 'Business contact number is required';
       }
     } else if (currentPage === 1) {
       // Services & Experience step
@@ -269,7 +278,7 @@ export default function BusinessRegistrationScreen() {
         errors.pincode = 'Pincode must be 6 digits';
       }
       if (!businessData.city || !businessData.city.trim()) {
-        errors.city = 'City/Town is required';
+        errors.city = 'Area is required';
       }
       if (!businessData.state || !businessData.state.trim()) {
         errors.state = 'State is required';
@@ -465,12 +474,30 @@ export default function BusinessRegistrationScreen() {
   };
 
   const handleSubmit = async () => {
+    // 0. Validate Phone Number (10 digits)
+    if (businessData.phoneNumber && businessData.phoneNumber.trim()) {
+      const cleanedPhone = stripCountryCode(businessData.phoneNumber);
+      if (cleanedPhone.length !== 10) {
+        Alert.alert('Validation Error', 'Business contact number must be exactly 10 digits.');
+        return;
+      }
+    }
+
     // Validate PAN number is provided
     if (!businessData.panNumber || !businessData.panNumber.trim()) {
       Alert.alert('Validation Error', 'PAN is required. Please enter your PAN number.');
       setSubmitting(false);
       return;
     }
+
+    // Validate PAN format
+    const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+    if (!panRegex.test(businessData.panNumber.trim().toUpperCase())) {
+      Alert.alert('Validation Error', 'Please enter a valid PAN number (e.g., ABCDE1234F).');
+      setSubmitting(false);
+      return;
+    }
+
 
     // Validate PAN document is uploaded
     const panDocuments = businessData.verificationDocuments?.['pan'];
@@ -508,12 +535,13 @@ export default function BusinessRegistrationScreen() {
           city: businessData.city,
           state: businessData.state,
           pincode: businessData.pincode || null,
+          locality: businessData.locality || null,
           latitude: null,
           longitude: null,
           operating_locations: businessData.operatingLocations || [],
           service_radius_km: businessData.serviceRadiusKm || 0,
           contact_person_name: businessData.contactPersonName,
-          contact_person_phone: businessData.phoneNumber, // Add this line
+          contact_person_phone: stripCountryCode(businessData.phoneNumber), // Ensure no +91
           contact_person_role: businessData.contactPersonRole || null,
           business_registration_number: businessData.panNumber || null, // PAN stored in business_registration_number field
           website_url: businessData.websiteUrl || null,
@@ -558,13 +586,20 @@ export default function BusinessRegistrationScreen() {
       // Step 4: Upload portfolio images if provided (after business is created)
       if (businessData.portfolioImages && businessData.portfolioImages.length > 0) {
         try {
-          await uploadMultipleBusinessImages(
-            createdBusiness.id,
-            businessData.portfolioImages,
-            (current, total) => {
-              console.log(`Uploading portfolio images ${current}/${total}`);
-            }
-          );
+          // Filter out the cover photo if it was already uploaded in Step 3
+          const otherImages = businessData.coverPhotoUri
+            ? businessData.portfolioImages.filter(uri => uri !== businessData.coverPhotoUri)
+            : businessData.portfolioImages;
+
+          if (otherImages.length > 0) {
+            await uploadMultipleBusinessImages(
+              createdBusiness.id,
+              otherImages,
+              (current, total) => {
+                console.log(`Uploading portfolio images ${current}/${total}`);
+              }
+            );
+          }
         } catch (imageError) {
           console.error('Error uploading portfolio images:', imageError);
           // Don't fail the entire registration if images fail
@@ -690,6 +725,7 @@ export default function BusinessRegistrationScreen() {
           data={businessData}
           onUpdate={updateBusinessData}
           validationErrors={validationErrors}
+          onFocus={handleFieldFocus}
         />
       ),
     },
@@ -702,6 +738,7 @@ export default function BusinessRegistrationScreen() {
           data={businessData}
           onUpdate={updateBusinessData}
           validationErrors={validationErrors}
+          onFocus={handleFieldFocus}
         />
       ),
     },
@@ -714,6 +751,7 @@ export default function BusinessRegistrationScreen() {
           data={businessData}
           onUpdate={updateBusinessData}
           validationErrors={validationErrors}
+          onFocus={handleFieldFocus}
         />
       ),
     },
@@ -726,6 +764,7 @@ export default function BusinessRegistrationScreen() {
           data={businessData}
           onUpdate={updateBusinessData}
           validationErrors={validationErrors}
+          onFocus={handleFieldFocus}
         />
       ),
     },
@@ -736,6 +775,7 @@ export default function BusinessRegistrationScreen() {
         <PortfolioSocialStep
           data={businessData}
           onUpdate={updateBusinessData}
+          onFocus={handleFieldFocus}
         />
       ),
     },
@@ -745,7 +785,7 @@ export default function BusinessRegistrationScreen() {
     <ScreenBackground style={{ flex: 1 }}>
       <KeyboardAvoidingView
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
       >
         <View style={styles.header}>
@@ -783,9 +823,9 @@ export default function BusinessRegistrationScreen() {
         <ScrollView
           ref={scrollViewRef}
           style={styles.pager}
-          contentContainerStyle={styles.pagerContent}
-          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={[styles.pagerContent, { paddingBottom: 100 }]}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           scrollEnabled={contentHeight > containerHeight}
           onContentSizeChange={(_, h) => setContentHeight(h)}
           onLayout={(e) => setContainerHeight(e.nativeEvent.layout.height)}

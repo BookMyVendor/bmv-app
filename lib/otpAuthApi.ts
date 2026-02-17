@@ -91,6 +91,23 @@ function getProjectRef(): string {
 }
 
 /**
+ * Ensure phone number is in +91XXXXXXXXXX format
+ */
+function ensureFullPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 10) {
+    return `+91${digits}`;
+  }
+  if (digits.length === 12 && digits.startsWith('91')) {
+    return `+${digits}`;
+  }
+  if (phone.startsWith('+')) {
+    return phone;
+  }
+  return phone;
+}
+
+/**
  * Parse error response from API
  */
 function parseErrorResponse(response: Response, data: any): AuthError {
@@ -130,7 +147,7 @@ export async function sendOTP(phone: string): Promise<{ data?: SendOTPResponse; 
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        phone,
+        phone: ensureFullPhone(phone),
         deviceInfo,
       } as SendOTPRequest),
     });
@@ -167,7 +184,7 @@ export async function resendOTP(phone: string): Promise<{ data?: ResendOTPRespon
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        phone,
+        phone: ensureFullPhone(phone),
       }),
     });
 
@@ -207,7 +224,7 @@ export async function verifyOTP(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        phone,
+        phone: ensureFullPhone(phone),
         otp,
         deviceInfo,
       } as VerifyOTPRequest),
@@ -271,8 +288,12 @@ export async function refreshAccessToken(): Promise<{ data?: RefreshTokenRespons
     const data = await response.json();
 
     if (!response.ok) {
-      // If refresh fails, clear tokens
-      await clearTokens();
+      // Only clear tokens for client errors (4xx), meaning the token is invalid
+      // For server errors (5xx), keep tokens to retry later
+      if (response.status >= 400 && response.status < 500) {
+        console.log('[AUTH] Refresh token rejected (4xx), clearing tokens');
+        await clearTokens();
+      }
       return { error: parseErrorResponse(response, data) };
     }
 
@@ -292,7 +313,6 @@ export async function refreshAccessToken(): Promise<{ data?: RefreshTokenRespons
     return { data: responseData };
   } catch (error: any) {
     console.error('Error refreshing token:', error);
-    await clearTokens();
     return {
       error: {
         code: 'NETWORK_ERROR',

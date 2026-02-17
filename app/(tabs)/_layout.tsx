@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LayoutDashboard, MessageSquare, Star, User } from 'lucide-react-native';
 import { Colors } from '../../constants/theme';
+import analytics from '@react-native-firebase/analytics';
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
@@ -39,6 +40,11 @@ export default function TabLayout() {
             <LayoutDashboard size={size} color={color} />
           ),
         }}
+        listeners={{
+          tabPress: () => {
+            analytics().logEvent('tab_dashboard_tapped');
+          },
+        }}
       />
       <Tabs.Screen
         name="leads"
@@ -48,6 +54,11 @@ export default function TabLayout() {
             <MessageSquare size={size} color={color} />
           ),
         }}
+        listeners={{
+          tabPress: () => {
+            analytics().logEvent('tab_leads_tapped');
+          },
+        }}
       />
       <Tabs.Screen
         name="reviews"
@@ -55,12 +66,22 @@ export default function TabLayout() {
           title: 'Reviews',
           tabBarIcon: ({ size, color }) => <Star size={size} color={color} />,
         }}
+        listeners={{
+          tabPress: () => {
+            analytics().logEvent('tab_reviews_tapped');
+          },
+        }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
           tabBarIcon: ({ size, color }) => <User size={size} color={color} />,
+        }}
+        listeners={{
+          tabPress: () => {
+            analytics().logEvent('tab_profile_tapped');
+          },
         }}
       />
     </Tabs>

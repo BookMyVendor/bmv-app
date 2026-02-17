@@ -12,6 +12,7 @@ import {
   isTokenExpiredOrExpiringSoon,
 } from '../lib/tokenStorage';
 import { refreshAccessToken } from '../lib/otpAuthApi';
+import { registerPushTokenFromDevice } from '../lib/pushNotifications';
 
 
 interface UserProfile {
@@ -21,6 +22,8 @@ interface UserProfile {
   last_name: string | null;
   email: string | null;
   image_file_id: string | null;
+  terms_accepted: boolean | null;
+  terms_accepted_at: string | null;
 }
 
 interface AuthContextType {
@@ -48,6 +51,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isNewUser, setIsNewUser] = useState(false);
   const userRef = useRef<User | null>(null);
   const isLoggingOutRef = useRef<boolean>(false);
+  const isRefreshingRef = useRef<boolean>(false);
+  const isRestoringRef = useRef<boolean>(false);
 
   const fetchProfile = async (userId: string) => {
     try {
@@ -89,24 +94,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const checkStoredTokens = async () => {
       try {
-        if (isLoggingOutRef.current) {
-          setLoading(false);
+        console.log('[AUTH] 🔍 Starting token restoration check...');
+
+        if (isLoggingOutRef.current || isRestoringRef.current) {
+          console.log('[AUTH] ⏭️ Skipping restoration - activity in progress');
           return;
         }
 
+        isRestoringRef.current = true;
         const hasStoredTokens = await hasTokens();
+        console.log('[AUTH] 📦 Has stored tokens:', hasStoredTokens);
+
         if (hasStoredTokens) {
-          console.log('[AUTH] Stored tokens found, initializing session...');
+          console.log('[AUTH] ✅ Stored tokens found, initializing session...');
 
           // 1. Check if token needs refresh using our manual logic
-          if (await isTokenExpiredOrExpiringSoon()) {
-            console.log('[AUTH] Token expiring soon, refreshing manually before init...');
-            const refreshResult = await refreshAccessToken();
-            if (!refreshResult.data) {
-              console.error('[AUTH] Manual refresh failed on boot, clearing session');
-              await clearTokens();
-              setLoading(false);
-              return;
+          const needsRefresh = await isTokenExpiredOrExpiringSoon();
+          console.log('[AUTH] ⏰ Token needs refresh:', needsRefresh);
+
+          if (needsRefresh) {
+            console.log('[AUTH] 🔄 Token expiring soon, refreshing manually before init...');
+            isRefreshingRef.current = true;
+            try {
+              const refreshResult = await refreshAccessToken();
+              if (!refreshResult.data) {
+                console.error('[AUTH] ❌ Manual refresh failed on boot, clearing session');
+                await clearTokens();
+                setLoading(false);
+                return;
+              }
+              console.log('[AUTH] ✅ Token refreshed successfully');
+            } finally {
+              isRefreshingRef.current = false;
             }
           }
 
@@ -115,12 +134,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const refreshTokenValue = await getRefreshToken();
           const expiryTime = await getTokenExpiry();
 
+          console.log('[AUTH] 🔑 Retrieved tokens:', {
+            hasAccessToken: !!accessToken,
+            hasRefreshToken: !!refreshTokenValue,
+            expiryTime: expiryTime ? new Date(expiryTime).toISOString() : 'none',
+            isExpired: expiryTime ? expiryTime < Date.now() : 'unknown'
+          });
+
           if (accessToken) {
             // 3. Reconstruct session from tokens
             // First try to get the user from this token to ensure it's valid
+            console.log('[AUTH] 🔐 Validating access token with Supabase...');
             const { data: { user: supabaseUser }, error: userError } = await supabaseCore.auth.getUser(accessToken);
 
             if (supabaseUser && !userError) {
+              console.log('[AUTH] ✅ Token valid, user found:', supabaseUser.id);
+
               const session: Session = {
                 access_token: accessToken,
                 refresh_token: refreshTokenValue || '',
@@ -132,38 +161,117 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
               // 4. Sync this session to all clients IMMEDIATELY
               // This overwrites any stale session in Supabase's internal AsyncStorage
-              await setSessionOnAllClients(session);
+              console.log('[AUTH] 🔄 Setting session on all Supabase clients...');
 
-              setSession(session);
-              setUser(session.user);
-              userRef.current = session.user;
-              await fetchProfile(session.user.id);
-              console.log('[AUTH] Session restored successfully from SecureStore');
+              // Use a flag to indicate we're doing a manual sync to prevent onAuthStateChange interference
+              isRefreshingRef.current = true;
+              try {
+                await setSessionOnAllClients(session);
+                setSession(session);
+                setUser(session.user);
+                userRef.current = session.user;
+
+                console.log('[AUTH] 👤 Fetching user profile...');
+                await fetchProfile(session.user.id);
+                console.log('[AUTH] ✅ Session restored successfully from SecureStore');
+              } finally {
+                isRefreshingRef.current = false;
+              }
             } else {
-              console.error('[AUTH] Failed to get user from restored token:', userError);
-              // If we have tokens but can't get user, try fallback refresh or clear
-              const refreshResult = await refreshAccessToken();
-              if (refreshResult.error) {
+              console.log('[AUTH] ❌ Token validation failed (likely expired), code:', userError?.status, userError?.code);
+
+              // Only attempt refresh if it's actually an expiry error
+              const isExpiryError = userError?.message?.includes('expired') || userError?.status === 401 || userError?.status === 403;
+
+              if (isExpiryError) {
+                console.log('[AUTH] 🔄 Attempting fallback token refresh...');
+
+                isRefreshingRef.current = true;
+                try {
+                  const refreshResult = await refreshAccessToken();
+                  if (refreshResult.error) {
+                    console.error('[AUTH] ❌ Fallback refresh failed:', refreshResult.error);
+
+                    // Log additional context for TOKEN_EXPIRED errors
+                    if (refreshResult.error.code === 'TOKEN_EXPIRED') {
+                      const storedExpiry = await getTokenExpiry();
+                      console.log('[AUTH] 🕐 Token expiry context:', {
+                        storedExpiryTime: storedExpiry ? new Date(storedExpiry).toISOString() : 'none',
+                        currentTime: new Date().toISOString(),
+                        wasExpiredByStorage: storedExpiry ? storedExpiry < Date.now() : 'unknown',
+                        message: 'Both access and refresh tokens expired. User must log in again.'
+                      });
+                    }
+                    // refreshAccessToken already clears tokens on 4xx
+                  } else if (refreshResult.data) {
+                    console.log('[AUTH] ✅ Fallback refresh succeeded, restoring session with new token...');
+
+                    // Re-validate with the newly refreshed access token
+                    const newAccessToken = await getAccessToken();
+                    const newRefreshTokenVal = await getRefreshToken();
+                    const newExpiry = await getTokenExpiry();
+
+                    if (newAccessToken) {
+                      const { data: { user: refreshedUser }, error: refreshedUserError } =
+                        await supabaseCore.auth.getUser(newAccessToken);
+
+                      if (refreshedUser && !refreshedUserError) {
+                        console.log('[AUTH] ✅ Refreshed token valid, user:', refreshedUser.id);
+
+                        const restoredSession: Session = {
+                          access_token: newAccessToken,
+                          refresh_token: newRefreshTokenVal || '',
+                          expires_at: newExpiry ? Math.floor(newExpiry / 1000) : Math.floor(Date.now() / 1000) + 3600,
+                          expires_in: refreshResult.data.expiresIn || 3600,
+                          token_type: 'bearer',
+                          user: refreshedUser,
+                        };
+
+                        await setSessionOnAllClients(restoredSession);
+                        setSession(restoredSession);
+                        setUser(refreshedUser);
+                        userRef.current = refreshedUser;
+                        await fetchProfile(refreshedUser.id);
+                        console.log('[AUTH] ✅ Session restored after fallback refresh');
+                      } else {
+                        console.error('[AUTH] ❌ Refreshed token still invalid after validation:', refreshedUserError);
+                        await clearTokens();
+                      }
+                    }
+                  }
+                } finally {
+                  isRefreshingRef.current = false;
+                }
+              } else {
+                console.error('[AUTH] ❌ Non-expiry error during validation, clearing session to be safe');
                 await clearTokens();
               }
             }
+          } else {
+            console.warn('[AUTH] ⚠️ No access token found despite hasTokens=true');
           }
         } else {
+          console.log('[AUTH] 📭 No tokens in SecureStore, checking Supabase AsyncStorage...');
+
           // Fallback check for Supabase session directly (e.g. if SecureStore cleared but AsyncStorage didn't)
           const { data: { session: sbSession } } = await supabaseCore.auth.getSession();
           if (sbSession) {
-            console.log('[AUTH] Found Supabase session as fallback');
+            console.log('[AUTH] ✅ Found Supabase session as fallback');
             setSession(sbSession);
             setUser(sbSession.user);
             userRef.current = sbSession.user;
             if (sbSession.user?.id) {
               await fetchProfile(sbSession.user.id);
             }
+          } else {
+            console.log('[AUTH] 📭 No session found anywhere - user needs to login');
           }
         }
       } catch (error) {
-        console.error('Error checking stored tokens:', error);
+        console.error('[AUTH] ❌ Error checking stored tokens:', error);
       } finally {
+        isRestoringRef.current = false;
+        console.log('[AUTH] 🏁 Token restoration complete, setting loading=false');
         setLoading(false);
       }
     };
@@ -177,7 +285,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
+        // CRITICAL: When using custom JWT auth, Supabase's internal auto-refresh
+        // may fail and fire SIGNED_OUT. We must check our SecureStore tokens
+        // before honoring the sign-out to avoid false logouts.
         if (event === 'SIGNED_OUT' || !session) {
+          // If we're currently refreshing or restoring, ignore this event to prevent loops
+          if (isRefreshingRef.current) {
+            console.log('[AUTH] 🛡️ Ignoring SIGNED_OUT during active refresh/restore');
+            return;
+          }
+
+          // Check if we still have valid tokens in SecureStore
+          const stillHasTokens = await hasTokens();
+          if (stillHasTokens) {
+            console.log('[AUTH] Supabase fired SIGNED_OUT but SecureStore has tokens - ignoring');
+            return;
+          }
+
+          console.log('[AUTH] No tokens in SecureStore - honoring sign out');
           setSession(null);
           setUser(null);
           userRef.current = null;
@@ -232,7 +357,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [user?.id]);
 
-  // Auto-refresh token before expiration (check every 5 minutes)
+  // Auto-refresh token before expiration
+  // With 2-minute access tokens, we check every 1 minute.
+  // The 30-second buffer in isTokenExpiredOrExpiringSoon ensures we
+  // refresh before actual expiry.
   useEffect(() => {
     if (!user?.id) {
       return;
@@ -240,6 +368,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const checkAndRefreshToken = async () => {
       if (await isTokenExpiredOrExpiringSoon()) {
+        console.log('[AUTH] Token expiring soon, triggering refresh...');
         await refreshToken();
       }
     };
@@ -247,14 +376,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Check immediately
     checkAndRefreshToken();
 
-    // Then check every 5 minutes
+    // Then check every 20 seconds (safe for 2-min tokens)
     const tokenRefreshInterval = setInterval(() => {
       checkAndRefreshToken();
-    }, 5 * 60 * 1000);
+    }, 20 * 1000);
 
     return () => {
       clearInterval(tokenRefreshInterval);
     };
+  }, [user?.id]);
+
+  // Register push notifications token when user logs in
+  useEffect(() => {
+    if (user?.id) {
+      registerPushTokenFromDevice().catch((err) => {
+        console.error('[AUTH] Background push token registration failed:', err);
+      });
+    }
   }, [user?.id]);
 
   const signInWithOTP = async (phone: string) => {
@@ -320,10 +458,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await setSessionOnAllClients(session);
 
         // Fetch profile before updating session state to avoid UI flicker in navigation
-        if (!newUser && user.id) {
+        // Always try to fetch profile if we have a user ID, regardless of newUser flag
+        // This handles cases where an existing user might be flagged as new by the backend
+        if (user.id) {
           await fetchProfile(user.id);
-        } else {
-          setProfile(null);
         }
 
         setSession(session);
@@ -434,6 +572,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         last_name: 'User',
         email: 'dummy@test.com',
         image_file_id: null,
+        terms_accepted: true,
+        terms_accepted_at: new Date().toISOString(),
       };
 
       // Set profile directly (bypassing Supabase)
@@ -508,11 +648,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Refresh access token using custom API
+  // IMPORTANT: We must use our own auth-refresh-token API and never
+  // rely on Supabase's built-in auto-refresh, which is disabled.
   const refreshToken = async () => {
+    console.log('[AUTH] 🔄 Initiating manual token refresh via custom auth-refresh-token API');
     try {
+      // Set refreshing flag to prevent onAuthStateChange from interfering
+      isRefreshingRef.current = true;
+
       const result = await refreshAccessToken();
       if (result.data && session) {
-        // Update session with new expiry
         // Update session with new expiry and refresh token if provided
         const updatedSession: Session = {
           ...session,
@@ -532,11 +678,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           expiresIn: result.data.expiresIn,
           rotated: !!result.data.refreshToken
         });
+      } else if (result.error) {
+        console.error('[AUTH] Token refresh returned error:', result.error);
+        await signOut();
       }
     } catch (error) {
       console.error('Token refresh failed:', error);
       // If refresh fails, sign out
       await signOut();
+    } finally {
+      isRefreshingRef.current = false;
     }
   };
 

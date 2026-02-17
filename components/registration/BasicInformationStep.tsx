@@ -6,11 +6,13 @@ import {
   StyleSheet,
   ScrollView,
 } from 'react-native';
+import { stripCountryCode } from '../../lib/formatters';
 
 interface BasicInformationStepProps {
   data: any;
   onUpdate: (data: any) => void;
   validationErrors?: Record<string, string>;
+  onFocus?: () => void;
 }
 
 export interface BasicInformationStepRef {
@@ -21,6 +23,7 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
   data,
   onUpdate,
   validationErrors = {},
+  onFocus,
 }, ref) => {
   const handleChange = (field: string, value: string) => {
     onUpdate({ [field]: value });
@@ -63,6 +66,7 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
           placeholder="Enter your business name"
           placeholderTextColor="#999"
           returnKeyType="next"
+          onFocus={onFocus}
           onSubmitEditing={() => contactPersonNameRef.current?.focus()}
         />
         {validationErrors.businessName && (
@@ -83,6 +87,7 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
           placeholder="Enter contact person name"
           placeholderTextColor="#999"
           returnKeyType="next"
+          onFocus={onFocus}
           onSubmitEditing={() => contactPersonRoleRef.current?.focus()}
         />
         {validationErrors.contactPersonName && (
@@ -100,6 +105,7 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
           placeholder="e.g., Owner, Manager, Director"
           placeholderTextColor="#999"
           returnKeyType="next"
+          onFocus={onFocus}
           onSubmitEditing={() => emailRef.current?.focus()}
         />
       </View>
@@ -119,6 +125,7 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
           keyboardType="email-address"
           autoCapitalize="none"
           returnKeyType="next"
+          onFocus={onFocus}
           onSubmitEditing={() => phoneNumberRef.current?.focus()}
         />
         {validationErrors.email && (
@@ -127,14 +134,14 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Phone Number *</Text>
+        <Text style={styles.label}>Business Contact Number *</Text>
         <TextInput
           ref={phoneNumberRef}
           style={[
             styles.input,
             validationErrors.phoneNumber && styles.inputError
           ]}
-          value={data.phoneNumber || ''}
+          value={stripCountryCode(data.phoneNumber) || ''}
           placeholder="Enter 10-digit mobile number"
           placeholderTextColor="#999"
           keyboardType="number-pad"
@@ -149,6 +156,7 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
               handleChange('phoneNumber', numericText);
             }
           }}
+          onFocus={onFocus}
         />
 
         {validationErrors.phoneNumber && (

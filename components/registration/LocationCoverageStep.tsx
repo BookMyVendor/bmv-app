@@ -6,6 +6,7 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
+  TouchableOpacity,
 } from 'react-native';
 import { Check, AlertCircle } from 'lucide-react-native';
 import Dropdown from '../../components/Dropdown';
@@ -15,6 +16,7 @@ interface LocationCoverageStepProps {
   data: any;
   onUpdate: (data: any) => void;
   validationErrors?: Record<string, string>;
+  onFocus?: () => void;
 }
 
 export interface LocationCoverageStepRef {
@@ -58,6 +60,7 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
   data,
   onUpdate,
   validationErrors = {},
+  onFocus,
 }, ref) => {
   const [validatingPincode, setValidatingPincode] = useState(false);
   const [pincodeStatus, setPincodeStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
@@ -177,6 +180,7 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
           textAlignVertical="top"
           returnKeyType="next"
           blurOnSubmit={false}
+          onFocus={onFocus}
           onSubmitEditing={() => pincodeRef.current?.focus()}
         />
         {validationErrors.businessAddress && (
@@ -203,6 +207,7 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
             keyboardType="numeric"
             maxLength={6}
             returnKeyType="next"
+            onFocus={onFocus}
             onSubmitEditing={() => {
               // If city is a TextInput, focus it; otherwise focus locality
               if (cityOptions.length <= 1 && cityRef.current) {
@@ -235,34 +240,44 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>City/Town *</Text>
-        {cityOptions.length > 1 ? (
-          <Dropdown
-            options={cityOptions.map((city) => ({
-              label: city,
-              value: city,
-            }))}
-            value={data.city || ''}
-            placeholder="Select city/town"
-            onChange={(value) => handleChange('city', value)}
-          />
-        ) : (
-          <TextInput
-            ref={cityRef}
-            style={[
-              styles.input,
-              validationErrors.city && styles.inputError
-            ]}
-            value={data.city || ''}
-            onChangeText={(text) => handleChange('city', text)}
-            placeholder="Enter city/town"
-            placeholderTextColor="#999"
-            returnKeyType="next"
-            onSubmitEditing={() => localityRef.current?.focus()}
-          />
-        )}
-        {cityOptions.length > 1 && (
-          <Text style={styles.hintText}>Select from available options for this pincode</Text>
+        <Text style={styles.label}>Area *</Text>
+        <TextInput
+          ref={cityRef}
+          style={[
+            styles.input,
+            validationErrors.city && styles.inputError
+          ]}
+          value={data.city || ''}
+          onChangeText={(text) => handleChange('city', text)}
+          placeholder="Enter area"
+          placeholderTextColor="#999"
+          returnKeyType="next"
+          onFocus={onFocus}
+          onSubmitEditing={() => localityRef.current?.focus()}
+        />
+        {cityOptions.length > 0 && (
+          <View style={styles.suggestionsContainer}>
+            <Text style={styles.suggestionsLabel}>Suggestions:</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestionsScroll}>
+              {cityOptions.map((city) => (
+                <TouchableOpacity
+                  key={city}
+                  style={[
+                    styles.suggestionChip,
+                    data.city === city && styles.suggestionChipSelected
+                  ]}
+                  onPress={() => handleChange('city', city)}
+                >
+                  <Text style={[
+                    styles.suggestionChipText,
+                    data.city === city && styles.suggestionChipTextSelected
+                  ]}>
+                    {city}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
         )}
         {validationErrors.city && (
           <Text style={styles.errorText}>{validationErrors.city}</Text>
@@ -270,18 +285,18 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Locality/District</Text>
+        <Text style={styles.label}>City/Town</Text>
         <TextInput
           ref={localityRef}
           style={styles.input}
           value={data.locality || ''}
           onChangeText={(text) => handleChange('locality', text)}
-          placeholder="Enter locality/district"
+          placeholder="Enter city/town"
           placeholderTextColor="#999"
           returnKeyType="next"
+          onFocus={onFocus}
           onSubmitEditing={() => serviceRadiusRef.current?.focus()}
         />
-        <Text style={styles.hintText}>Auto-filled from pincode (editable)</Text>
       </View>
 
       <View style={styles.field}>
@@ -295,7 +310,6 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
           placeholder="Select state"
           onChange={(value) => handleChange('state', value)}
         />
-        <Text style={styles.hintText}>Auto-filled from pincode (editable)</Text>
         {validationErrors.state && (
           <Text style={styles.errorText}>{validationErrors.state}</Text>
         )}
@@ -315,6 +329,7 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
           placeholderTextColor="#999"
           keyboardType="numeric"
           maxLength={4}
+          onFocus={onFocus}
           returnKeyType="done"
         />
       </View>
@@ -416,5 +431,38 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#0066cc',
     lineHeight: 20,
+  },
+  suggestionsContainer: {
+    marginTop: 8,
+  },
+  suggestionsLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 6,
+    marginLeft: 4,
+  },
+  suggestionsScroll: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  suggestionChip: {
+    backgroundColor: '#f0f0f0',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  suggestionChipSelected: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  suggestionChipText: {
+    fontSize: 13,
+    color: '#666',
+  },
+  suggestionChipTextSelected: {
+    color: '#fff',
+    fontWeight: '500',
   },
 });

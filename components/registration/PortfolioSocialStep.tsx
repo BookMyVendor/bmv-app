@@ -16,14 +16,15 @@ import { pickMultipleImages, uploadMultipleBusinessImages, pickImage } from '../
 interface PortfolioSocialStepProps {
   data: any;
   onUpdate: (data: any) => void;
+  onFocus?: () => void;
 }
 
 export default function PortfolioSocialStep({
   data,
   onUpdate,
+  onFocus,
 }: PortfolioSocialStepProps) {
   const [portfolioImages, setPortfolioImages] = useState<string[]>(data.portfolioImages || []);
-  const [coverPhotoUri, setCoverPhotoUri] = useState<string | null>(data.coverPhotoUri || null);
   const [uploading, setUploading] = useState(false);
 
   // Refs for keyboard navigation
@@ -31,6 +32,17 @@ export default function PortfolioSocialStep({
   const instagramUrlRef = useRef<TextInput>(null);
   const facebookUrlRef = useRef<TextInput>(null);
   const youtubeUrlRef = useRef<TextInput>(null);
+
+  // Sync cover image with first portfolio image
+  React.useEffect(() => {
+    if (portfolioImages.length > 0) {
+      if (data.coverPhotoUri !== portfolioImages[0]) {
+        onUpdate({ coverPhotoUri: portfolioImages[0] });
+      }
+    } else if (data.coverPhotoUri) {
+      onUpdate({ coverPhotoUri: undefined });
+    }
+  }, [portfolioImages]);
 
   const handleChange = (field: string, value: string) => {
     onUpdate({ [field]: value });
@@ -64,32 +76,22 @@ export default function PortfolioSocialStep({
     // Store image URIs - they'll be uploaded after business creation
     const newImages = [...portfolioImages, ...uris];
     setPortfolioImages(newImages);
-    onUpdate({ portfolioImages: newImages });
+    onUpdate({
+      portfolioImages: newImages,
+      coverPhotoUri: newImages[0]
+    });
   };
 
   const handleRemoveImage = (index: number) => {
     const newImages = [...portfolioImages];
     newImages.splice(index, 1);
     setPortfolioImages(newImages);
-    onUpdate({ portfolioImages: newImages });
+    onUpdate({
+      portfolioImages: newImages,
+      coverPhotoUri: newImages.length > 0 ? newImages[0] : undefined
+    });
   };
 
-  const handlePickCoverImage = async () => {
-    const { uri, error } = await pickImage();
-    if (error) {
-      Alert.alert('Error', error.message);
-      return;
-    }
-    if (uri) {
-      setCoverPhotoUri(uri);
-      onUpdate({ coverPhotoUri: uri });
-    }
-  };
-
-  const handleRemoveCoverImage = () => {
-    setCoverPhotoUri(null);
-    onUpdate({ coverPhotoUri: undefined });
-  };
 
   return (
     <View style={[styles.container, styles.content]}>
@@ -104,7 +106,7 @@ export default function PortfolioSocialStep({
       <View style={styles.field}>
         <View style={styles.labelRow}>
           <Globe size={16} color="#666" />
-          <Text style={styles.label}>Website URL</Text>
+          <Text style={styles.label}>Website</Text>
         </View>
         <TextInput
           ref={websiteUrlRef}
@@ -116,6 +118,7 @@ export default function PortfolioSocialStep({
           autoCapitalize="none"
           keyboardType="url"
           returnKeyType="next"
+          onFocus={onFocus}
           onSubmitEditing={() => instagramUrlRef.current?.focus()}
         />
       </View>
@@ -123,7 +126,7 @@ export default function PortfolioSocialStep({
       <View style={styles.field}>
         <View style={styles.labelRow}>
           <Instagram size={16} color="#666" />
-          <Text style={styles.label}>Instagram URL</Text>
+          <Text style={styles.label}>Instagram</Text>
         </View>
         <TextInput
           ref={instagramUrlRef}
@@ -135,6 +138,7 @@ export default function PortfolioSocialStep({
           autoCapitalize="none"
           keyboardType="url"
           returnKeyType="next"
+          onFocus={onFocus}
           onSubmitEditing={() => facebookUrlRef.current?.focus()}
         />
       </View>
@@ -142,7 +146,7 @@ export default function PortfolioSocialStep({
       <View style={styles.field}>
         <View style={styles.labelRow}>
           <Facebook size={16} color="#666" />
-          <Text style={styles.label}>Facebook URL</Text>
+          <Text style={styles.label}>Facebook</Text>
         </View>
         <TextInput
           ref={facebookUrlRef}
@@ -154,6 +158,7 @@ export default function PortfolioSocialStep({
           autoCapitalize="none"
           keyboardType="url"
           returnKeyType="next"
+          onFocus={onFocus}
           onSubmitEditing={() => youtubeUrlRef.current?.focus()}
         />
       </View>
@@ -161,7 +166,7 @@ export default function PortfolioSocialStep({
       <View style={styles.field}>
         <View style={styles.labelRow}>
           <Youtube size={16} color="#666" />
-          <Text style={styles.label}>YouTube URL</Text>
+          <Text style={styles.label}>YouTube</Text>
         </View>
         <TextInput
           ref={youtubeUrlRef}
@@ -172,41 +177,11 @@ export default function PortfolioSocialStep({
           placeholderTextColor="#999"
           autoCapitalize="none"
           keyboardType="url"
+          onFocus={onFocus}
           returnKeyType="done"
         />
       </View>
 
-      <View style={styles.field}>
-        <View style={styles.labelRow}>
-          <Star size={16} color="#666" />
-          <Text style={styles.label}>Cover Image</Text>
-        </View>
-        <Text style={styles.uploadHintTop}>
-          This image will be displayed as the main cover photo for your business on the dashboard.
-        </Text>
-
-        {coverPhotoUri ? (
-          <View style={styles.coverImageContainer}>
-            <RNImage source={{ uri: coverPhotoUri }} style={styles.coverImage} />
-            <TouchableOpacity
-              style={styles.removeCoverButton}
-              onPress={handleRemoveCoverImage}
-            >
-              <X size={20} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <TouchableOpacity
-            style={styles.coverImagePlaceholder}
-            onPress={handlePickCoverImage}
-            activeOpacity={0.7}
-          >
-            <Image size={32} color="#999" />
-            <Text style={styles.coverImagePlaceholderText}>Select Cover Image</Text>
-            <Text style={styles.coverImagePlaceholderHint}>Recommended: 1200x600px</Text>
-          </TouchableOpacity>
-        )}
-      </View>
 
       <View style={styles.field}>
         <View style={styles.labelRow}>
@@ -217,7 +192,7 @@ export default function PortfolioSocialStep({
           </Text>
         </View>
         <Text style={styles.uploadHintTop}>
-          Images are compressed to ~500KB. Recommended: 800px width, good lighting.
+          Recommended: 800px width, good lighting.
         </Text>
 
         {portfolioImages.length > 0 && (
@@ -225,6 +200,12 @@ export default function PortfolioSocialStep({
             {portfolioImages.map((uri, index) => (
               <View key={index} style={styles.imageContainer}>
                 <RNImage source={{ uri }} style={styles.thumbnailImage} />
+                {index === 0 && (
+                  <View style={styles.coverBadge}>
+                    <Star size={10} color="#fff" fill="#fff" />
+                    <Text style={styles.coverBadgeText}>COVER</Text>
+                  </View>
+                )}
                 <TouchableOpacity
                   style={styles.removeButton}
                   onPress={() => handleRemoveImage(index)}
@@ -386,50 +367,22 @@ const styles = StyleSheet.create({
     color: '#996600',
     lineHeight: 20,
   },
-  coverImageContainer: {
-    position: 'relative',
-    width: '100%',
-    height: 200,
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginBottom: 12,
-  },
-  coverImage: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#f0f0f0',
-  },
-  removeCoverButton: {
+  coverBadge: {
     position: 'absolute',
-    top: 12,
-    right: 12,
-    backgroundColor: '#ff4444',
-    borderRadius: 20,
-    width: 40,
-    height: 40,
+    top: 4,
+    left: 4,
+    backgroundColor: '#34C759',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 2,
+    zIndex: 5,
   },
-  coverImagePlaceholder: {
-    width: '100%',
-    height: 200,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#e0e0e0',
-    borderStyle: 'dashed',
-    backgroundColor: '#f8f8f8',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-  coverImagePlaceholderText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666',
-  },
-  coverImagePlaceholderHint: {
-    fontSize: 12,
-    color: '#999',
+  coverBadgeText: {
+    color: '#fff',
+    fontSize: 8,
+    fontWeight: '800',
   },
 });

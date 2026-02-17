@@ -14,6 +14,8 @@ import {
   Image,
   Dimensions,
   Pressable,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -64,6 +66,7 @@ import {
 import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '../lib/documentUpload';
 import { validatePincode } from '../lib/pincodeValidation';
 import { validateEmail, getEmailError } from '../lib/validation';
+import { stripCountryCode } from '../lib/formatters';
 import Logo from '../components/Logo';
 import Dropdown from '../components/Dropdown';
 import PackageList from '../components/packages/PackageList';
@@ -181,6 +184,14 @@ export default function BusinessDetailsScreen() {
   const [deleting, setDeleting] = useState(false);
   const [defaultPackageId, setDefaultPackageId] = useState<string | null>(null);
   const [activeMenuImageId, setActiveMenuImageId] = useState<string | null>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  const handleFieldFocus = () => {
+    // Add a small delay to ensure the keyboard has started showing
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 200);
+  };
 
   // Category selection state
   const [allBusinessCategories, setAllBusinessCategories] = useState<any[]>([]);
@@ -256,7 +267,11 @@ export default function BusinessDetailsScreen() {
       if (businessRes.error) throw businessRes.error;
 
       setBusiness(businessRes.data);
-      setEditData(businessRes.data || {});
+      const dataToEdit = { ...businessRes.data } || {};
+      if (dataToEdit.contact_person_phone) {
+        dataToEdit.contact_person_phone = stripCountryCode(dataToEdit.contact_person_phone);
+      }
+      setEditData(dataToEdit);
 
       // CRITICAL: Stop loading here so the user sees the page content
       setLoading(false);
@@ -420,6 +435,8 @@ export default function BusinessDetailsScreen() {
       return { businessIds: [], eventIds: [] };
     }
   };
+
+
 
   const loadCategories = async () => {
     let businessCatsResult: any[] = [];
@@ -1406,7 +1423,8 @@ export default function BusinessDetailsScreen() {
         const { data, error: uploadError } = await uploadVerificationDocument(
           id,
           documentTypeCode,
-          file
+          file,
+          user?.id
         );
 
         if (uploadError) {
@@ -1743,7 +1761,7 @@ export default function BusinessDetailsScreen() {
     if (editData.contact_person_phone && editData.contact_person_phone.trim()) {
       const phoneRegex = /^\d{10}$/;
       if (!phoneRegex.test(editData.contact_person_phone)) {
-        Alert.alert('Validation Error', 'Phone number must be exactly 10 digits.');
+        Alert.alert('Validation Error', 'Business contact number must be exactly 10 digits.');
         setSavingDetails(false);
         return;
       }
@@ -1780,26 +1798,30 @@ export default function BusinessDetailsScreen() {
       return;
     }
 
-    // 6. Validate at least one service category
-    const hasSubCategory = selectedCategoryIds.some(id => {
-      const cat = allBusinessCategories.find(c => c.id === id);
-      return cat && cat.parent_category_id !== null;
-    });
-    if (!hasSubCategory) {
-      Alert.alert('Validation Error', 'At least one sub-category must be selected.');
-      setSavingDetails(false);
-      return;
+    // 6. Validate at least one service category ONLY if categories are loaded
+    if (allBusinessCategories.length > 0) {
+      const hasSubCategory = selectedCategoryIds.some(id => {
+        const cat = allBusinessCategories.find(c => c.id === id);
+        return cat && cat.parent_category_id !== null;
+      });
+      if (!hasSubCategory) {
+        Alert.alert('Validation Error', 'At least one service offering must be selected.');
+        setSavingDetails(false);
+        return;
+      }
     }
 
-    // 7. Validate at least one event type
-    const hasSubEventType = selectedEventIds.some(id => {
-      const cat = allEventCategories.find(c => c.id === id);
-      return cat && cat.parent_category_id !== null;
-    });
-    if (!hasSubEventType) {
-      Alert.alert('Validation Error', 'At least one sub-category for event types must be selected.');
-      setSavingDetails(false);
-      return;
+    // 7. Validate at least one event type ONLY if categories are loaded
+    if (allEventCategories.length > 0) {
+      const hasSubEventType = selectedEventIds.some(id => {
+        const cat = allEventCategories.find(c => c.id === id);
+        return cat && cat.parent_category_id !== null;
+      });
+      if (!hasSubEventType) {
+        Alert.alert('Validation Error', 'At least one event type must be selected.');
+        setSavingDetails(false);
+        return;
+      }
     }
 
     try {
@@ -1809,7 +1831,11 @@ export default function BusinessDetailsScreen() {
       const { base_price, pricing_unit, ...businessUpdateData } = editData;
 
       // Update business details
-      const { data, error } = await updateBusinessDetails(id, businessUpdateData);
+      const finalUpdateData = { ...businessUpdateData };
+      if (finalUpdateData.contact_person_phone) {
+        finalUpdateData.contact_person_phone = stripCountryCode(finalUpdateData.contact_person_phone);
+      }
+      const { data, error } = await updateBusinessDetails(id, finalUpdateData);
       if (error) throw error;
       setBusiness(data);
 
@@ -2024,6 +2050,7 @@ export default function BusinessDetailsScreen() {
     );
   };
 
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -2069,8 +2096,13 @@ export default function BusinessDetailsScreen() {
           </View>
         </View>
       </View>
-      <View style={styles.tabContainer}>
-        {/*
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={insets.top + 60}
+      >
+        <View style={styles.tabContainer}>
+          {/*
           <TouchableOpacity
             style={[
               styles.tab,
@@ -2090,25 +2122,25 @@ export default function BusinessDetailsScreen() {
           </TouchableOpacity>
           */}
 
-        <TouchableOpacity
-          style={[
-            styles.tab,
-            activeSection === 'gallery' && styles.activeTab,
-          ]}
-          onPress={() => setActiveSection('gallery')}
-        >
-          <ImageIcon size={20} color={activeSection === 'gallery' ? '#fff' : 'rgba(255,255,255,0.7)'} />
-          <Text
+          <TouchableOpacity
             style={[
-              styles.tabText,
-              activeSection === 'gallery' && styles.activeTabText,
+              styles.tab,
+              activeSection === 'gallery' && styles.activeTab,
             ]}
-            numberOfLines={1}
+            onPress={() => setActiveSection('gallery')}
           >
-            Gallery
-          </Text>
-        </TouchableOpacity>
-        {/*
+            <ImageIcon size={20} color={activeSection === 'gallery' ? '#fff' : 'rgba(255,255,255,0.7)'} />
+            <Text
+              style={[
+                styles.tabText,
+                activeSection === 'gallery' && styles.activeTabText,
+              ]}
+              numberOfLines={1}
+            >
+              Gallery
+            </Text>
+          </TouchableOpacity>
+          {/*
         <TouchableOpacity
           style={[
             styles.tab,
@@ -2128,35 +2160,37 @@ export default function BusinessDetailsScreen() {
           </Text>
         </TouchableOpacity>
         */}
-        <TouchableOpacity
-          style={[
-            styles.tab,
-            activeSection === 'edit' && styles.activeTab,
-          ]}
-          onPress={() => setActiveSection('edit')}
-        >
-          <Edit size={20} color={activeSection === 'edit' ? '#fff' : 'rgba(255,255,255,0.7)'} />
-          <Text
+          <TouchableOpacity
             style={[
-              styles.tabText,
-              activeSection === 'edit' && styles.activeTabText,
+              styles.tab,
+              activeSection === 'edit' && styles.activeTab,
             ]}
-            numberOfLines={1}
+            onPress={() => setActiveSection('edit')}
           >
-            Edit Details
-          </Text>
-        </TouchableOpacity>
-      </View>
+            <Edit size={20} color={activeSection === 'edit' ? '#fff' : 'rgba(255,255,255,0.7)'} />
+            <Text
+              style={[
+                styles.tabText,
+                activeSection === 'edit' && styles.activeTabText,
+              ]}
+              numberOfLines={1}
+            >
+              Edit Details
+            </Text>
+          </TouchableOpacity>
+        </View>
 
 
-      <ScrollView
-        style={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.content}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
 
-        {/*activeSection === 'offers' && (
+          {/*activeSection === 'offers' && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Offers & Promotions</Text>
@@ -2186,86 +2220,86 @@ export default function BusinessDetailsScreen() {
         )*/}
 
 
-        {activeSection === 'gallery' && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Business Gallery</Text>
-              <View style={styles.buttonGroup}>
-                <TouchableOpacity
-                  style={[styles.addButton, styles.smallButton]}
-                  onPress={handleUploadImage}
-                  disabled={uploading || uploadingMultiple || images.length >= 20}
-                >
-                  {uploading ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <>
-                      <Plus size={18} color="#fff" />
-                      <Text style={styles.smallButtonText}>Single</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.addButton, styles.smallButton]}
-                  onPress={handleUploadMultipleImages}
-                  disabled={uploading || uploadingMultiple || images.length >= 20}
-                >
-                  {uploadingMultiple ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <>
-                      <ImageIcon size={18} color="#fff" />
-                      <Text style={styles.smallButtonText}>Multiple</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {uploadingMultiple && (
-              <View style={styles.progressContainer}>
-                <Text style={styles.progressText}>
-                  Uploading {uploadProgress.current} of {uploadProgress.total} images...
-                </Text>
-                <View style={styles.progressBar}>
-                  <View
-                    style={[
-                      styles.progressFill,
-                      {
-                        width: `${(uploadProgress.current / uploadProgress.total) * 100}%`,
-                      },
-                    ]}
-                  />
+          {activeSection === 'gallery' && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Business Gallery</Text>
+                <View style={styles.buttonGroup}>
+                  <TouchableOpacity
+                    style={[styles.addButton, styles.smallButton]}
+                    onPress={handleUploadImage}
+                    disabled={uploading || uploadingMultiple || images.length >= 20}
+                  >
+                    {uploading ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Plus size={18} color="#fff" />
+                        <Text style={styles.smallButtonText}>Single</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.addButton, styles.smallButton]}
+                    onPress={handleUploadMultipleImages}
+                    disabled={uploading || uploadingMultiple || images.length >= 20}
+                  >
+                    {uploadingMultiple ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <ImageIcon size={18} color="#fff" />
+                        <Text style={styles.smallButtonText}>Multiple</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
                 </View>
               </View>
-            )}
 
-            <Text style={styles.imageCounter}>
-              {images.length}/20 images uploaded
-            </Text>
+              {uploadingMultiple && (
+                <View style={styles.progressContainer}>
+                  <Text style={styles.progressText}>
+                    Uploading {uploadProgress.current} of {uploadProgress.total} images...
+                  </Text>
+                  <View style={styles.progressBar}>
+                    <View
+                      style={[
+                        styles.progressFill,
+                        {
+                          width: `${(uploadProgress.current / uploadProgress.total) * 100}%`,
+                        },
+                      ]}
+                    />
+                  </View>
+                </View>
+              )}
 
-            {images.length === 0 ? (
-              <View style={styles.emptyState}>
-                <ImageIcon size={48} color="#ddd" />
-                <Text style={styles.emptyStateTitle}>No Images Yet</Text>
-                <Text style={styles.emptyStateText}>
-                  Upload images to showcase your work
-                </Text>
-              </View>
-            ) : (
-              <FlatList
-                data={images}
-                renderItem={renderImageItem}
-                keyExtractor={(item) => item.id}
-                numColumns={2}
-                columnWrapperStyle={styles.imageRow}
-                scrollEnabled={false}
-              />
-            )}
-          </View>
-        )}
+              <Text style={styles.imageCounter}>
+                {images.length}/20 images uploaded
+              </Text>
 
-        {/*
+              {images.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <ImageIcon size={48} color="#ddd" />
+                  <Text style={styles.emptyStateTitle}>No Images Yet</Text>
+                  <Text style={styles.emptyStateText}>
+                    Upload images to showcase your work
+                  </Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={images}
+                  renderItem={renderImageItem}
+                  keyExtractor={(item) => item.id}
+                  numColumns={2}
+                  columnWrapperStyle={styles.imageRow}
+                  scrollEnabled={false}
+                />
+              )}
+            </View>
+          )}
+
+          {/*
         activeSection === 'packages' && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -2306,1019 +2340,1102 @@ export default function BusinessDetailsScreen() {
         )
         */}
 
-        {/* Delete Confirmation Modal */}
-        <Modal
-          visible={showDeleteModal}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => {
-            setShowDeleteModal(false);
-            setPackageToDelete(null);
-          }}
-        >
-          <View style={styles.confirmModalOverlay}>
-            <View style={styles.confirmModalContent}>
-              <Text style={styles.confirmModalTitle}>Delete Package</Text>
-              <Text style={styles.confirmModalMessage}>
-                Are you sure you want to delete "{packageToDelete?.package_name || 'this package'}"? This will mark it as inactive and hide it from the list.
-              </Text>
-              <View style={styles.confirmModalButtons}>
-                <TouchableOpacity
-                  style={[styles.confirmModalButton, styles.modalButtonCancel]}
-                  onPress={() => {
-                    setShowDeleteModal(false);
-                    setPackageToDelete(null);
-                  }}
-                  disabled={deleting}
-                >
-                  <Text style={styles.modalButtonCancelText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.confirmModalButton, styles.modalButtonDelete]}
-                  onPress={confirmDeletePackage}
-                  disabled={deleting}
-                >
-                  {deleting ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text style={styles.modalButtonDeleteText}>Delete</Text>
-                  )}
-                </TouchableOpacity>
+          {/* Delete Confirmation Modal */}
+          <Modal
+            visible={showDeleteModal}
+            transparent={true}
+            animationType="fade"
+            onRequestClose={() => {
+              setShowDeleteModal(false);
+              setPackageToDelete(null);
+            }}
+          >
+            <View style={styles.confirmModalOverlay}>
+              <View style={styles.confirmModalContent}>
+                <Text style={styles.confirmModalTitle}>Delete Package</Text>
+                <Text style={styles.confirmModalMessage}>
+                  Are you sure you want to delete "{packageToDelete?.package_name || 'this package'}"? This will mark it as inactive and hide it from the list.
+                </Text>
+                <View style={styles.confirmModalButtons}>
+                  <TouchableOpacity
+                    style={[styles.confirmModalButton, styles.modalButtonCancel]}
+                    onPress={() => {
+                      setShowDeleteModal(false);
+                      setPackageToDelete(null);
+                    }}
+                    disabled={deleting}
+                  >
+                    <Text style={styles.modalButtonCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.confirmModalButton, styles.modalButtonDelete]}
+                    onPress={confirmDeletePackage}
+                    disabled={deleting}
+                  >
+                    {deleting ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.modalButtonDeleteText}>Delete</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
-          </View>
-        </Modal>
+          </Modal>
 
-        {activeSection === 'edit' && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Edit Business Details</Text>
+          {activeSection === 'edit' && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Edit Business Details</Text>
 
-            <View style={styles.editSection}>
-              <Text style={styles.editSectionTitle}>Basic Information</Text>
+              <View style={styles.editSection}>
+                <Text style={styles.editSectionTitle}>Basic Information</Text>
 
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Business Name</Text>
-                <TextInput
-                  style={styles.editInput}
-                  value={editData.business_name || ''}
-                  onChangeText={(text) => setEditData({ ...editData, business_name: text })}
-                  placeholder="Enter business name"
-                  placeholderTextColor="#999"
-                  returnKeyType="next"
-                  onSubmitEditing={() => contactPersonNameRef.current?.focus()}
-                />
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Business Name</Text>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editData.business_name || ''}
+                    onChangeText={(text) => setEditData({ ...editData, business_name: text })}
+                    placeholder="Enter business name"
+                    placeholderTextColor="#999"
+                    returnKeyType="next"
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => contactPersonNameRef.current?.focus()}
+                  />
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Contact Person Name</Text>
+                  <TextInput
+                    ref={contactPersonNameRef}
+                    style={styles.editInput}
+                    value={editData.contact_person_name || ''}
+                    onChangeText={(text) => setEditData({ ...editData, contact_person_name: text })}
+                    placeholder="Enter contact person name"
+                    placeholderTextColor="#999"
+                    returnKeyType="next"
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => contactPersonRoleRef.current?.focus()}
+                  />
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Contact Person Role</Text>
+                  <TextInput
+                    ref={contactPersonRoleRef}
+                    style={styles.editInput}
+                    value={editData.contact_person_role || ''}
+                    onChangeText={(text) => setEditData({ ...editData, contact_person_role: text })}
+                    placeholder="e.g., Owner, Manager, Director"
+                    placeholderTextColor="#999"
+                    returnKeyType="next"
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => businessEmailRef.current?.focus()}
+                  />
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Email</Text>
+                  <TextInput
+                    ref={businessEmailRef}
+                    style={[styles.editInput, emailError && styles.validationInputInvalid]}
+                    value={editData.business_email || ''}
+                    onChangeText={(text) => {
+                      setEditData({ ...editData, business_email: text });
+                      const error = getEmailError(text);
+                      if (error && text.trim().length > 5) {
+                        setEmailError(error);
+                      } else {
+                        setEmailError(null);
+                      }
+                    }}
+                    placeholder="Enter email"
+                    placeholderTextColor="#999"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    returnKeyType="next"
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => contactPersonPhoneRef.current?.focus()}
+                  />
+                  {emailError && <Text style={styles.validationErrorText}>{emailError}</Text>}
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Business Contact Number</Text>
+                  <TextInput
+                    ref={contactPersonPhoneRef}
+                    style={styles.editInput}
+                    value={editData.contact_person_phone || ''}
+                    onChangeText={(text) => {
+                      const cleaned = text.replace(/\D/g, '').slice(0, 10);
+                      setEditData({ ...editData, contact_person_phone: cleaned });
+                    }}
+                    placeholder="Enter business contact number"
+                    placeholderTextColor="#999"
+                    keyboardType="phone-pad"
+                    maxLength={10}
+                    returnKeyType="next"
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => businessDescriptionRef.current?.focus()}
+                  />
+                </View>
               </View>
 
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Contact Person Name</Text>
-                <TextInput
-                  ref={contactPersonNameRef}
-                  style={styles.editInput}
-                  value={editData.contact_person_name || ''}
-                  onChangeText={(text) => setEditData({ ...editData, contact_person_name: text })}
-                  placeholder="Enter contact person name"
-                  placeholderTextColor="#999"
-                  returnKeyType="next"
-                  onSubmitEditing={() => contactPersonRoleRef.current?.focus()}
-                />
-              </View>
+              <View style={styles.editSection}>
+                <Text style={styles.editSectionTitle}>Services & Experience</Text>
 
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Contact Person Role</Text>
-                <TextInput
-                  ref={contactPersonRoleRef}
-                  style={styles.editInput}
-                  value={editData.contact_person_role || ''}
-                  onChangeText={(text) => setEditData({ ...editData, contact_person_role: text })}
-                  placeholder="e.g., Owner, Manager, Director"
-                  placeholderTextColor="#999"
-                  returnKeyType="next"
-                  onSubmitEditing={() => businessEmailRef.current?.focus()}
-                />
-              </View>
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Business Category *</Text>
+                  <Dropdown
+                    options={rootCategoriesForDropdown.map((n: any) => ({
+                      label: n.icon ? `${n.icon} ${n.name}` : n.name,
+                      value: n.id,
+                    }))}
+                    value={selectedRootCategoryId || ''}
+                    placeholder="Select a category"
+                    onChange={(value: string) => handleRootSelection(value)}
+                    open={isRootDropdownOpen}
+                    onOpenChange={setIsRootDropdownOpen}
+                  />
+                </View>
 
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Email</Text>
-                <TextInput
-                  ref={businessEmailRef}
-                  style={[styles.editInput, emailError && styles.validationInputInvalid]}
-                  value={editData.business_email || ''}
-                  onChangeText={(text) => {
-                    setEditData({ ...editData, business_email: text });
-                    const error = getEmailError(text);
-                    if (error && text.trim().length > 5) {
-                      setEmailError(error);
-                    } else {
-                      setEmailError(null);
-                    }
-                  }}
-                  placeholder="Enter email"
-                  placeholderTextColor="#999"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  returnKeyType="next"
-                  onSubmitEditing={() => contactPersonPhoneRef.current?.focus()}
-                />
-                {emailError && <Text style={styles.validationErrorText}>{emailError}</Text>}
-              </View>
-
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Phone Number</Text>
-                <TextInput
-                  ref={contactPersonPhoneRef}
-                  style={styles.editInput}
-                  value={editData.contact_person_phone || ''}
-                  onChangeText={(text) => setEditData({ ...editData, contact_person_phone: text })}
-                  placeholder="Enter phone number"
-                  placeholderTextColor="#999"
-                  keyboardType="phone-pad"
-                  returnKeyType="next"
-                  onSubmitEditing={() => businessDescriptionRef.current?.focus()}
-                />
-              </View>
-            </View>
-
-            <View style={styles.editSection}>
-              <Text style={styles.editSectionTitle}>Services & Experience</Text>
-
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Business Category *</Text>
-                <Dropdown
-                  options={rootCategoriesForDropdown.map((n: any) => ({
-                    label: n.icon ? `${n.icon} ${n.name}` : n.name,
-                    value: n.id,
-                  }))}
-                  value={selectedRootCategoryId || ''}
-                  placeholder="Select a category"
-                  onChange={(value: string) => handleRootSelection(value)}
-                  open={isRootDropdownOpen}
-                  onOpenChange={setIsRootDropdownOpen}
-                />
-              </View>
-
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Services Offered *</Text>
-                <TouchableOpacity
-                  style={[
-                    styles.dropdownTrigger,
-                    !selectedRootCategoryId && styles.dropdownTriggerDisabled,
-                  ]}
-                  onPress={() => selectedRootCategoryId && handleCategoryModalOpen()}
-                  activeOpacity={0.7}
-                  disabled={!selectedRootCategoryId}
-                >
-                  <Text
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Services Offered *</Text>
+                  <TouchableOpacity
                     style={[
-                      styles.dropdownText,
-                      !selectedRootCategoryId && styles.placeholder,
-                      selectedRootCategoryId && selectedCategoriesWithPaths.length === 0 && styles.placeholder,
+                      styles.dropdownTrigger,
+                      !selectedRootCategoryId && styles.dropdownTriggerDisabled,
                     ]}
+                    onPress={() => selectedRootCategoryId && handleCategoryModalOpen()}
+                    activeOpacity={0.7}
+                    disabled={!selectedRootCategoryId}
                   >
-                    {!selectedRootCategoryId
-                      ? 'Select a category first'
-                      : selectedCategoriesWithPaths.length === 0
-                        ? 'Select sub-categories'
-                        : selectedCategoriesWithPaths.length === 1
-                          ? selectedCategoriesWithPaths[0].path
-                          : `${selectedCategoriesWithPaths.length} sub-categories selected`}
-                  </Text>
-                  <ChevronDown size={20} color={selectedRootCategoryId ? '#666' : '#ccc'} />
-                </TouchableOpacity>
-
-                {selectedCategoriesWithPaths.length > 0 && (
-                  <View style={styles.selectedContainer}>
-                    <View style={styles.selectedHeader}>
-                      <Text style={styles.selectedLabel}>
-                        Selected ({selectedCategoriesWithPaths.length}):
-                      </Text>
-                      {selectedCategoriesWithPaths.length > 3 && (
-                        <TouchableOpacity onPress={() => setIsCategoriesExpanded(!isCategoriesExpanded)}>
-                          <ChevronDown
-                            size={20}
-                            color="#666"
-                            style={{ transform: [{ rotate: isCategoriesExpanded ? '180deg' : '0deg' }] }}
-                          />
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                    {(isCategoriesExpanded ? selectedCategoriesWithPaths : selectedCategoriesWithPaths.slice(0, 3)).map((item) => (
-                      <View key={item.id} style={styles.selectedChip}>
-                        <Text style={styles.selectedChipText}>{item.path}</Text>
-                        <TouchableOpacity
-                          onPress={() => {
-                            if (selectedCategoryIds.length <= 1) {
-                              Alert.alert('Validation Error', 'At least one service category must be selected.');
-                              return;
-                            }
-                            toggleCategorySelection(item.id);
-                          }}
-                          style={styles.removeButton}
-                        >
-                          <X size={16} color="#fff" />
-                        </TouchableOpacity>
-                      </View>
-                    ))}
-                  </View>
-                )}
-
-                <Modal
-                  visible={isCategoryModalOpen}
-                  transparent
-                  animationType="fade"
-                  onRequestClose={handleCategoryModalClose}
-                >
-                  <Pressable
-                    style={styles.modalOverlay}
-                    onPress={handleCategoryModalClose}
-                  >
-                    <Pressable
-                      style={styles.categoryModalContent}
-                      onPress={(e) => e.stopPropagation()}
+                    <Text
+                      style={[
+                        styles.dropdownText,
+                        !selectedRootCategoryId && styles.placeholder,
+                        selectedRootCategoryId && selectedCategoriesWithPaths.length === 0 && styles.placeholder,
+                      ]}
                     >
-                      <View style={styles.categoryModalHeader}>
-                        <Text style={styles.categoryModalTitle}>
-                          {subtreeForSelectedRoot
-                            ? `Services offered under ${subtreeForSelectedRoot.name}`
-                            : 'Select Services offered'}
+                      {!selectedRootCategoryId
+                        ? 'Select a category first'
+                        : selectedCategoriesWithPaths.length === 0
+                          ? 'Select services offered'
+                          : selectedCategoriesWithPaths.length === 1
+                            ? selectedCategoriesWithPaths[0].path
+                            : `${selectedCategoriesWithPaths.length} services selected`}
+                    </Text>
+                    <ChevronDown size={20} color={selectedRootCategoryId ? '#666' : '#ccc'} />
+                  </TouchableOpacity>
+
+                  {selectedCategoriesWithPaths.length > 0 && (
+                    <View style={styles.selectedContainer}>
+                      <View style={styles.selectedHeader}>
+                        <Text style={styles.selectedLabel}>
+                          Selected ({selectedCategoriesWithPaths.length}):
                         </Text>
-                        <TouchableOpacity
-                          onPress={handleCategoryModalClose}
-                          style={styles.closeButton}
-                        >
-                          <X size={24} color="#666" />
-                        </TouchableOpacity>
-                      </View>
-
-                      <TextInput
-                        style={styles.modalSearchInput}
-                        placeholder="Search sub-categories..."
-                        placeholderTextColor="#999"
-                        value={searchQuery}
-                        onChangeText={setSearchQuery}
-                      />
-
-                      <ScrollView
-                        style={styles.modalCategoryTree}
-                        nestedScrollEnabled
-                        showsVerticalScrollIndicator
-                      >
-                        {filteredSubtreeChildren.length === 0 ? (
-                          <Text style={styles.emptyText}>
-                            {subtreeForSelectedRoot?.children?.length === 0
-                              ? 'No sub-categories'
-                              : 'No matching sub-categories'}
-                          </Text>
-                        ) : (
-                          renderSubCategoryTreeForModal(filteredSubtreeChildren)
+                        {selectedCategoriesWithPaths.length > 3 && (
+                          <TouchableOpacity onPress={() => setIsCategoriesExpanded(!isCategoriesExpanded)}>
+                            <ChevronDown
+                              size={20}
+                              color="#666"
+                              style={{ transform: [{ rotate: isCategoriesExpanded ? '180deg' : '0deg' }] }}
+                            />
+                          </TouchableOpacity>
                         )}
-                      </ScrollView>
-
-                      <View style={styles.categoryModalFooter}>
-                        <TouchableOpacity
-                          style={styles.categoryModalButton}
-                          onPress={handleCategoryModalDone}
-                        >
-                          <Text style={styles.modalButtonText}>Done</Text>
-                        </TouchableOpacity>
                       </View>
-                    </Pressable>
-                  </Pressable>
-                </Modal>
-              </View>
-
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Event Types *</Text>
-
-                {/* Event Dropdown Trigger */}
-                <TouchableOpacity
-                  style={styles.dropdownTrigger}
-                  onPress={handleEventModalOpen}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.dropdownText, selectedEventsWithPaths.length === 0 && styles.placeholder]}>
-                    {getEventDropdownDisplayText()}
-                  </Text>
-                  <ChevronDown size={20} color="#666" />
-                </TouchableOpacity>
-
-                {/* Selected Events Display */}
-                {selectedEventsWithPaths.length > 0 && (
-                  <View style={styles.selectedContainer}>
-                    <View style={styles.selectedHeader}>
-                      <Text style={[styles.selectedLabel, { marginBottom: 0 }]}>
-                        Selected Events ({selectedEventsWithPaths.length}):
-                      </Text>
-                      {selectedEventsWithPaths.length > 3 && (
-                        <TouchableOpacity onPress={() => setIsEventsExpanded(!isEventsExpanded)}>
-                          <ChevronDown
-                            size={20}
-                            color="#666"
-                            style={{ transform: [{ rotate: isEventsExpanded ? '180deg' : '0deg' }] }}
-                          />
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                    {(isEventsExpanded ? selectedEventsWithPaths : selectedEventsWithPaths.slice(0, 3)).map((item) => {
-                      const eventCategory = allEventCategories.find((c) => c.id === item.id);
-                      return (
+                      {(isCategoriesExpanded ? selectedCategoriesWithPaths : selectedCategoriesWithPaths.slice(0, 3)).map((item) => (
                         <View key={item.id} style={styles.selectedChip}>
-                          <Text style={styles.selectedChipText}>
-                            {eventCategory?.icon ? `${eventCategory.icon} ` : ''}
-                            {item.path}
-                          </Text>
+                          <Text style={styles.selectedChipText}>{item.path}</Text>
                           <TouchableOpacity
-                            onPress={() => toggleEventSelection(item.id)}
+                            onPress={() => {
+                              if (selectedCategoryIds.length <= 1) {
+                                Alert.alert('Validation Error', 'At least one service category must be selected.');
+                                return;
+                              }
+                              toggleCategorySelection(item.id);
+                            }}
                             style={styles.removeButton}
                           >
                             <X size={16} color="#fff" />
                           </TouchableOpacity>
                         </View>
-                      );
-                    })}
-                  </View>
-                )}
+                      ))}
+                    </View>
+                  )}
 
-                {/* Event Selection Modal */}
-                <Modal
-                  visible={isEventModalOpen}
-                  transparent
-                  animationType="fade"
-                  onRequestClose={handleEventModalClose}
-                >
-                  <Pressable
-                    style={styles.modalOverlay}
-                    onPress={handleEventModalClose}
+                  <Modal
+                    visible={isCategoryModalOpen}
+                    transparent
+                    animationType="fade"
+                    onRequestClose={handleCategoryModalClose}
                   >
                     <Pressable
-                      style={styles.categoryModalContent}
-                      onPress={(e) => e.stopPropagation()}
+                      style={styles.modalOverlay}
+                      onPress={handleCategoryModalClose}
                     >
-                      <View style={styles.categoryModalHeader}>
-                        <Text style={styles.categoryModalTitle}>Select Event Types</Text>
-                        <TouchableOpacity
-                          onPress={handleEventModalClose}
-                          style={styles.closeButton}
-                        >
-                          <X size={24} color="#666" />
-                        </TouchableOpacity>
-                      </View>
-
-                      {/* Search Input */}
-                      <TextInput
-                        style={styles.modalSearchInput}
-                        placeholder="Search event types..."
-                        placeholderTextColor="#999"
-                        value={eventSearchQuery}
-                        onChangeText={setEventSearchQuery}
-                      />
-
-                      {/* Event Category Tree */}
-                      <ScrollView
-                        style={styles.modalCategoryTree}
-                        nestedScrollEnabled={true}
-                        showsVerticalScrollIndicator={true}
+                      <Pressable
+                        style={styles.categoryModalContent}
+                        onPress={(e) => e.stopPropagation()}
                       >
-                        {filteredEventTree.length === 0 ? (
-                          <Text style={styles.emptyText}>No events found</Text>
-                        ) : (
-                          renderEventCategoryTreeForModal(filteredEventTree)
-                        )}
-                      </ScrollView>
+                        <View style={styles.categoryModalHeader}>
+                          <Text style={styles.categoryModalTitle}>
+                            {subtreeForSelectedRoot
+                              ? `Services offered under ${subtreeForSelectedRoot.name}`
+                              : 'Select Services offered'}
+                          </Text>
+                          <TouchableOpacity
+                            onPress={handleCategoryModalClose}
+                            style={styles.closeButton}
+                          >
+                            <X size={24} color="#666" />
+                          </TouchableOpacity>
+                        </View>
 
-                      <View style={styles.categoryModalFooter}>
-                        <TouchableOpacity
-                          style={styles.categoryModalButton}
-                          onPress={handleEventModalDone}
+                        <TextInput
+                          style={styles.modalSearchInput}
+                          placeholder="Search services offered..."
+                          placeholderTextColor="#999"
+                          value={searchQuery}
+                          onChangeText={setSearchQuery}
+                        />
+
+                        <ScrollView
+                          style={styles.modalCategoryTree}
+                          nestedScrollEnabled
+                          showsVerticalScrollIndicator
                         >
-                          <Text style={styles.modalButtonText}>Done</Text>
-                        </TouchableOpacity>
-                      </View>
+                          {filteredSubtreeChildren.length === 0 ? (
+                            <Text style={styles.emptyText}>
+                              {subtreeForSelectedRoot?.children?.length === 0
+                                ? 'No services offered'
+                                : 'No matching services offered'}
+                            </Text>
+                          ) : (
+                            renderSubCategoryTreeForModal(filteredSubtreeChildren)
+                          )}
+                        </ScrollView>
+
+                        <View style={styles.categoryModalFooter}>
+                          <TouchableOpacity
+                            style={styles.categoryModalButton}
+                            onPress={handleCategoryModalDone}
+                          >
+                            <Text style={styles.modalButtonText}>Done</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </Pressable>
                     </Pressable>
-                  </Pressable>
-                </Modal>
-              </View>
+                  </Modal>
+                </View>
 
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Business Description</Text>
-                <TextInput
-                  ref={businessDescriptionRef}
-                  style={[styles.editInput, styles.textArea]}
-                  value={editData.description || ''}
-                  onChangeText={(text) => setEditData({ ...editData, description: text })}
-                  placeholder="Describe your business"
-                  placeholderTextColor="#999"
-                  multiline
-                  numberOfLines={4}
-                  returnKeyType="next"
-                  onSubmitEditing={() => addressRef.current?.focus()}
-                />
-              </View>
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Event Types *</Text>
 
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Years of Experience *</Text>
-                <Dropdown
-                  options={EXPERIENCE_OPTIONS.map((exp) => ({
-                    label: exp,
-                    value: exp,
-                  }))}
-                  value={getExperienceDisplayValue(editData.years_experience)}
-                  placeholder="Select experience"
-                  onChange={(value: string) => setEditData({ ...editData, years_experience: parseExperienceToNumber(value) })}
-                />
-              </View>
+                  {/* Event Dropdown Trigger */}
+                  <TouchableOpacity
+                    style={styles.dropdownTrigger}
+                    onPress={handleEventModalOpen}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.dropdownText, selectedEventsWithPaths.length === 0 && styles.placeholder]}>
+                      {getEventDropdownDisplayText()}
+                    </Text>
+                    <ChevronDown size={20} color="#666" />
+                  </TouchableOpacity>
 
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Base Price (₹) *</Text>
-                <TextInput
-                  style={styles.editInput}
-                  value={editData.base_price ? String(editData.base_price) : ''}
-                  onChangeText={(text) => {
-                    const cleanText = text.replace(/[^0-9]/g, '');
-                    setEditData({ ...editData, base_price: cleanText });
-                  }}
-                  placeholder="Enter starting price"
-                  placeholderTextColor="#999"
-                  keyboardType="numeric"
-                  returnKeyType="next"
-                />
-              </View>
+                  {/* Selected Events Display */}
+                  {selectedEventsWithPaths.length > 0 && (
+                    <View style={styles.selectedContainer}>
+                      <View style={styles.selectedHeader}>
+                        <Text style={[styles.selectedLabel, { marginBottom: 0 }]}>
+                          Selected Events ({selectedEventsWithPaths.length}):
+                        </Text>
+                        {selectedEventsWithPaths.length > 3 && (
+                          <TouchableOpacity onPress={() => setIsEventsExpanded(!isEventsExpanded)}>
+                            <ChevronDown
+                              size={20}
+                              color="#666"
+                              style={{ transform: [{ rotate: isEventsExpanded ? '180deg' : '0deg' }] }}
+                            />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                      {(isEventsExpanded ? selectedEventsWithPaths : selectedEventsWithPaths.slice(0, 3)).map((item) => {
+                        const eventCategory = allEventCategories.find((c) => c.id === item.id);
+                        return (
+                          <View key={item.id} style={styles.selectedChip}>
+                            <Text style={styles.selectedChipText}>
+                              {eventCategory?.icon ? `${eventCategory.icon} ` : ''}
+                              {item.path}
+                            </Text>
+                            <TouchableOpacity
+                              onPress={() => toggleEventSelection(item.id)}
+                              style={styles.removeButton}
+                            >
+                              <X size={16} color="#fff" />
+                            </TouchableOpacity>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
 
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Pricing Unit *</Text>
-                <Dropdown
-                  options={pricingUnitOptions.map((unit) => ({
-                    label: unit,
-                    value: unit,
-                  }))}
-                  value={editData.pricing_unit || ''}
-                  placeholder="Select pricing unit"
-                  onChange={(value: string) => setEditData({ ...editData, pricing_unit: value })}
-                  open={isPricingUnitDropdownOpen}
-                  onOpenChange={setIsPricingUnitDropdownOpen}
-                  disabled={selectedCategoriesWithPaths.length === 0}
-                />
-                {selectedCategoriesWithPaths.length === 0 && (
-                  <Text style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                    Select a service category first
-                  </Text>
-                )}
-              </View>
-            </View>
+                  {/* Event Selection Modal */}
+                  <Modal
+                    visible={isEventModalOpen}
+                    transparent
+                    animationType="fade"
+                    onRequestClose={handleEventModalClose}
+                  >
+                    <Pressable
+                      style={styles.modalOverlay}
+                      onPress={handleEventModalClose}
+                    >
+                      <Pressable
+                        style={styles.categoryModalContent}
+                        onPress={(e) => e.stopPropagation()}
+                      >
+                        <View style={styles.categoryModalHeader}>
+                          <Text style={styles.categoryModalTitle}>Select Events</Text>
+                          <TouchableOpacity
+                            onPress={handleEventModalClose}
+                            style={styles.closeButton}
+                          >
+                            <X size={24} color="#666" />
+                          </TouchableOpacity>
+                        </View>
 
-            <View style={styles.editSection}>
-              <Text style={styles.editSectionTitle}>Location</Text>
+                        {/* Search Input */}
+                        <TextInput
+                          style={styles.modalSearchInput}
+                          placeholder="Search event types..."
+                          placeholderTextColor="#999"
+                          value={eventSearchQuery}
+                          onChangeText={setEventSearchQuery}
+                        />
 
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Business Address</Text>
-                <TextInput
-                  ref={addressRef}
-                  style={styles.editInput}
-                  value={editData.address || ''}
-                  onChangeText={(text) => setEditData({ ...editData, address: text })}
-                  placeholder="Enter business address"
-                  placeholderTextColor="#999"
-                  returnKeyType="next"
-                  onSubmitEditing={() => pincodeRef.current?.focus()}
-                />
-              </View>
+                        {/* Event Category Tree */}
+                        <ScrollView
+                          style={styles.modalCategoryTree}
+                          nestedScrollEnabled={true}
+                          showsVerticalScrollIndicator={true}
+                        >
+                          {filteredEventTree.length === 0 ? (
+                            <Text style={styles.emptyText}>No events found</Text>
+                          ) : (
+                            renderEventCategoryTreeForModal(filteredEventTree)
+                          )}
+                        </ScrollView>
 
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Pincode *</Text>
-                <View style={styles.inputWithStatus}>
+                        <View style={styles.categoryModalFooter}>
+                          <TouchableOpacity
+                            style={styles.categoryModalButton}
+                            onPress={handleEventModalDone}
+                          >
+                            <Text style={styles.modalButtonText}>Done</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </Pressable>
+                    </Pressable>
+                  </Modal>
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Business Description</Text>
                   <TextInput
-                    ref={pincodeRef}
-                    style={[
-                      styles.editInput,
-                      styles.pincodeInput,
-                      pincodeStatus === 'valid' && styles.inputValid,
-                      pincodeStatus === 'invalid' && styles.inputInvalid,
-                    ]}
-                    value={editData.pincode || ''}
-                    onChangeText={(text) => {
-                      const cleanText = text.replace(/\D/g, '');
-                      setEditData({ ...editData, pincode: cleanText });
-                      if (pincodeStatus !== 'idle') {
-                        setPincodeStatus('idle');
-                        setPincodeError(null);
-                        setCityOptions([]);
-                      }
-                    }}
+                    ref={businessDescriptionRef}
+                    style={[styles.editInput, styles.textArea]}
+                    value={editData.description || ''}
+                    onChangeText={(text) => setEditData({ ...editData, description: text })}
+                    placeholder="Describe your business"
+                    placeholderTextColor="#999"
+                    multiline
+                    numberOfLines={4}
                     returnKeyType="next"
-                    onSubmitEditing={() => {
-                      if (cityOptions.length === 0 || cityOptions.length === 1) {
-                        cityRef.current?.focus();
-                      } else {
-                        localityRef.current?.focus();
-                      }
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => addressRef.current?.focus()}
+                  />
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Years of Experience *</Text>
+                  <Dropdown
+                    options={EXPERIENCE_OPTIONS.map((exp) => ({
+                      label: exp,
+                      value: exp,
+                    }))}
+                    value={getExperienceDisplayValue(editData.years_experience)}
+                    placeholder="Select experience"
+                    onChange={(value: string) => setEditData({ ...editData, years_experience: parseExperienceToNumber(value) })}
+                  />
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Base Price (₹) *</Text>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editData.base_price ? String(editData.base_price) : ''}
+                    onChangeText={(text) => {
+                      const cleanText = text.replace(/[^0-9]/g, '');
+                      setEditData({ ...editData, base_price: cleanText });
                     }}
-                    onBlur={async () => {
-                      const pincode = editData.pincode;
-                      if (!pincode || pincode.length !== 6) {
-                        if (pincode && pincode.length > 0 && pincode.length < 6) {
-                          setPincodeStatus('invalid');
-                          setPincodeError('Pincode must be 6 digits');
-                        }
-                        return;
-                      }
-                      setValidatingPincode(true);
-                      setPincodeError(null);
-                      try {
-                        const result = await validatePincode(pincode);
-                        if (result.valid) {
-                          setPincodeStatus('valid');
-                          // Set city options for dropdown
-                          if (result.cityOptions && result.cityOptions.length > 0) {
-                            setCityOptions(result.cityOptions);
-                          }
-                          // Auto-fill: city = Name, locality = District
-                          if (result.city) {
-                            setEditData((prev: any) => ({ ...prev, city: result.city }));
-                          }
-                          if (result.locality) {
-                            setEditData((prev: any) => ({ ...prev, locality: result.locality }));
-                          }
-                          if (result.state) {
-                            setEditData((prev: any) => ({ ...prev, state: result.state }));
-                          }
-                        } else {
-                          setPincodeStatus('invalid');
-                          setPincodeError(result.error || 'Invalid pincode');
-                          setCityOptions([]);
-                        }
-                      } catch (error) {
-                        setPincodeStatus('invalid');
-                        setPincodeError('Failed to validate pincode');
-                        setCityOptions([]);
-                      } finally {
-                        setValidatingPincode(false);
-                      }
-                    }}
-                    placeholder="Enter 6-digit pincode"
+                    placeholder="Enter starting price"
                     placeholderTextColor="#999"
                     keyboardType="numeric"
-                    maxLength={6}
+                    onFocus={handleFieldFocus}
+                    returnKeyType="next"
                   />
-                  <View style={styles.statusIcon}>
-                    {validatingPincode && (
-                      <ActivityIndicator size="small" color="#007AFF" />
-                    )}
-                    {!validatingPincode && pincodeStatus === 'valid' && (
-                      <Check size={20} color="#34C759" />
-                    )}
-                    {!validatingPincode && pincodeStatus === 'invalid' && (
-                      <AlertCircle size={20} color="#FF3B30" />
-                    )}
-                  </View>
                 </View>
-                {pincodeError && (
-                  <Text style={styles.pincodeErrorText}>{pincodeError}</Text>
-                )}
-                {pincodeStatus === 'valid' && (
-                  <Text style={styles.pincodeSuccessText}>
-                    Pincode verified - Location details auto-filled
-                  </Text>
-                )}
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Pricing Unit *</Text>
+                  <Dropdown
+                    options={pricingUnitOptions.map((unit) => ({
+                      label: unit,
+                      value: unit,
+                    }))}
+                    value={editData.pricing_unit || ''}
+                    placeholder="Select pricing unit"
+                    onChange={(value: string) => setEditData({ ...editData, pricing_unit: value })}
+                    open={isPricingUnitDropdownOpen}
+                    onOpenChange={setIsPricingUnitDropdownOpen}
+                    disabled={selectedCategoriesWithPaths.length === 0}
+                  />
+                  {selectedCategoriesWithPaths.length === 0 && (
+                    <Text style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                      Select a service category first
+                    </Text>
+                  )}
+                </View>
               </View>
 
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>City/Town</Text>
-                {cityOptions.length > 1 ? (
-                  <View style={styles.cityDropdown}>
-                    {cityOptions.map((city) => (
-                      <Pressable
-                        key={city}
-                        style={[
-                          styles.cityOption,
-                          editData.city === city && styles.cityOptionSelected,
-                        ]}
-                        onPress={() => setEditData({ ...editData, city })}
-                      >
-                        <Text
-                          style={[
-                            styles.cityOptionText,
-                            editData.city === city && styles.cityOptionTextSelected,
-                          ]}
-                        >
-                          {city}
-                        </Text>
-                        {editData.city === city && (
-                          <Check size={16} color="#007AFF" />
-                        )}
-                      </Pressable>
-                    ))}
+              <View style={styles.editSection}>
+                <Text style={styles.editSectionTitle}>Location</Text>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Business Address</Text>
+                  <TextInput
+                    ref={addressRef}
+                    style={styles.editInput}
+                    value={editData.address || ''}
+                    onChangeText={(text) => setEditData({ ...editData, address: text })}
+                    placeholder="Enter business address"
+                    placeholderTextColor="#999"
+                    returnKeyType="next"
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => pincodeRef.current?.focus()}
+                  />
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Pincode *</Text>
+                  <View style={styles.inputWithStatus}>
+                    <TextInput
+                      ref={pincodeRef}
+                      style={[
+                        styles.editInput,
+                        styles.pincodeInput,
+                        pincodeStatus === 'valid' && styles.inputValid,
+                        pincodeStatus === 'invalid' && styles.inputInvalid,
+                      ]}
+                      value={editData.pincode || ''}
+                      onChangeText={(text) => {
+                        const cleanText = text.replace(/\D/g, '');
+                        setEditData({ ...editData, pincode: cleanText });
+                        if (pincodeStatus !== 'idle') {
+                          setPincodeStatus('idle');
+                          setPincodeError(null);
+                          setCityOptions([]);
+                        }
+                      }}
+                      onFocus={handleFieldFocus}
+                      returnKeyType="next"
+                      onSubmitEditing={() => {
+                        if (cityOptions.length === 0 || cityOptions.length === 1) {
+                          cityRef.current?.focus();
+                        } else {
+                          localityRef.current?.focus();
+                        }
+                      }}
+                      onBlur={async () => {
+                        const pincode = editData.pincode;
+                        if (!pincode || pincode.length !== 6) {
+                          if (pincode && pincode.length > 0 && pincode.length < 6) {
+                            setPincodeStatus('invalid');
+                            setPincodeError('Pincode must be 6 digits');
+                          }
+                          return;
+                        }
+                        setValidatingPincode(true);
+                        setPincodeError(null);
+                        try {
+                          const result = await validatePincode(pincode);
+                          if (result.valid) {
+                            setPincodeStatus('valid');
+                            // Set city options for dropdown
+                            if (result.cityOptions && result.cityOptions.length > 0) {
+                              setCityOptions(result.cityOptions);
+                            }
+                            // Auto-fill: city = Name, locality = District
+                            if (result.city) {
+                              setEditData((prev: any) => ({ ...prev, city: result.city }));
+                            }
+                            if (result.locality) {
+                              setEditData((prev: any) => ({ ...prev, locality: result.locality }));
+                            }
+                            if (result.state) {
+                              setEditData((prev: any) => ({ ...prev, state: result.state }));
+                            }
+                          } else {
+                            setPincodeStatus('invalid');
+                            setPincodeError(result.error || 'Invalid pincode');
+                            setCityOptions([]);
+                          }
+                        } catch (error) {
+                          setPincodeStatus('invalid');
+                          setPincodeError('Failed to validate pincode');
+                          setCityOptions([]);
+                        } finally {
+                          setValidatingPincode(false);
+                        }
+                      }}
+                      placeholder="Enter 6-digit pincode"
+                      placeholderTextColor="#999"
+                      keyboardType="numeric"
+                      maxLength={6}
+                    />
+                    <View style={styles.statusIcon}>
+                      {validatingPincode && (
+                        <ActivityIndicator size="small" color="#007AFF" />
+                      )}
+                      {!validatingPincode && pincodeStatus === 'valid' && (
+                        <Check size={20} color="#34C759" />
+                      )}
+                      {!validatingPincode && pincodeStatus === 'invalid' && (
+                        <AlertCircle size={20} color="#FF3B30" />
+                      )}
+                    </View>
                   </View>
-                ) : (
+                  {pincodeError && (
+                    <Text style={styles.pincodeErrorText}>{pincodeError}</Text>
+                  )}
+                  {pincodeStatus === 'valid' && (
+                    <Text style={styles.pincodeSuccessText}>
+                      Pincode verified - Location details auto-filled
+                    </Text>
+                  )}
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Area</Text>
                   <TextInput
                     ref={cityRef}
                     style={styles.editInput}
                     value={editData.city || ''}
                     onChangeText={(text) => setEditData({ ...editData, city: text })}
+                    placeholder="Enter area"
+                    placeholderTextColor="#999"
+                    returnKeyType="next"
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => localityRef.current?.focus()}
+                  />
+                  {cityOptions.length > 0 && (
+                    <View style={styles.suggestionsContainer}>
+                      <Text style={styles.suggestionsLabel}>Suggestions:</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestionsScroll}>
+                        {cityOptions.map((city) => (
+                          <TouchableOpacity
+                            key={city}
+                            style={[
+                              styles.suggestionChip,
+                              editData.city === city && styles.suggestionChipSelected
+                            ]}
+                            onPress={() => setEditData({ ...editData, city })}
+                          >
+                            <Text style={[
+                              styles.suggestionChipText,
+                              editData.city === city && styles.suggestionChipTextSelected
+                            ]}>
+                              {city}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>City/Town</Text>
+                  <TextInput
+                    ref={localityRef}
+                    style={styles.editInput}
+                    value={editData.locality || ''}
+                    onChangeText={(text) => setEditData({ ...editData, locality: text })}
                     placeholder="Enter city/town"
                     placeholderTextColor="#999"
                     returnKeyType="next"
-                    onSubmitEditing={() => localityRef.current?.focus()}
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => stateRef.current?.focus()}
                   />
-                )}
-                {cityOptions.length > 1 && (
-                  <Text style={styles.editHint}>Select from available options for this pincode</Text>
-                )}
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>State</Text>
+                  <TextInput
+                    ref={stateRef}
+                    style={styles.editInput}
+                    value={editData.state || ''}
+                    onChangeText={(text) => setEditData({ ...editData, state: text })}
+                    placeholder="Enter state"
+                    placeholderTextColor="#999"
+                    returnKeyType="next"
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => serviceRadiusRef.current?.focus()}
+                  />
+                </View>
+
+                <View style={styles.field}>
+                  <Text style={styles.label}>Service Radius (km)</Text>
+                  <TextInput
+                    ref={serviceRadiusRef}
+                    style={styles.input}
+                    value={editData.service_radius_km?.toString() || ''}
+                    onChangeText={(text) => {
+                      const num = parseInt(text) || 0;
+                      setEditData({ ...editData, service_radius_km: num });
+                    }}
+                    placeholder="Enter service radius in kilometers"
+                    returnKeyType="next"
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => gstNumberRef.current?.focus()}
+                    keyboardType="numeric"
+                    maxLength={4}
+                    placeholderTextColor="#999"
+                  />
+                </View>
               </View>
 
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Locality/District</Text>
-                <TextInput
-                  ref={localityRef}
-                  style={styles.editInput}
-                  value={editData.locality || ''}
-                  onChangeText={(text) => setEditData({ ...editData, locality: text })}
-                  placeholder="Enter locality/district"
-                  placeholderTextColor="#999"
-                  returnKeyType="next"
-                  onSubmitEditing={() => stateRef.current?.focus()}
-                />
-                <Text style={styles.editHint}>Auto-filled from pincode (editable)</Text>
-              </View>
+              <View style={styles.editSection}>
+                <Text style={styles.editSectionTitle}>Verification</Text>
 
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>State</Text>
-                <TextInput
-                  ref={stateRef}
-                  style={styles.editInput}
-                  value={editData.state || ''}
-                  onChangeText={(text) => setEditData({ ...editData, state: text })}
-                  placeholder="Enter state"
-                  placeholderTextColor="#999"
-                  returnKeyType="next"
-                  onSubmitEditing={() => serviceRadiusRef.current?.focus()}
-                />
-                <Text style={styles.editHint}>Auto-filled from pincode (editable)</Text>
-              </View>
-
-              <View style={styles.field}>
-                <Text style={styles.label}>Service Radius (km)</Text>
-                <TextInput
-                  ref={serviceRadiusRef}
-                  style={styles.input}
-                  value={editData.service_radius_km?.toString() || ''}
-                  onChangeText={(text) => {
-                    const num = parseInt(text) || 0;
-                    setEditData({ ...editData, service_radius_km: num });
-                  }}
-                  placeholder="Enter service radius in kilometers"
-                  returnKeyType="next"
-                  onSubmitEditing={() => gstNumberRef.current?.focus()}
-                  keyboardType="numeric"
-                  maxLength={4}
-                  placeholderTextColor="#999"
-                />
-              </View>
-            </View>
-
-            <View style={styles.editSection}>
-              <Text style={styles.editSectionTitle}>Verification</Text>
-
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>GST Number</Text>
-                <TextInput
-                  ref={gstNumberRef}
-                  style={styles.editInput}
-                  value={editData.gst_number || ''}
-                  onChangeText={(text) => setEditData({ ...editData, gst_number: text })}
-                  placeholder="Enter GST number"
-                  placeholderTextColor="#999"
-                  returnKeyType="next"
-                  onSubmitEditing={() => panRef.current?.focus()}
-                />
-              </View>
-
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>PAN *</Text>
-                <Text style={styles.editHint}>Required - Permanent Account Number</Text>
-                <TextInput
-                  ref={panRef}
-                  style={styles.editInput}
-                  value={editData.business_registration_number || ''}
-                  onChangeText={(text) => setEditData({ ...editData, business_registration_number: text })}
-                  placeholder="Enter PAN (e.g., ABCDE1234F)"
-                  placeholderTextColor="#999"
-                  autoCapitalize="characters"
-                  maxLength={10}
-                  returnKeyType="next"
-                  onSubmitEditing={() => websiteUrlRef.current?.focus()}
-                />
-              </View>
-
-              {/* Verification Documents Section */}
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Verification Documents</Text>
-                <Text style={styles.editHint}>
-                  PAN card document is required. Upload images (jpg, png) or PDF files (max 10MB each)
-                </Text>
-
-                {/* Document Types - PAN Card first and mandatory */}
-                {[
-                  { code: 'pan', name: 'PAN Card', mandatory: true },
-                  { code: 'gst', name: 'GST Certificate', mandatory: false },
-                  { code: 'aadhaar', name: 'Aadhaar Card', mandatory: false },
-                  { code: 'bank_statement', name: 'Bank Statement', mandatory: false },
-                  { code: 'general', name: 'General Document', mandatory: false },
-                  { code: 'business_license', name: 'Business License', mandatory: false },
-                ].map((docType) => {
-                  const docs = documentsByType[docType.code] || [];
-                  const isUploading = uploadingDocument === docType.code;
-
-                  return (
-                    <View key={docType.code} style={[styles.documentTypeSection, docType.mandatory && styles.mandatoryDocumentSection]}>
-                      <View style={styles.documentTypeHeader}>
-                        <View style={styles.documentTypeLabelContainer}>
-                          <Text style={styles.documentTypeName}>{docType.name} {docType.mandatory ? '*' : ''}</Text>
-                          {docType.mandatory && (
-                            <Text style={styles.mandatoryDocumentHint}>Required</Text>
-                          )}
-                        </View>
-                        <TouchableOpacity
-                          style={[styles.addDocumentButton, isUploading && styles.addDocumentButtonDisabled]}
-                          onPress={() => handleUploadDocument(docType.code)}
-                          disabled={isUploading}
-                        >
-                          {isUploading ? (
-                            <ActivityIndicator size="small" color="#007AFF" />
-                          ) : (
-                            <Upload size={16} color="#007AFF" />
-                          )}
-                          <Text style={styles.addDocumentButtonText}>
-                            {isUploading ? 'Uploading...' : 'Add'}
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-
-                      {/* Display documents */}
-                      {docs.length > 0 && (
-                        <View style={styles.documentsList}>
-                          {docs.map((doc) => (
-                            <View key={doc.id} style={styles.documentItem}>
-                              {isImageFile(doc.mime_type || '') && doc.file_url ? (
-                                <Image source={{ uri: doc.file_url }} style={styles.documentThumbnail} />
-                              ) : (
-                                <View style={styles.documentIcon}>
-                                  <FileText size={20} color="#666" />
-                                </View>
-                              )}
-                              <View style={styles.documentInfo}>
-                                <Text style={styles.documentName} numberOfLines={1}>
-                                  {doc.file_name || 'Document'}
-                                </Text>
-                                <Text style={styles.documentStatus}>
-                                  Status: {doc.verification_status}
-                                </Text>
-                              </View>
-                              <TouchableOpacity
-                                style={styles.deleteDocumentButton}
-                                onPress={() => handleDeleteDocument(doc.id)}
-                              >
-                                <X size={16} color="#fff" />
-                              </TouchableOpacity>
-                            </View>
-                          ))}
-                        </View>
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>PAN *</Text>
+                  <Text style={styles.editHint}>Required - Permanent Account Number</Text>
+                  <View style={styles.inputActionRow}>
+                    <TextInput
+                      ref={panRef}
+                      style={[styles.editInput, styles.flexInput]}
+                      value={editData.business_registration_number || ''}
+                      onChangeText={(text) => setEditData({ ...editData, business_registration_number: text })}
+                      placeholder="Enter PAN"
+                      placeholderTextColor="#999"
+                      autoCapitalize="characters"
+                      maxLength={10}
+                      returnKeyType="next"
+                      onSubmitEditing={() => gstNumberRef.current?.focus()}
+                    />
+                    <TouchableOpacity
+                      style={[styles.inlineUploadButton, uploadingDocument === 'pan' && styles.addDocumentButtonDisabled]}
+                      onPress={() => handleUploadDocument('pan')}
+                      disabled={uploadingDocument === 'pan'}
+                    >
+                      {uploadingDocument === 'pan' ? (
+                        <ActivityIndicator size="small" color="#007AFF" />
+                      ) : (
+                        <>
+                          <Upload size={18} color="#007AFF" />
+                          <Text style={styles.inlineUploadButtonText}>Add PAN</Text>
+                        </>
                       )}
+                    </TouchableOpacity>
+                  </View>
+                  {/* PAN Document Preview */}
+                  {(documentsByType['pan'] || []).length > 0 && (
+                    <View style={styles.inlineDocumentsList}>
+                      {(documentsByType['pan'] || []).map((doc: any) => (
+                        <View key={doc.id} style={styles.documentItem}>
+                          {isImageFile(doc.mime_type || '') && doc.file_url ? (
+                            <Image source={{ uri: doc.file_url }} style={styles.documentThumbnail} />
+                          ) : (
+                            <View style={styles.documentIcon}>
+                              <FileText size={20} color="#666" />
+                            </View>
+                          )}
+                          <View style={styles.documentInfo}>
+                            <Text style={styles.documentName} numberOfLines={1}>{doc.file_name || 'PAN Card'}</Text>
+                            <Text style={styles.documentStatus}>Status: {doc.verification_status}</Text>
+                          </View>
+                          <TouchableOpacity style={styles.deleteDocumentButton} onPress={() => handleDeleteDocument(doc.id)}>
+                            <X size={16} color="#fff" />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
                     </View>
-                  );
-                })}
+                  )}
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>GST Number</Text>
+                  <View style={styles.inputActionRow}>
+                    <TextInput
+                      ref={gstNumberRef}
+                      style={[styles.editInput, styles.flexInput]}
+                      value={editData.gst_number || ''}
+                      onChangeText={(text) => setEditData({ ...editData, gst_number: text })}
+                      placeholder="Enter GST number"
+                      placeholderTextColor="#999"
+                      returnKeyType="next"
+                      onSubmitEditing={() => websiteUrlRef.current?.focus()}
+                    />
+                    <TouchableOpacity
+                      style={[styles.inlineUploadButton, uploadingDocument === 'gst' && styles.addDocumentButtonDisabled]}
+                      onPress={() => handleUploadDocument('gst')}
+                      disabled={uploadingDocument === 'gst'}
+                    >
+                      {uploadingDocument === 'gst' ? (
+                        <ActivityIndicator size="small" color="#007AFF" />
+                      ) : (
+                        <>
+                          <Upload size={18} color="#007AFF" />
+                          <Text style={styles.inlineUploadButtonText}>Add GST</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                  {/* GST Document Preview */}
+                  {(documentsByType['gst'] || []).length > 0 && (
+                    <View style={styles.inlineDocumentsList}>
+                      {(documentsByType['gst'] || []).map((doc: any) => (
+                        <View key={doc.id} style={styles.documentItem}>
+                          {isImageFile(doc.mime_type || '') && doc.file_url ? (
+                            <Image source={{ uri: doc.file_url }} style={styles.documentThumbnail} />
+                          ) : (
+                            <View style={styles.documentIcon}>
+                              <FileText size={20} color="#666" />
+                            </View>
+                          )}
+                          <View style={styles.documentInfo}>
+                            <Text style={styles.documentName} numberOfLines={1}>{doc.file_name || 'GST Document'}</Text>
+                            <Text style={styles.documentStatus}>Status: {doc.verification_status}</Text>
+                          </View>
+                          <TouchableOpacity style={styles.deleteDocumentButton} onPress={() => handleDeleteDocument(doc.id)}>
+                            <X size={16} color="#fff" />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+
+                {/* Verification Documents Section */}
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Verification Documents</Text>
+
+                  {/* Document Types - PAN Card first and mandatory */}
+                  {[
+                    { code: 'aadhaar', name: 'Aadhaar Card', mandatory: false },
+                    { code: 'bank_statement', name: 'Bank Statement', mandatory: false },
+                    { code: 'general', name: 'General Document', mandatory: false },
+                    { code: 'business_license', name: 'Business License', mandatory: false },
+                  ].map((docType) => {
+                    const docs = documentsByType[docType.code] || [];
+                    const isUploading = uploadingDocument === docType.code;
+
+                    return (
+                      <View key={docType.code} style={[styles.documentTypeSection, docType.mandatory && styles.mandatoryDocumentSection]}>
+                        <View style={styles.documentTypeHeader}>
+                          <View style={styles.documentTypeLabelContainer}>
+                            <Text style={styles.documentTypeName}>{docType.name} {docType.mandatory ? '*' : ''}</Text>
+                            {docType.mandatory && (
+                              <Text style={styles.mandatoryDocumentHint}>Required</Text>
+                            )}
+                          </View>
+                          <TouchableOpacity
+                            style={[styles.addDocumentButton, isUploading && styles.addDocumentButtonDisabled]}
+                            onPress={() => handleUploadDocument(docType.code)}
+                            disabled={isUploading}
+                          >
+                            {isUploading ? (
+                              <ActivityIndicator size="small" color="#007AFF" />
+                            ) : (
+                              <Upload size={16} color="#007AFF" />
+                            )}
+                            <Text style={styles.addDocumentButtonText}>
+                              {isUploading ? 'Uploading...' : 'Add'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        {/* Display documents */}
+                        {docs.length > 0 && (
+                          <View style={styles.documentsList}>
+                            {docs.map((doc) => (
+                              <View key={doc.id} style={styles.documentItem}>
+                                {isImageFile(doc.mime_type || '') && doc.file_url ? (
+                                  <Image source={{ uri: doc.file_url }} style={styles.documentThumbnail} />
+                                ) : (
+                                  <View style={styles.documentIcon}>
+                                    <FileText size={20} color="#666" />
+                                  </View>
+                                )}
+                                <View style={styles.documentInfo}>
+                                  <Text style={styles.documentName} numberOfLines={1}>
+                                    {doc.file_name || 'Document'}
+                                  </Text>
+                                  <Text style={styles.documentStatus}>
+                                    Status: {doc.verification_status}
+                                  </Text>
+                                </View>
+                                <TouchableOpacity
+                                  style={styles.deleteDocumentButton}
+                                  onPress={() => handleDeleteDocument(doc.id)}
+                                >
+                                  <X size={16} color="#fff" />
+                                </TouchableOpacity>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
               </View>
-            </View>
 
-            <View style={styles.editSection}>
-              <Text style={styles.editSectionTitle}>Social Media</Text>
+              <View style={styles.editSection}>
+                <Text style={styles.editSectionTitle}>Social Media</Text>
 
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Website URL</Text>
-                <TextInput
-                  ref={websiteUrlRef}
-                  style={styles.editInput}
-                  value={editData.website_url || ''}
-                  onChangeText={(text) => setEditData({ ...editData, website_url: text })}
-                  placeholder="https://www.yourbusiness.com"
-                  placeholderTextColor="#999"
-                  autoCapitalize="none"
-                  keyboardType="url"
-                  returnKeyType="next"
-                  onSubmitEditing={() => instagramUrlRef.current?.focus()}
-                />
-              </View>
-
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Instagram URL</Text>
-                <TextInput
-                  ref={instagramUrlRef}
-                  style={styles.editInput}
-                  value={editData.instagram_url || ''}
-                  onChangeText={(text) => setEditData({ ...editData, instagram_url: text })}
-                  placeholder="https://instagram.com/yourbusiness"
-                  placeholderTextColor="#999"
-                  autoCapitalize="none"
-                  keyboardType="url"
-                  returnKeyType="next"
-                  onSubmitEditing={() => facebookUrlRef.current?.focus()}
-                />
-              </View>
-
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>Facebook URL</Text>
-                <TextInput
-                  ref={facebookUrlRef}
-                  style={styles.editInput}
-                  value={editData.facebook_url || ''}
-                  onChangeText={(text) => setEditData({ ...editData, facebook_url: text })}
-                  placeholder="https://facebook.com/yourbusiness"
-                  placeholderTextColor="#999"
-                  autoCapitalize="none"
-                  keyboardType="url"
-                  returnKeyType="next"
-                  onSubmitEditing={() => youtubeUrlRef.current?.focus()}
-                />
-              </View>
-
-              <View style={styles.editField}>
-                <Text style={styles.editLabel}>YouTube URL</Text>
-                <TextInput
-                  ref={youtubeUrlRef}
-                  style={styles.editInput}
-                  value={editData.youtube_url || ''}
-                  onChangeText={(text) => setEditData({ ...editData, youtube_url: text })}
-                  placeholder="https://youtube.com/@yourbusiness"
-                  placeholderTextColor="#999"
-                  autoCapitalize="none"
-                  keyboardType="url"
-                  returnKeyType="done"
-                />
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={[styles.saveButton, savingDetails && styles.saveButtonDisabled]}
-              onPress={handleSaveDetails}
-              disabled={savingDetails}
-            >
-              {savingDetails ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.saveButtonText}>Save Changes</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        )}
-      </ScrollView>
-
-      <Modal
-        visible={showOfferModal}
-        animationType="slide"
-        onRequestClose={() => {
-          resetOfferForm();
-          setShowOfferModal(false);
-        }}
-      >
-        <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>
-              {editingOffer ? 'Edit Offer' : 'Create Offer'}
-            </Text>
-            <TouchableOpacity
-              onPress={() => {
-                resetOfferForm();
-                setShowOfferModal(false);
-              }}
-            >
-              <X size={24} color="#1a1a1a" />
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView style={styles.modalContent}>
-            <View style={styles.field}>
-              <Text style={styles.label}>Title *</Text>
-              <TextInput
-                style={styles.input}
-                value={offerTitle}
-                onChangeText={setOfferTitle}
-                placeholder="Enter offer title"
-                maxLength={100}
-              />
-              <Text style={styles.charCount}>{offerTitle.length}/100</Text>
-            </View>
-
-            <View style={styles.field}>
-              <Text style={styles.label}>Description *</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={offerDescription}
-                onChangeText={setOfferDescription}
-                placeholder="Enter offer description"
-                multiline
-                numberOfLines={4}
-                maxLength={500}
-              />
-              <Text style={styles.charCount}>{offerDescription.length}/500</Text>
-            </View>
-
-            <View style={styles.field}>
-              <Text style={styles.label}>Banner Image</Text>
-              <TouchableOpacity
-                style={styles.imagePicker}
-                onPress={handlePickOfferBanner}
-              >
-                {offerBannerUri ? (
-                  <Image
-                    source={{ uri: offerBannerUri }}
-                    style={styles.pickerPreview}
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Website</Text>
+                  <TextInput
+                    ref={websiteUrlRef}
+                    style={styles.editInput}
+                    value={editData.website_url || ''}
+                    onChangeText={(text) => setEditData({ ...editData, website_url: text })}
+                    placeholder="https://www.yourbusiness.com"
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                    keyboardType="url"
+                    returnKeyType="next"
+                    onSubmitEditing={() => instagramUrlRef.current?.focus()}
                   />
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Instagram</Text>
+                  <TextInput
+                    ref={instagramUrlRef}
+                    style={styles.editInput}
+                    value={editData.instagram_url || ''}
+                    onChangeText={(text) => setEditData({ ...editData, instagram_url: text })}
+                    placeholder="https://instagram.com/yourbusiness"
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                    keyboardType="url"
+                    returnKeyType="next"
+                    onSubmitEditing={() => facebookUrlRef.current?.focus()}
+                  />
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Facebook</Text>
+                  <TextInput
+                    ref={facebookUrlRef}
+                    style={styles.editInput}
+                    value={editData.facebook_url || ''}
+                    onChangeText={(text) => setEditData({ ...editData, facebook_url: text })}
+                    placeholder="https://facebook.com/yourbusiness"
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                    keyboardType="url"
+                    returnKeyType="next"
+                    onSubmitEditing={() => youtubeUrlRef.current?.focus()}
+                  />
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>YouTube</Text>
+                  <TextInput
+                    ref={youtubeUrlRef}
+                    style={styles.editInput}
+                    value={editData.youtube_url || ''}
+                    onChangeText={(text) => setEditData({ ...editData, youtube_url: text })}
+                    placeholder="https://youtube.com/@yourbusiness"
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                    keyboardType="url"
+                    returnKeyType="done"
+                  />
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.saveButton, savingDetails && styles.saveButtonDisabled]}
+                onPress={handleSaveDetails}
+                disabled={savingDetails}
+              >
+                {savingDetails ? (
+                  <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <>
-                    <ImageIcon size={32} color="#666" />
-                    <Text style={styles.pickerText}>Select Banner Image</Text>
-                    <Text style={styles.pickerHint}>JPG or PNG, max 5MB</Text>
-                  </>
+                  <Text style={styles.saveButtonText}>Save Changes</Text>
                 )}
               </TouchableOpacity>
             </View>
-
-            <View style={styles.field}>
-              <Text style={styles.label}>Discount Percentage</Text>
-              <TextInput
-                style={styles.input}
-                value={offerDiscount}
-                onChangeText={setOfferDiscount}
-                placeholder="e.g., 20"
-                keyboardType="numeric"
-              />
-            </View>
-
-            <View style={styles.field}>
-              <Text style={styles.label}>Valid Until *</Text>
-              <TextInput
-                style={styles.input}
-                value={offerValidUntil}
-                onChangeText={setOfferValidUntil}
-                placeholder="YYYY-MM-DD"
-              />
-              <Text style={styles.fieldHint}>
-                Enter future date in YYYY-MM-DD format
-              </Text>
-            </View>
-          </ScrollView>
-
-          <View style={styles.modalFooter}>
-            <TouchableOpacity
-              style={[styles.modalButton, styles.cancelButton]}
-              onPress={() => {
-                resetOfferForm();
-                setShowOfferModal(false);
-              }}
-            >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.modalButton,
-                styles.submitButton,
-                submitting && styles.buttonDisabled,
-              ]}
-              onPress={editingOffer ? handleUpdateOffer : handleCreateOffer}
-              disabled={submitting}
-            >
-              {submitting ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.submitButtonText}>
-                  {editingOffer ? 'Update' : 'Create'}
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={showImagePreview}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setShowImagePreview(false)}
-      >
-        <View style={styles.previewContainer}>
-          <TouchableOpacity
-            style={styles.previewClose}
-            onPress={() => setShowImagePreview(false)}
-          >
-            <X size={32} color="#fff" />
-          </TouchableOpacity>
-          {previewImageUrl && (
-            <Image
-              source={{ uri: previewImageUrl }}
-              style={styles.previewImage}
-              resizeMode="contain"
-            />
           )}
-        </View>
-      </Modal>
+        </ScrollView>
+
+        <Modal
+          visible={showOfferModal}
+          animationType="slide"
+          onRequestClose={() => {
+            resetOfferForm();
+            setShowOfferModal(false);
+          }}
+        >
+          <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {editingOffer ? 'Edit Offer' : 'Create Offer'}
+              </Text>
+              <TouchableOpacity
+                onPress={() => {
+                  resetOfferForm();
+                  setShowOfferModal(false);
+                }}
+              >
+                <X size={24} color="#1a1a1a" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalContent}>
+              <View style={styles.field}>
+                <Text style={styles.label}>Title *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={offerTitle}
+                  onChangeText={setOfferTitle}
+                  placeholder="Enter offer title"
+                  maxLength={100}
+                />
+                <Text style={styles.charCount}>{offerTitle.length}/100</Text>
+              </View>
+
+              <View style={styles.field}>
+                <Text style={styles.label}>Description *</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  value={offerDescription}
+                  onChangeText={setOfferDescription}
+                  placeholder="Enter offer description"
+                  multiline
+                  numberOfLines={4}
+                  maxLength={500}
+                />
+                <Text style={styles.charCount}>{offerDescription.length}/500</Text>
+              </View>
+
+              <View style={styles.field}>
+                <Text style={styles.label}>Banner Image</Text>
+                <TouchableOpacity
+                  style={styles.imagePicker}
+                  onPress={handlePickOfferBanner}
+                >
+                  {offerBannerUri ? (
+                    <Image
+                      source={{ uri: offerBannerUri }}
+                      style={styles.pickerPreview}
+                    />
+                  ) : (
+                    <>
+                      <ImageIcon size={32} color="#666" />
+                      <Text style={styles.pickerText}>Select Banner Image</Text>
+                      <Text style={styles.pickerHint}>JPG or PNG, max 5MB</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.field}>
+                <Text style={styles.label}>Discount Percentage</Text>
+                <TextInput
+                  style={styles.input}
+                  value={offerDiscount}
+                  onChangeText={setOfferDiscount}
+                  placeholder="e.g., 20"
+                  keyboardType="numeric"
+                />
+              </View>
+
+              <View style={styles.field}>
+                <Text style={styles.label}>Valid Until *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={offerValidUntil}
+                  onChangeText={setOfferValidUntil}
+                  placeholder="YYYY-MM-DD"
+                />
+                <Text style={styles.fieldHint}>
+                  Enter future date in YYYY-MM-DD format
+                </Text>
+              </View>
+            </ScrollView>
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => {
+                  resetOfferForm();
+                  setShowOfferModal(false);
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.modalButton,
+                  styles.submitButton,
+                  submitting && styles.buttonDisabled,
+                ]}
+                onPress={editingOffer ? handleUpdateOffer : handleCreateOffer}
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.submitButtonText}>
+                    {editingOffer ? 'Update' : 'Create'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={showImagePreview}
+          animationType="fade"
+          transparent
+          onRequestClose={() => setShowImagePreview(false)}
+        >
+          <View style={styles.previewContainer}>
+            <TouchableOpacity
+              style={styles.previewClose}
+              onPress={() => setShowImagePreview(false)}
+            >
+              <X size={32} color="#fff" />
+            </TouchableOpacity>
+            {previewImageUrl && (
+              <Image
+                source={{ uri: previewImageUrl }}
+                style={styles.previewImage}
+                resizeMode="contain"
+              />
+            )}
+          </View>
+        </Modal>
+      </KeyboardAvoidingView>
     </ScreenBackground>
   );
 }
@@ -3729,6 +3846,37 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#fff',
+  },
+  inputActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  flexInput: {
+    flex: 1,
+    minWidth: 200,
+  },
+  inlineUploadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#f0f7ff',
+    borderWidth: 1,
+    borderColor: '#007AFF',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    minHeight: 52,
+  },
+  inlineUploadButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  inlineDocumentsList: {
+    marginTop: 12,
+    gap: 8,
   },
   comingSoonText: {
     fontSize: 16,
@@ -4392,5 +4540,38 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 8,
+  },
+  suggestionsContainer: {
+    marginTop: 8,
+  },
+  suggestionsLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 6,
+    marginLeft: 4,
+  },
+  suggestionsScroll: {
+    flexDirection: 'row',
+  },
+  suggestionChip: {
+    backgroundColor: '#f0f0f0',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    marginRight: 8,
+  },
+  suggestionChipSelected: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  suggestionChipText: {
+    fontSize: 13,
+    color: '#666',
+  },
+  suggestionChipTextSelected: {
+    color: '#fff',
+    fontWeight: '500',
   },
 });

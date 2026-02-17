@@ -74,7 +74,7 @@ export default function LoginScreen() {
     const formattedPhone = formatPhoneNumber(phone);
 
     if (!validatePhoneNumber(formattedPhone)) {
-      setError('Please enter a valid phone number');
+      setError('Please enter a valid business contact number');
       return;
     }
 
@@ -256,7 +256,7 @@ export default function LoginScreen() {
                         <Text style={styles.formTitle}>Verify OTP</Text>
                         <View style={styles.otpHeader}>
                           <Text style={styles.otpLabel}>Enter 6-digit OTP sent to</Text>
-                          <Text style={styles.phoneNumberDisplay}>{formatPhoneNumber(phone)}</Text>
+                          <Text style={styles.phoneNumberDisplay}>{phone}</Text>
                         </View>
 
                         <TextInput
@@ -296,7 +296,7 @@ export default function LoginScreen() {
                             }}
                             disabled={loading}
                           >
-                            <Text style={[styles.footerLink, loading && styles.disabledLink]}>Change Phone Number</Text>
+                            <Text style={[styles.footerLink, loading && styles.disabledLink]}>Change Business Contact Number</Text>
                           </TouchableOpacity>
 
                           <View>
@@ -361,6 +361,10 @@ export default function LoginScreen() {
                         </View>
                         <Text style={styles.trustText}>Building India's Largest Event Vendor Network</Text>
                       </View>
+
+                      {process.env.EXPO_PUBLIC_NODE_ENV === 'development' && (
+                        <Text style={styles.devTag}>DEVELOPMENT</Text>
+                      )}
                     </>
                   )}
                 </View>
@@ -636,6 +640,14 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
     fontWeight: '700',
     letterSpacing: 0.2,
+  },
+  devTag: {
+    color: '#FF0000',
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginTop: Spacing.md,
+    fontSize: 16,
+    textTransform: 'uppercase',
   },
 
   safeSupportContainer: {

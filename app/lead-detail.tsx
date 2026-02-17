@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import * as Linking from 'expo-linking';
 import {
   View,
@@ -15,11 +15,13 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Phone, Mail, Calendar, MapPin, Users, Building2, CreditCard as Edit, Clock, Tag, FileText, MessageSquare, CircleCheck as CheckCircle, Circle as XCircle } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
-import { supabaseCore, supabaseCrm } from '../lib/supabase';
+import { supabaseCore, supabaseCms, supabaseCrm } from '../lib/supabase';
+import { stripCountryCode } from '../lib/formatters';
 import Logo from '../components/Logo';
 import { Lead, LeadActivity, STATUS_OPTIONS } from '../types/leads';
 import { getTimeAgo, formatEventDate } from '../lib/timeUtils';
 import ScreenBackground from '../components/ScreenBackground';
+import Dropdown from '../components/Dropdown';
 
 export default function LeadDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -139,6 +141,10 @@ export default function LeadDetailScreen() {
         return 'Email Sent';
       case 'message':
         return 'Message';
+      case 'note':
+        return 'Note Added';
+      case 'status_change':
+        return 'Status Changed';
       case 'meeting':
         return 'Meeting';
       case 'quote_sent':
@@ -162,7 +168,7 @@ export default function LeadDetailScreen() {
       }
     } else {
       console.log('[DEBUG] No customer phone found');
-      Alert.alert('Info', 'No phone number available for this lead');
+      Alert.alert('Info', 'No business contact number available for this lead');
     }
   };
 
@@ -197,7 +203,7 @@ export default function LeadDetailScreen() {
       // Clean phone number: remove non-numeric characters
       const cleanPhone = lead.customer_phone.replace(/\D/g, '');
       // Add India country code if not present (assuming default is India for this app)
-      const phoneWithCountry = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+      const phoneWithCountry = cleanPhone.length === 10 ? `${cleanPhone}` : cleanPhone;
 
       const whatsappUrl = `https://wa.me/${phoneWithCountry}`;
       console.log('[DEBUG] Prepared WhatsApp URL:', whatsappUrl);
@@ -210,7 +216,7 @@ export default function LeadDetailScreen() {
       }
     } else {
       console.log('[DEBUG] No customer phone found for WhatsApp');
-      Alert.alert('Info', 'No phone number available for this lead');
+      Alert.alert('Info', 'No business contact number available for this lead');
     }
   };
 
@@ -241,7 +247,7 @@ export default function LeadDetailScreen() {
       if (error) throw error;
 
       await logActivity(
-        'message',
+        'status_change',
         'Status changed',
         `Status changed from ${lead.lead_status} to ${newStatus}`
       );
@@ -264,7 +270,7 @@ export default function LeadDetailScreen() {
       await supabaseCrm.from('lead_communications').insert({
         lead_id: lead.id,
         vendor_id: user?.id,
-        communication_type: 'message',
+        communication_type: 'note',
         message: newNote.trim(),
         is_from_vendor: true,
       });
@@ -343,19 +349,25 @@ export default function LeadDetailScreen() {
   const getActivityIcon = (type: string) => {
     switch (type) {
       case 'call':
-        return <Phone size={16} color="#007AFF" />;
+        return { icon: <Phone size={14} color="#007AFF" />, color: '#E3F2FD', bColor: '#007AFF' };
       case 'email':
-        return <Mail size={16} color="#007AFF" />;
+        return { icon: <Mail size={14} color="#5C6BC0" />, color: '#E8EAF6', bColor: '#5C6BC0' };
+      case 'note':
+        return { icon: <FileText size={14} color="#FF9800" />, color: '#FFF3E0', bColor: '#FF9800' };
+      case 'status_change':
+        return { icon: <Clock size={14} color="#7E57C2" />, color: '#F3E5F5', bColor: '#7E57C2' };
       case 'message':
-        return <FileText size={16} color="#007AFF" />;
+        return { icon: <MessageSquare size={14} color="#43A047" />, color: '#E8F5E9', bColor: '#43A047' };
       case 'meeting':
-        return <Users size={16} color="#007AFF" />;
+        return { icon: <Users size={14} color="#00897B" />, color: '#E0F2F1', bColor: '#00897B' };
       case 'quote_sent':
-        return <CheckCircle size={16} color="#34C759" />;
+        return { icon: <CheckCircle size={14} color="#2E7D32" />, color: '#E8F5E9', bColor: '#2E7D32' };
       default:
-        return <MessageSquare size={16} color="#007AFF" />;
+        return { icon: <MessageSquare size={14} color="#757575" />, color: '#F5F5F5', bColor: '#757575' };
     }
   };
+
+
 
   if (loading) {
     return (
@@ -395,17 +407,20 @@ export default function LeadDetailScreen() {
 
         <View style={styles.heroCard}>
           <View style={styles.heroHeader}>
-            <View style={styles.heroLeft}>
+            <View style={styles.heroContent}>
               <Text style={styles.heroName}>{lead.customer_name}</Text>
-              <Text style={styles.heroBusiness}>{lead.business_name}</Text>
-            </View>
-            <View style={styles.badges}>
-              <View
-                style={[styles.statusBadge, { backgroundColor: statusInfo.color + '20' }]}
-              >
-                <Text style={[styles.statusText, { color: statusInfo.color }]}>
-                  {statusInfo.label}
-                </Text>
+              <View style={styles.businessRow}>
+                <View style={styles.businessInfo}>
+                  <Building2 size={16} color="#666" style={styles.businessIcon} />
+                  <Text style={styles.heroBusiness} numberOfLines={1}>{lead.business_name}</Text>
+                </View>
+                <View
+                  style={[styles.statusBadge, { backgroundColor: statusInfo.color + '20' }]}
+                >
+                  <Text style={[styles.statusText, { color: statusInfo.color }]}>
+                    {statusInfo.label}
+                  </Text>
+                </View>
               </View>
             </View>
           </View>
@@ -419,11 +434,12 @@ export default function LeadDetailScreen() {
               <Text style={styles.actionButtonText}>Call</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.actionButton}
+              style={[styles.actionButton, !lead.customer_email && styles.actionButtonDisabled]}
               onPress={handleEmailPress}
+              disabled={!lead.customer_email}
             >
-              <Mail size={20} color="#007AFF" strokeWidth={2} />
-              <Text style={styles.actionButtonText}>Email</Text>
+              <Mail size={20} color={lead.customer_email ? "#007AFF" : "#CCC"} strokeWidth={2} />
+              <Text style={[styles.actionButtonText, !lead.customer_email && styles.actionButtonDisabledText]}>Email</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.actionButton}
@@ -475,6 +491,18 @@ export default function LeadDetailScreen() {
           {activeTab === 'overview' && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Lead Status</Text>
+              </View>
+              <View style={{ marginBottom: 24, paddingHorizontal: 4 }}>
+                <Dropdown
+                  options={STATUS_OPTIONS}
+                  value={lead.lead_status}
+                  placeholder="Select Status"
+                  onSelect={(value) => handleStatusChange(value)}
+                />
+              </View>
+
+              <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>Contact Information</Text>
               </View>
 
@@ -483,7 +511,7 @@ export default function LeadDetailScreen() {
                   <Phone size={20} color="#666" />
                   <View style={styles.infoContent}>
                     <Text style={styles.infoLabel}>Phone</Text>
-                    <Text style={styles.infoValue}>{lead.customer_phone}</Text>
+                    <Text style={styles.infoValue}>{stripCountryCode(lead.customer_phone)}</Text>
                   </View>
                 </View>
 
@@ -558,7 +586,7 @@ export default function LeadDetailScreen() {
                     <Text style={{ fontSize: 20, color: '#666', fontWeight: '600' }}>₹</Text>
                     <View style={styles.infoContent}>
                       <Text style={styles.infoLabel}>Budget Range</Text>
-                      <Text style={styles.infoValue}>₹ {lead.budget_range}</Text>
+                      <Text style={styles.infoValue}>{lead.budget_range}</Text>
                     </View>
                   </View>
                 )}
@@ -576,32 +604,6 @@ export default function LeadDetailScreen() {
                 </>
               )}
 
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Change Status</Text>
-              </View>
-
-              <View style={styles.statusGrid}>
-                {STATUS_OPTIONS.map((status) => (
-                  <TouchableOpacity
-                    key={status.value}
-                    style={[
-                      styles.statusOption,
-                      lead.lead_status === status.value && styles.statusOptionActive,
-                      { borderColor: status.color },
-                    ]}
-                    onPress={() => handleStatusChange(status.value)}
-                  >
-                    <Text
-                      style={[
-                        styles.statusOptionText,
-                        lead.lead_status === status.value && { color: status.color },
-                      ]}
-                    >
-                      {status.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
             </View>
           )}
 
@@ -619,27 +621,38 @@ export default function LeadDetailScreen() {
                 </View>
               ) : (
                 <View style={styles.timeline}>
-                  {activities.map((activity, index) => (
-                    <View key={activity.id} style={styles.timelineItem}>
-                      <View style={styles.timelineDot}>
-                        {getActivityIcon(activity.activity_type)}
-                      </View>
-                      {index < activities.length - 1 && <View style={styles.timelineLine} />}
-                      <View style={styles.activityCard}>
-                        <View style={styles.activityHeader}>
-                          <Text style={styles.activityTitle}>{activity.title}</Text>
-                          <Text style={styles.activityTime}>
+                  {activities.map((activity, index) => {
+                    const activityIcon = getActivityIcon(activity.activity_type);
+                    const isLast = index === activities.length - 1;
+
+                    return (
+                      <View key={activity.id} style={styles.timelineItem}>
+                        <View style={styles.timelineLeft}>
+                          <View style={[styles.timelineDot, { backgroundColor: activityIcon.color, borderColor: activityIcon.bColor + '40' }]}>
+                            {activityIcon.icon}
+                          </View>
+                          {!isLast && <View style={styles.timelineLine} />}
+                        </View>
+
+                        <View style={styles.activityCard}>
+                          <View style={styles.activityHeader}>
+                            <Text style={styles.activityTitle}>{activity.title}</Text>
+                            <Text style={styles.activityTime}>
+                              {new Date(activity.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </Text>
+                          </View>
+                          {activity.description && (
+                            <Text style={styles.activityDescription}>
+                              {activity.description}
+                            </Text>
+                          )}
+                          <Text style={styles.activityMeta}>
                             {getTimeAgo(activity.created_at)}
                           </Text>
                         </View>
-                        {activity.description && (
-                          <Text style={styles.activityDescription}>
-                            {activity.description}
-                          </Text>
-                        )}
                       </View>
-                    </View>
-                  ))}
+                    );
+                  })}
                 </View>
               )}
             </View>
@@ -679,7 +692,7 @@ export default function LeadDetailScreen() {
                 <Text style={styles.sectionTitle}>Notes History</Text>
               </View>
 
-              {activities.filter((a) => a.activity_type === 'message').length === 0 ? (
+              {activities.filter((a) => a.activity_type === 'note').length === 0 ? (
                 <View style={styles.emptyState}>
                   <FileText size={48} color="#ddd" />
                   <Text style={styles.emptyStateText}>No notes yet</Text>
@@ -687,7 +700,7 @@ export default function LeadDetailScreen() {
               ) : (
                 <View style={styles.notesList}>
                   {activities
-                    .filter((a) => a.activity_type === 'message')
+                    .filter((a) => a.activity_type === 'note')
                     .map((note) => (
                       <View key={note.id} style={styles.noteCard}>
                         <View style={styles.noteHeader}>
@@ -776,36 +789,46 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   heroHeader: {
-    marginBottom: 16,
+    marginBottom: 24,
   },
-  heroLeft: {
-    marginBottom: 12,
+  heroContent: {
+    gap: 8,
   },
   heroName: {
     fontSize: 24,
     fontWeight: '700',
     color: '#1a1a1a',
-    marginBottom: 4,
+  },
+  businessRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginTop: 4,
+  },
+  businessInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 12,
+    gap: 6,
+  },
+  businessIcon: {
+    // No specific style needed beyond color/size
   },
   heroBusiness: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#666',
-    fontWeight: '500',
-  },
-  badges: {
-    flexDirection: 'row',
-    gap: 8,
+    flex: 1,
   },
   statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderRadius: 12,
   },
   statusText: {
     fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontWeight: '600',
   },
   quickActions: {
     flexDirection: 'row',
@@ -824,10 +847,17 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 12,
   },
+  actionButtonDisabled: {
+    backgroundColor: '#FAFAFA',
+    opacity: 0.6,
+  },
   actionButtonText: {
     fontSize: 14,
     fontWeight: '600',
     color: '#007AFF',
+  },
+  actionButtonDisabledText: {
+    color: '#CCC',
   },
   tabs: {
     flexDirection: 'row',
@@ -947,55 +977,84 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   timeline: {
-    gap: 0,
+    paddingTop: 8,
+  },
+  dateGroup: {
+    marginBottom: 16,
+  },
+  dateHeaderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    marginTop: 8,
+  },
+  dateHeaderLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#eee',
+  },
+  dateHeader: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#999',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginHorizontal: 12,
   },
   timelineItem: {
     flexDirection: 'row',
-    position: 'relative',
+    marginBottom: 0,
+  },
+  timelineLeft: {
+    width: 48,
+    alignItems: 'center',
   },
   timelineDot: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
-    marginTop: 8,
-    borderWidth: 2,
-    borderColor: '#e0e0e0',
+    borderWidth: 1,
     zIndex: 1,
+    backgroundColor: '#fff',
   },
   timelineLine: {
     position: 'absolute',
-    left: 15,
-    top: 40,
+    left: 23,
+    top: 32,
     bottom: -8,
     width: 2,
-    backgroundColor: '#e0e0e0',
+    backgroundColor: '#f0f0f0',
   },
   activityCard: {
     flex: 1,
     backgroundColor: '#fff',
     borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    padding: 12,
+    marginBottom: 8,
   },
   activityHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   activityTitle: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
     color: '#1a1a1a',
     flex: 1,
   },
   activityTime: {
     fontSize: 12,
+    color: '#666',
+    fontWeight: '600',
+  },
+  activityMeta: {
+    fontSize: 11,
     color: '#999',
+    marginTop: 6,
     fontWeight: '500',
   },
   activityDescription: {

@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Calendar, MapPin, Clock, ArrowUpDown, ChevronRight, Search, Plus, X, Download, MoveVertical as MoreVertical, SquareCheck as CheckSquare, Square } from 'lucide-react-native';
+import { Calendar, MapPin, Clock, ArrowUpDown, ChevronRight, Search, Plus, X, MoveVertical as MoreVertical, SquareCheck as CheckSquare, Square, Building2 } from 'lucide-react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabaseCore, supabaseCrm } from '../../lib/supabase';
@@ -71,15 +71,23 @@ export default function LeadsScreen() {
 
   const hasLoadedLeads = useRef(false);
 
+  // Sync filters with URL params when navigating from dashboard
   useEffect(() => {
+    // Only update if params exist, otherwise keep current state
     if (params.statuses && typeof params.statuses === 'string') {
       const statusArray = params.statuses.split(',');
       setSelectedStatuses(statusArray);
+    } else if (params.statuses === undefined && selectedStatuses.length > 0) {
+      // If params were cleared (navigated without params), don't reset
+      // This allows users to clear filters manually
     }
+
     if (params.timeFilter && typeof params.timeFilter === 'string') {
       setTimeFilter(params.timeFilter as 'all' | 'month' | 'today');
+    } else if (params.timeFilter === undefined && timeFilter !== 'all') {
+      // If params were cleared, don't reset
     }
-  }, [params]);
+  }, [params.statuses, params.timeFilter]); // Only depend on specific params
 
   useEffect(() => {
     if (user?.id) {
@@ -349,9 +357,7 @@ export default function LeadsScreen() {
     );
   };
 
-  const exportLeads = () => {
-    Alert.alert('Export', 'Export functionality coming soon');
-  };
+
 
   const activeFilterCount =
     selectedEventTypes.length + selectedStatuses.length + selectedCities.length;
@@ -404,7 +410,10 @@ export default function LeadsScreen() {
               </View>
             </View>
             {item.business_name && (
-              <Text style={styles.businessName}>{item.business_name}</Text>
+              <View style={styles.businessNameRow}>
+                <Building2 size={14} color="#666" strokeWidth={2} />
+                <Text style={styles.businessName}>{item.business_name}</Text>
+              </View>
             )}
           </View>
 
@@ -473,9 +482,7 @@ export default function LeadsScreen() {
             </TouchableOpacity>
           ) : (
             <>
-              <TouchableOpacity style={styles.headerButton} onPress={exportLeads}>
-                <Download size={20} color="#007AFF" strokeWidth={2} />
-              </TouchableOpacity>
+
               <TouchableOpacity
                 style={styles.headerButton}
                 onPress={() => setShowSortModal(true)}
@@ -585,6 +592,7 @@ export default function LeadsScreen() {
                   setSelectedEventTypes([]);
                   setSelectedStatuses([]);
                   setSelectedCities([]);
+                  setTimeFilter('all');
                 }}
               >
                 <Text style={styles.clearAllText}>Clear All</Text>
@@ -638,6 +646,7 @@ export default function LeadsScreen() {
                 setSelectedEventTypes([]);
                 setSelectedStatuses([]);
                 setSelectedCities([]);
+                setTimeFilter('all');
               }}
             >
               <Text style={styles.clearFiltersButtonText}>Clear Filters</Text>
@@ -724,7 +733,7 @@ export default function LeadsScreen() {
         multiSelect
       />
 
-      {!bulkSelectMode && (
+      {!bulkSelectMode && false && (
         <TouchableOpacity
           style={[
             styles.fab,
@@ -980,11 +989,21 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 8,
   },
+  businessNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
+  businessLabel: {
+    fontSize: 13,
+    color: '#999',
+    fontWeight: '500',
+  },
   businessName: {
     fontSize: 13,
     color: '#666',
-    fontWeight: '500',
-    marginTop: 2,
+    fontWeight: '600',
   },
   badges: {
     flexDirection: 'row',

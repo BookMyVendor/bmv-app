@@ -19,6 +19,7 @@ interface ServicesExperienceStepProps {
   data: any;
   onUpdate: (data: any) => void;
   validationErrors?: Record<string, string>;
+  onFocus?: () => void;
 }
 
 export interface ServicesExperienceStepRef {
@@ -82,6 +83,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   data,
   onUpdate,
   validationErrors = {},
+  onFocus,
 }, ref) => {
   const [allBusinessCategories, setAllBusinessCategories] = useState<Category[]>([]);
   const [eventCategories, setEventCategories] = useState<Category[]>([]);
@@ -893,10 +895,10 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
             {!selectedRootCategoryId
               ? 'Select a category first'
               : selectedCategoriesWithPaths.length === 0
-                ? 'Select sub-categories'
+                ? 'Select services offered'
                 : selectedCategoriesWithPaths.length === 1
                   ? selectedCategoriesWithPaths[0].path
-                  : `${selectedCategoriesWithPaths.length} sub-categories selected`}
+                  : `${selectedCategoriesWithPaths.length} services selected`}
           </Text>
           <ChevronDown size={20} color={selectedRootCategoryId ? '#666' : '#ccc'} />
         </TouchableOpacity>
@@ -963,7 +965,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
               <TextInput
                 style={styles.modalSearchInput}
-                placeholder="Search sub-categories..."
+                placeholder="Search services offered..."
                 placeholderTextColor="#999"
                 value={searchQuery}
                 onChangeText={setSearchQuery}
@@ -977,8 +979,8 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
                 {filteredSubtree.length === 0 ? (
                   <Text style={styles.emptyText}>
                     {subtreeForSelectedRoot?.children?.length === 0
-                      ? 'No sub-categories'
-                      : 'No matching sub-categories'}
+                      ? 'No services offered'
+                      : 'No matching services offered'}
                   </Text>
                 ) : (
                   renderSubCategoryTree(filteredSubtree)
@@ -1072,7 +1074,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               onPress={(e) => e.stopPropagation()}
             >
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Select Event Types</Text>
+                <Text style={styles.modalTitle}>Select Events</Text>
                 <TouchableOpacity
                   onPress={() => setIsEventModalOpen(false)}
                   style={styles.closeButton}
@@ -1087,6 +1089,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
                 placeholder="Search event types..."
                 placeholderTextColor="#999"
                 value={eventSearchQuery}
+                onFocus={onFocus}
                 onChangeText={setEventSearchQuery}
               />
 
@@ -1133,6 +1136,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           numberOfLines={4}
           textAlignVertical="top"
           returnKeyType="done"
+          onFocus={onFocus}
           blurOnSubmit={true}
         />
         {validationErrors.businessDescription && (
@@ -1175,6 +1179,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           placeholder="Enter starting price (e.g. 5000)"
           placeholderTextColor="#999"
           keyboardType="numeric"
+          onFocus={onFocus}
           returnKeyType="next"
         />
         {validationErrors.basePrice && (
