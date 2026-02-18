@@ -1,5 +1,6 @@
 import { Platform, PermissionsAndroid } from 'react-native';
 import messaging from '@react-native-firebase/messaging';
+import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
 import { supabaseUrl } from './supabase';
 import { apiFetch } from './apiClient';
 
@@ -111,14 +112,25 @@ export async function registerPushToken(pushToken: string, platform: 'ios' | 'an
 export function handleNotificationNavigation(remoteMessage: any, router: any) {
     if (!remoteMessage) return;
 
-    const title = (remoteMessage.notification?.title || remoteMessage.data?.title || '').toLowerCase();
-    const body = (remoteMessage.notification?.body || remoteMessage.data?.body || '').toLowerCase();
+    // Normalize data between FCM and Notifee
+    const data = remoteMessage.data || remoteMessage.remoteMessage?.data || {};
+    const notification = remoteMessage.notification || {};
 
-    console.log('[PUSH] Notification tapped:', { title, body, data: remoteMessage.data });
+    const title = (typeof notification.title === 'string' ? notification.title : typeof data.title === 'string' ? data.title : '').toLowerCase();
+    const body = (typeof notification.body === 'string' ? notification.body : typeof data.body === 'string' ? data.body : '').toLowerCase();
+    const leadId = data.leadId;
 
-    if (title.includes('lead') || body.includes('lead')) {
-        console.log('[PUSH] Found "lead" in notification. Navigating to leads screen...');
+    console.log('[PUSH] Notification tapped:', { title, body, leadId, data });
+
+    if (leadId) {
+        console.log('[PUSH] Lead ID found. Navigating to lead details...');
+        router.push(`/lead-detail?id=${leadId}`);
+    } else if (title.includes('lead') || body.includes('lead')) {
+        console.log('[PUSH] Found "lead" in text. Navigating to leads screen...');
         router.push('/(tabs)/leads');
+    } else {
+        console.log('[PUSH] No specific route found. Navigating to dashboard...');
+        router.push('/(tabs)');
     }
 }
 
@@ -126,12 +138,26 @@ export function handleNotificationNavigation(remoteMessage: any, router: any) {
  * Initialize notification listeners
  */
 export function setupPushNotifications(router: any) {
-    // Handle background/quit state notification click
+    // Create Android Channel (Required for foreground notifications on Android)
+    const createChannel = async () => {
+        if (Platform.OS === 'android') {
+            await notifee.createChannel({
+                id: 'default',
+                name: 'Default Channel',
+                importance: AndroidImportance.HIGH,
+                sound: 'default',
+            });
+        }
+    };
+
+    createChannel();
+
+    // Handle background/quit state notification click (FCM)
     const unsubscribeOnNotificationOpenedApp = messaging().onNotificationOpenedApp(remoteMessage => {
         handleNotificationNavigation(remoteMessage, router);
     });
 
-    // Check if the app was opened from a quit state via a notification
+    // Check if the app was opened from a quit state via a notification (FCM)
     messaging()
         .getInitialNotification()
         .then(remoteMessage => {
@@ -141,14 +167,37 @@ export function setupPushNotifications(router: any) {
             }
         });
 
-    // Handle foreground messages (optional, showing an alert or just logging)
+    // Handle foreground messages (FCM)
     const unsubscribeOnMessage = messaging().onMessage(async remoteMessage => {
-        console.log('[PUSH] Foreground notification received:', remoteMessage.notification);
+        console.log('[PUSH] Foreground message received, displaying via Notifee');
+
+        // Display a system notification even though the app is in foreground
+        await notifee.displayNotification({
+            title: remoteMessage.notification?.title || (typeof remoteMessage.data?.title === 'string' ? remoteMessage.data.title : undefined),
+            body: remoteMessage.notification?.body || (typeof remoteMessage.data?.body === 'string' ? remoteMessage.data.body : undefined),
+            data: remoteMessage.data, // Pass through original data for navigation
+            android: {
+                channelId: 'default',
+                importance: AndroidImportance.HIGH,
+                pressAction: {
+                    id: 'default',
+                },
+            },
+        });
+    });
+
+    // Handle Notifee notification taps (Foreground events)
+    const unsubscribeNotifee = notifee.onForegroundEvent(({ type, detail }: { type: EventType, detail: any }) => {
+        if (type === EventType.PRESS) {
+            console.log('[PUSH] Notifee foreground press event');
+            handleNotificationNavigation(detail.notification, router);
+        }
     });
 
     return () => {
         unsubscribeOnNotificationOpenedApp();
         unsubscribeOnMessage();
+        unsubscribeNotifee();
     };
 }
 
