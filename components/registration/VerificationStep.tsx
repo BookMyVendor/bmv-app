@@ -240,7 +240,8 @@ const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(
           ✅ Customers prefer verified vendors{'\n'}
           📈 Rank higher in search results{'\n'}
           ⭐ Unlock premium features & badges{'\n'}
-          🔒 Protect your brand from impersonation        </Text>
+          🔒 Protect your brand from impersonation
+        </Text>
       </View>
 
       <View style={styles.field}>
@@ -396,7 +397,7 @@ const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(
         );
       })}
 
-    </View>
+    </ScrollView>
   );
 });
 
