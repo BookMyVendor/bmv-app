@@ -271,7 +271,7 @@ export const getBusinessImages = async (
       .order('sort_order', { ascending: true });
 
     if (error) throw error;
-    
+
     // Transform data to match PortfolioImage interface
     const transformedData = data?.map((item: any) => ({
       id: item.id,
@@ -696,7 +696,7 @@ export const pickImage = async (): Promise<{
   try {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      throw new Error('Photo Library access is required. Go to Settings > Apps > BookMyVendors Business > Photos to enable.');
+      throw new Error('Photo Library access is required. Go to Settings > Apps > BookMyVendors Business > Permissions > Photos to enable.');
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -722,7 +722,7 @@ export const pickMultipleImages = async (): Promise<{
   try {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      throw new Error('Photo Library access is required. Go to Settings > Apps > BookMyVendors Business > Photos to enable.');
+      throw new Error('Photo Library access is required. Go to Settings > Apps > BookMyVendors Business > Permissions > Photos to enable.');
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -768,7 +768,8 @@ export interface UploadDocumentData {
 export const uploadVerificationDocument = async (
   businessId: string,
   documentTypeCode: string,
-  file: DocumentFile
+  file: DocumentFile,
+  userId?: string
 ): Promise<{ data: VerificationDocument | null; error: Error | null }> => {
   try {
     // Validate file type
@@ -783,11 +784,14 @@ export const uploadVerificationDocument = async (
     }
 
     // Get authenticated user ID (vendor_id) first for folder structure
-    const { data: { user } } = await supabaseCore.auth.getUser();
-    if (!user) {
-      throw new Error('User not authenticated');
+    let vendorId = userId;
+    if (!vendorId) {
+      const { data: { user } } = await supabaseCore.auth.getUser();
+      if (!user) {
+        throw new Error('User not authenticated');
+      }
+      vendorId = user.id;
     }
-    const vendorId = user.id;
 
     // Get document type ID
     const { data: docType, error: docTypeError } = await supabaseCore
@@ -1050,8 +1054,8 @@ export const getBusinessVerificationDocuments = async (
 
     // Transform data with manual join
     const transformedData: VerificationDocument[] = documents.map((item: any) => {
-      const docType = item.document_type_id 
-        ? documentTypesMap.get(item.document_type_id) 
+      const docType = item.document_type_id
+        ? documentTypesMap.get(item.document_type_id)
         : null;
       const fileStorage = item.file_storage;
 

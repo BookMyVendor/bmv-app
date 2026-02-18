@@ -24,6 +24,8 @@ import {
 import Dropdown from '../components/Dropdown';
 import Logo from '../components/Logo';
 import { validateEmail, getEmailError } from '../lib/validation';
+import { stripCountryCode } from '../lib/formatters';
+import ScreenBackground from '../components/ScreenBackground';
 
 export default function LeadFormScreen() {
   const router = useRouter();
@@ -133,7 +135,7 @@ export default function LeadFormScreen() {
           business_id: data.business_id || '',
           customer_name: data.customer_name || '',
           customer_email: data.customer_email || '',
-          customer_phone: data.customer_phone || '',
+          customer_phone: stripCountryCode(data.customer_phone) || '',
           category_id: data.category_id || '',
           event_date: data.event_date || '',
           event_location: data.event_location || '',
@@ -162,9 +164,9 @@ export default function LeadFormScreen() {
     }
 
     if (!formData.customer_phone.trim()) {
-      newErrors.customer_phone = 'Phone number is required';
+      newErrors.customer_phone = 'Business contact number is required';
     } else if (!/^\+?\d{10,}$/.test(formData.customer_phone.replace(/\D/g, ''))) {
-      newErrors.customer_phone = 'Please enter a valid phone number';
+      newErrors.customer_phone = 'Please enter a valid business contact number';
     }
 
     if (formData.customer_email && !validateEmail(formData.customer_email)) {
@@ -212,7 +214,7 @@ export default function LeadFormScreen() {
         business_id: formData.business_id || null,
         customer_name: formData.customer_name.trim(),
         customer_email: formData.customer_email.trim() || null,
-        customer_phone: formData.customer_phone.trim() || null,
+        customer_phone: stripCountryCode(formData.customer_phone) || null,
         category_id: formData.category_id || null,
         event_date: formData.event_date || null,
         event_location: formData.event_location.trim() || null,
@@ -323,7 +325,7 @@ export default function LeadFormScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <ScreenBackground style={{ flex: 1 }}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <ArrowLeft size={24} color="#007AFF" strokeWidth={2} />
@@ -392,14 +394,14 @@ export default function LeadFormScreen() {
 
             <View style={styles.formGroup}>
               <Text style={styles.label}>
-                Phone Number <Text style={styles.required}>*</Text>
+                Business Contact Number <Text style={styles.required}>*</Text>
               </Text>
               <TextInput
                 ref={customerPhoneRef}
                 style={[styles.input, errors.customer_phone && styles.inputError]}
                 placeholder="Enter 10-digit mobile number"
                 placeholderTextColor="#999"
-                value={formData.customer_phone}
+                value={stripCountryCode(formData.customer_phone)}
                 onChangeText={(text) =>
                   updateFormData('customer_phone', formatPhoneInput(text))
                 }
@@ -644,7 +646,7 @@ export default function LeadFormScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </View>
+    </ScreenBackground>
   );
 
 }
@@ -652,7 +654,6 @@ export default function LeadFormScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
   loadingContainer: {
     flex: 1,
@@ -664,12 +665,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#fff',
     paddingHorizontal: 20,
     paddingTop: 60,
     paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
   },
   backBtn: {
     padding: 4,

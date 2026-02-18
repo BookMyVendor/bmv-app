@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Calendar, MapPin, Clock, ArrowUpDown, ChevronRight, Search, Plus, X, Download, MoveVertical as MoreVertical, SquareCheck as CheckSquare, Square } from 'lucide-react-native';
+import { Calendar, MapPin, Clock, ArrowUpDown, ChevronRight, Search, Plus, X, MoveVertical as MoreVertical, SquareCheck as CheckSquare, Square, Building2 } from 'lucide-react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabaseCore, supabaseCrm } from '../../lib/supabase';
@@ -25,6 +25,7 @@ import FilterModal from '../../components/FilterModal';
 import { Lead, STATUS_OPTIONS, PRIORITY_OPTIONS } from '../../types/leads';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
 import Logo from '../../components/Logo';
+import ScreenBackground from '../../components/ScreenBackground';
 
 
 const EVENT_TYPES = [
@@ -68,19 +69,29 @@ export default function LeadsScreen() {
   const [showFilterScrollIndicator, setShowFilterScrollIndicator] = useState(false);
   const filterScrollViewRef = useRef<ScrollView>(null);
 
+  const hasLoadedLeads = useRef(false);
+
+  // Sync filters with URL params when navigating from dashboard
   useEffect(() => {
+    // Only update if params exist, otherwise keep current state
     if (params.statuses && typeof params.statuses === 'string') {
       const statusArray = params.statuses.split(',');
       setSelectedStatuses(statusArray);
+    } else if (params.statuses === undefined && selectedStatuses.length > 0) {
+      // If params were cleared (navigated without params), don't reset
+      // This allows users to clear filters manually
     }
+
     if (params.timeFilter && typeof params.timeFilter === 'string') {
       setTimeFilter(params.timeFilter as 'all' | 'month' | 'today');
+    } else if (params.timeFilter === undefined && timeFilter !== 'all') {
+      // If params were cleared, don't reset
     }
-  }, [params]);
+  }, [params.statuses, params.timeFilter]); // Only depend on specific params
 
   useEffect(() => {
     if (user?.id) {
-      fetchLeads();
+      fetchLeads(!hasLoadedLeads.current);
     }
   }, [user?.id]);
 
@@ -88,14 +99,16 @@ export default function LeadsScreen() {
   useFocusEffect(
     useCallback(() => {
       if (user?.id) {
-        fetchLeads();
+        fetchLeads(!hasLoadedLeads.current);
       }
     }, [user?.id])
   );
 
-  const fetchLeads = async () => {
+  const fetchLeads = async (showLoading = true) => {
     try {
-      setLoading(true);
+      if (showLoading) {
+        setLoading(true);
+      }
 
       const { data: businessData } = await supabaseCore
         .from('vendor_businesses')
@@ -104,7 +117,8 @@ export default function LeadsScreen() {
 
       if (!businessData || businessData.length === 0) {
         setLeads([]);
-        setLoading(false);
+        if (showLoading) setLoading(false);
+        hasLoadedLeads.current = true;
         return;
       }
 
@@ -155,7 +169,7 @@ export default function LeadsScreen() {
           ...lead,
           business_name: business?.name || 'Unknown Business',
           city: business?.city || null,
-          event_type: eventType || 'Unknown Event',
+          event_type: eventType || lead.event_type || 'Unknown Event',
           status: lead.lead_status, // Map lead_status to status for compatibility
         } as Lead;
       });
@@ -163,6 +177,7 @@ export default function LeadsScreen() {
       console.log(`✅ Fetched ${leadsWithDetails.length} leads`);
       console.log('Sample lead IDs:', leadsWithDetails.slice(0, 3).map(l => l.id));
       setLeads(leadsWithDetails);
+      hasLoadedLeads.current = true;
     } catch (error) {
       console.error('❌ Error fetching leads:', error);
       Alert.alert('Error', 'Failed to load leads. Please try again.');
@@ -175,7 +190,7 @@ export default function LeadsScreen() {
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      await fetchLeads();
+      await fetchLeads(false);
     } finally {
       setRefreshing(false);
     }
@@ -342,9 +357,7 @@ export default function LeadsScreen() {
     );
   };
 
-  const exportLeads = () => {
-    Alert.alert('Export', 'Export functionality coming soon');
-  };
+
 
   const activeFilterCount =
     selectedEventTypes.length + selectedStatuses.length + selectedCities.length;
@@ -397,7 +410,10 @@ export default function LeadsScreen() {
               </View>
             </View>
             {item.business_name && (
-              <Text style={styles.businessName}>{item.business_name}</Text>
+              <View style={styles.businessNameRow}>
+                <Building2 size={14} color="#666" strokeWidth={2} />
+                <Text style={styles.businessName}>{item.business_name}</Text>
+              </View>
             )}
           </View>
 
@@ -438,7 +454,7 @@ export default function LeadsScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <ScreenBackground style={styles.container}>
       <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
         <View style={styles.headerLeft}>
           <Logo size={38} style={styles.headerLogo} />
@@ -466,9 +482,7 @@ export default function LeadsScreen() {
             </TouchableOpacity>
           ) : (
             <>
-              <TouchableOpacity style={styles.headerButton} onPress={exportLeads}>
-                <Download size={20} color="#007AFF" strokeWidth={2} />
-              </TouchableOpacity>
+
               <TouchableOpacity
                 style={styles.headerButton}
                 onPress={() => setShowSortModal(true)}
@@ -578,6 +592,7 @@ export default function LeadsScreen() {
                   setSelectedEventTypes([]);
                   setSelectedStatuses([]);
                   setSelectedCities([]);
+                  setTimeFilter('all');
                 }}
               >
                 <Text style={styles.clearAllText}>Clear All</Text>
@@ -631,6 +646,7 @@ export default function LeadsScreen() {
                 setSelectedEventTypes([]);
                 setSelectedStatuses([]);
                 setSelectedCities([]);
+                setTimeFilter('all');
               }}
             >
               <Text style={styles.clearFiltersButtonText}>Clear Filters</Text>
@@ -717,7 +733,7 @@ export default function LeadsScreen() {
         multiSelect
       />
 
-      {!bulkSelectMode && (
+      {!bulkSelectMode && false && (
         <TouchableOpacity
           style={[
             styles.fab,
@@ -738,14 +754,13 @@ export default function LeadsScreen() {
           </LinearGradient>
         </TouchableOpacity>
       )}
-    </View>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    // backgroundColor: 'rgba(138, 151, 209, 0.02)',
   },
   header: {
     flexDirection: 'row',
@@ -974,11 +989,21 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 8,
   },
+  businessNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
+  businessLabel: {
+    fontSize: 13,
+    color: '#999',
+    fontWeight: '500',
+  },
   businessName: {
     fontSize: 13,
     color: '#666',
-    fontWeight: '500',
-    marginTop: 2,
+    fontWeight: '600',
   },
   badges: {
     flexDirection: 'row',

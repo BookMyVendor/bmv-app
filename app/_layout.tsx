@@ -8,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFrameworkReady } from '../hooks/useFrameworkReady';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
+import { setupPushNotifications } from '../lib/pushNotifications';
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
@@ -46,6 +47,19 @@ function RootLayoutNav() {
     checkStorage();
   }, [checkStorage]);
 
+  // Setup push notification listeners
+  useEffect(() => {
+    if (session) {
+      console.log('[PUSH] Initializing notification listeners');
+      const unsubscribe = setupPushNotifications(router);
+      return () => {
+        if (typeof unsubscribe === 'function') {
+          unsubscribe();
+        }
+      };
+    }
+  }, [session, router]);
+
   // Refresh terms acceptance state when session/profile changes
   // This ensures we get the latest value after user accepts terms
   useEffect(() => {
@@ -54,7 +68,7 @@ function RootLayoutNav() {
       // This helps catch updates after terms acceptance
       checkStorage();
     }
-  }, [session?.id, profile?.id, checkStorage]);
+  }, [session?.user?.id, profile?.id, checkStorage]);
 
   // Also refresh when navigating away from terms screen
   useEffect(() => {
@@ -88,8 +102,8 @@ function RootLayoutNav() {
       userFirstName: profile?.first_name,
     });
 
-    // If user is on onboarding screen, don't interfere - let onboarding handle navigation
-    if (inOnboarding) {
+    // If user is on onboarding screen AND not logged in, don't interfere - let onboarding handle navigation
+    if (inOnboarding && !session) {
       // But still hide splash screen if not already hidden
       if (initialLoad) {
         SplashScreen.hideAsync().catch(() => { });
@@ -140,11 +154,11 @@ function RootLayoutNav() {
         console.log('[NAV] User has no complete profile - needs to complete profile');
 
         const termsAcceptedValue = await AsyncStorage.getItem(TERMS_ACCEPTANCE_KEY);
-        const isTermsAccepted = termsAcceptedValue === 'true';
+        const isTermsAccepted = termsAcceptedValue === 'true' || profile?.terms_accepted === true;
 
         // Step 1: T&C must be accepted first
         if (!isTermsAccepted) {
-          if (!inTermsAndConditions && !inOnboarding) {
+          if (!inTermsAndConditions) {
             console.log('[NAV] T&C not accepted - redirecting to terms and conditions');
             router.replace('/terms-and-conditions');
           }
@@ -152,7 +166,7 @@ function RootLayoutNav() {
         }
 
         // Step 2: After T&C, complete profile
-        if (!inCompleteProfile && !inOnboarding && !inBusinessReg) {
+        if (!inCompleteProfile && !inBusinessReg) {
           console.log('[NAV] T&C accepted but profile incomplete - redirecting to complete profile');
           router.replace('/complete-profile');
         }
@@ -164,7 +178,7 @@ function RootLayoutNav() {
         console.log('[NAV] User has complete profile - navigating to dashboard');
 
         // Don't redirect if already on appropriate screen
-        if (inAuthGroup || inTermsAndConditions || inCompleteProfile) {
+        if (inAuthGroup || inTermsAndConditions || inCompleteProfile || inOnboarding) {
           console.log('[NAV] User profile complete - redirecting to dashboard');
           router.replace('/(tabs)');
         }
@@ -222,7 +236,7 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <AuthProvider>
         <RootLayoutNav />
-        <StatusBar style="auto" />
+        <StatusBar style="dark" />
       </AuthProvider>
     </SafeAreaProvider>
   );

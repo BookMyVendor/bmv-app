@@ -12,7 +12,7 @@ const SHARED_STORAGE_KEY = 'supabase.auth.token';
 const sharedAuthConfig = {
   storage: AsyncStorage,
   storageKey: SHARED_STORAGE_KEY,
-  autoRefreshToken: true,
+  autoRefreshToken: false, // We manage token refresh manually in AuthContext
   persistSession: true,
   detectSessionInUrl: false,
 };
@@ -108,7 +108,7 @@ const getResponsePreview = async (response: Response) => {
     if (response.bodyUsed || response.type === 'opaque' || response.type === 'opaqueredirect') {
       return undefined;
     }
-    
+
     // Try to clone - this can throw if body is already consumed
     let cloned: Response;
     try {
@@ -117,7 +117,7 @@ const getResponsePreview = async (response: Response) => {
       // Body is already consumed or can't be cloned
       return undefined;
     }
-    
+
     const text = await cloned.text();
 
     if (!text) return undefined;
@@ -183,14 +183,14 @@ export async function setAuthorizationToken(token: string) {
       token_type: 'bearer',
       user: { id: '', aud: 'authenticated', role: 'authenticated' }
     };
-    
+
     // Set session on all clients
     await Promise.all([
       supabaseCore.auth.setSession(session as any),
       supabaseCms.auth.setSession(session as any),
       supabaseCrm.auth.setSession(session as any),
     ]);
-    
+
     console.log('[SUPABASE] Authorization token set on all clients');
   } catch (error) {
     console.error('[SUPABASE] Failed to set authorization token:', error);
@@ -218,6 +218,10 @@ export const supabaseCore = createClient(supabaseUrl, supabaseAnonKey, {
 // Client for cms schema (file_storage, vendor_verification_documents, vendor_business_documents)
 export const supabaseCms = createClient(supabaseUrl, supabaseAnonKey, {
   ...clientConfig,
+  auth: {
+    ...sharedAuthConfig,
+    persistSession: false,
+  },
   db: {
     schema: 'cms',
   },
@@ -226,6 +230,10 @@ export const supabaseCms = createClient(supabaseUrl, supabaseAnonKey, {
 // Client for crm schema (customer_leads, customer_reviews)
 export const supabaseCrm = createClient(supabaseUrl, supabaseAnonKey, {
   ...clientConfig,
+  auth: {
+    ...sharedAuthConfig,
+    persistSession: false,
+  },
   db: {
     schema: 'crm',
   },
@@ -234,6 +242,10 @@ export const supabaseCrm = createClient(supabaseUrl, supabaseAnonKey, {
 // Client for backoffice schema (if needed)
 export const supabaseBackoffice = createClient(supabaseUrl, supabaseAnonKey, {
   ...clientConfig,
+  auth: {
+    ...sharedAuthConfig,
+    persistSession: false,
+  },
   db: {
     schema: 'backoffice',
   },

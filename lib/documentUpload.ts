@@ -96,7 +96,7 @@ export const pickDocuments = async (allowMultiple: boolean = true): Promise<Pick
     if (status !== 'granted') {
       return {
         files: [],
-        error: new Error('Photo Library access is required. Go to Settings > Apps > BookMyVendors Business > Photos to enable.'),
+        error: new Error('Photo Library access is required. Go to Settings > Apps > BookMyVendors Business > Permissions > Photos to enable.'),
       };
     }
 
@@ -262,7 +262,7 @@ export const pickImages = async (allowMultiple: boolean = true): Promise<PickDoc
     if (status !== 'granted') {
       return {
         files: [],
-        error: new Error('Photo Library access is required. Go to Settings > Apps > BookMyVendors Business > Photos to enable.'),
+        error: new Error('Photo Library access is required. Go to Settings > Apps > BookMyVendors Business > Permissions > Photos to enable.'),
       };
     }
 
