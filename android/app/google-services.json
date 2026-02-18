@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "390565702260",
+    "project_id": "bmv-business",
+    "storage_bucket": "bmv-business.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:390565702260:android:f2dd55ee505de26b53ff21",
+        "android_client_info": {
+          "package_name": "com.bnt.bookmyvendors"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA-ZSffR0uIjjziHL11cTzpItUvvFkrvA8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -129,7 +129,7 @@ export default function OnboardingScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar style="dark" translucent backgroundColor="transparent" />
+      <StatusBar style="dark" />
       <ScrollView
         ref={scrollViewRef}
         horizontal

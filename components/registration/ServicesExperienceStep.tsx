@@ -19,6 +19,7 @@ interface ServicesExperienceStepProps {
   data: any;
   onUpdate: (data: any) => void;
   validationErrors?: Record<string, string>;
+  onFocus?: () => void;
 }
 
 export interface ServicesExperienceStepRef {
@@ -82,6 +83,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   data,
   onUpdate,
   validationErrors = {},
+  onFocus,
 }, ref) => {
   const [allBusinessCategories, setAllBusinessCategories] = useState<Category[]>([]);
   const [eventCategories, setEventCategories] = useState<Category[]>([]);
@@ -102,6 +104,8 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   const [expandedEventIds, setExpandedEventIds] = useState<Set<string>>(new Set());
 
   const [isPricingUnitDropdownOpen, setIsPricingUnitDropdownOpen] = useState(false);
+  const [isCategoriesExpanded, setIsCategoriesExpanded] = useState(false);
+  const [isEventsExpanded, setIsEventsExpanded] = useState(false);
 
   // Refs for keyboard navigation
   const businessDescriptionRef = useRef<TextInput>(null);
@@ -334,33 +338,65 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   // Toggle only child category selection (used in sub-categories modal)
   const toggleCategorySelection = (categoryId: string) => {
     setSelectedCategoryIds((prev) => {
-      if (prev.includes(categoryId)) {
-        const newIds = prev.filter((id) => id !== categoryId);
+      let newIds = [...prev];
+      const isSelected = prev.includes(categoryId);
+
+      // Helper to find all descendants recursively
+      const getDescendants = (parentId: string): string[] => {
+        let descendants: string[] = [];
+        const children = allBusinessCategories.filter(c => c.parent_category_id === parentId);
+        if (children.length > 0) {
+          children.forEach(child => {
+            descendants.push(child.id);
+            descendants = [...descendants, ...getDescendants(child.id)];
+          });
+        }
+        return descendants;
+      };
+
+      const descendants = getDescendants(categoryId);
+
+      if (isSelected) {
+        // Deselecting: remove id and all descendants
+        newIds = newIds.filter((id) => id !== categoryId && !descendants.includes(id));
+
         setExpandedCategoryIds((expanded) => {
           const next = new Set(expanded);
           next.delete(categoryId);
           return next;
         });
-        return newIds;
+      } else {
+        // Selecting: add id and all descendants
+        if (!newIds.includes(categoryId)) newIds.push(categoryId);
+
+        descendants.forEach(childId => {
+          if (!newIds.includes(childId)) {
+            newIds.push(childId);
+          }
+        });
+
+        // Auto-expand the parent category to show selected children
+        setExpandedCategoryIds((expanded) => {
+          const newExpanded = new Set(expanded);
+          newExpanded.add(categoryId);
+          return newExpanded;
+        });
+
+        const category = allBusinessCategories.find((c) => c.id === categoryId);
+        if (category) {
+          const parentChain: string[] = [];
+          let currentParentId: string | null = category.parent_category_id;
+          while (currentParentId) {
+            parentChain.push(currentParentId);
+            const parent = allBusinessCategories.find((c) => c.id === currentParentId);
+            currentParentId = parent?.parent_category_id || null;
+          }
+          if (parentChain.length > 0) {
+            setExpandedCategoryIds((expanded) => new Set([...expanded, ...parentChain]));
+          }
+        }
       }
-      const category = allBusinessCategories.find((c) => c.id === categoryId);
-      if (category) {
-        const parentChain: string[] = [];
-        let currentParentId: string | null = category.parent_category_id;
-        while (currentParentId) {
-          parentChain.push(currentParentId);
-          const parent = allBusinessCategories.find((c) => c.id === currentParentId);
-          currentParentId = parent?.parent_category_id || null;
-        }
-        if (parentChain.length > 0) {
-          setExpandedCategoryIds((expanded) => new Set([...expanded, ...parentChain]));
-        }
-        const hasChildren = allBusinessCategories.some((c) => c.parent_category_id === categoryId);
-        if (hasChildren) {
-          setExpandedCategoryIds((expanded) => new Set([...expanded, categoryId]));
-        }
-      }
-      return [...prev, categoryId];
+      return newIds;
     });
   };
 
@@ -485,15 +521,22 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     });
   };
 
-  // Get selected categories with full paths (including root if selected)
+  // Get selected categories with full paths (only leaf-level selected items)
   const selectedCategoriesWithPaths = useMemo(() => {
-    // Only show child categories (those with parents)
-    const childIds = selectedCategoryIds.filter(id => {
+    // Only show selected categories that:
+    // 1. Have a parent (not root)
+    // 2. Don't have any selected children (leaf-level in selection)
+    const leafIds = selectedCategoryIds.filter(id => {
       const cat = allBusinessCategories.find(c => c.id === id);
-      return cat && cat.parent_category_id !== null;
+      if (!cat || cat.parent_category_id === null) return false;
+      // Check if any of its children are also selected
+      const hasSelectedChild = allBusinessCategories.some(
+        c => c.parent_category_id === id && selectedCategoryIds.includes(c.id)
+      );
+      return !hasSelectedChild;
     });
 
-    return childIds.map((id) => {
+    return leafIds.map((id) => {
       const cat = allBusinessCategories.find(c => c.id === id);
       return {
         id,
@@ -510,8 +553,19 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   const toggleEventType = (eventId: string) => {
     const currentIds = data.selectedEventIds || [];
     const isSelected = currentIds.includes(eventId);
+    let newIds = [...currentIds];
 
     if (isSelected) {
+      // Deselecting
+      newIds = newIds.filter((id) => id !== eventId);
+
+      // Also deselect all children if this is a parent category
+      const childCategories = eventCategories.filter(c => c.parent_category_id === eventId);
+      if (childCategories.length > 0) {
+        const childIds = childCategories.map(c => c.id);
+        newIds = newIds.filter(id => !childIds.includes(id));
+      }
+
       // Collapse when deselecting
       setExpandedEventIds((expanded) => {
         const newExpanded = new Set(expanded);
@@ -520,11 +574,28 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         }
         return newExpanded;
       });
+    } else {
+      // Selecting
+      newIds.push(eventId);
+
+      // Also select all children if this is a parent category
+      const childCategories = eventCategories.filter(c => c.parent_category_id === eventId);
+      if (childCategories.length > 0) {
+        childCategories.forEach(child => {
+          if (!newIds.includes(child.id)) {
+            newIds.push(child.id);
+          }
+        });
+
+        // Auto-expand the parent category to show selected children
+        setExpandedEventIds((expanded) => {
+          const newExpanded = new Set(expanded);
+          newExpanded.add(eventId);
+          return newExpanded;
+        });
+      }
     }
 
-    const newIds = isSelected
-      ? currentIds.filter((id: string) => id !== eventId)
-      : [...currentIds, eventId];
     handleChange('selectedEventIds', newIds);
   };
 
@@ -784,9 +855,9 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   }));
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <View style={[styles.container, styles.content]}>
       <View style={styles.field}>
-        <Text style={styles.label}>Service Category (root) *</Text>
+        <Text style={styles.label}>Business Category *</Text>
         <Dropdown
           options={rootDropdownOptions}
           value={selectedRootCategoryId || ''}
@@ -803,7 +874,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Sub-categories *</Text>
+        <Text style={styles.label}>Services Offered *</Text>
         <TouchableOpacity
           style={[
             styles.dropdownTrigger,
@@ -824,21 +895,32 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
             {!selectedRootCategoryId
               ? 'Select a category first'
               : selectedCategoriesWithPaths.length === 0
-                ? 'Select sub-categories'
+                ? 'Select services offered'
                 : selectedCategoriesWithPaths.length === 1
                   ? selectedCategoriesWithPaths[0].path
-                  : `${selectedCategoriesWithPaths.length} sub-categories selected`}
+                  : `${selectedCategoriesWithPaths.length} services selected`}
           </Text>
           <ChevronDown size={20} color={selectedRootCategoryId ? '#666' : '#ccc'} />
         </TouchableOpacity>
 
-        {/* Selected sub-categories */}
+        {/* Selected Services Offered*/}
         {selectedCategoriesWithPaths.length > 0 && (
           <View style={styles.selectedContainer}>
-            <Text style={styles.selectedLabel}>
-              Selected ({selectedCategoriesWithPaths.length}):
-            </Text>
-            {selectedCategoriesWithPaths.map((item: { id: string; path: string }) => (
+            <View style={styles.selectedHeader}>
+              <Text style={styles.selectedLabel}>
+                Selected ({selectedCategoriesWithPaths.length}):
+              </Text>
+              {selectedCategoriesWithPaths.length > 3 && (
+                <TouchableOpacity onPress={() => setIsCategoriesExpanded(!isCategoriesExpanded)}>
+                  <ChevronDown
+                    size={20}
+                    color="#666"
+                    style={{ transform: [{ rotate: isCategoriesExpanded ? '180deg' : '0deg' }] }}
+                  />
+                </TouchableOpacity>
+              )}
+            </View>
+            {(isCategoriesExpanded ? selectedCategoriesWithPaths : selectedCategoriesWithPaths.slice(0, 3)).map((item: { id: string; path: string }) => (
               <View key={item.id} style={styles.selectedChip}>
                 <Text style={styles.selectedChipText}>{item.path}</Text>
                 <TouchableOpacity
@@ -870,8 +952,8 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>
                   {subtreeForSelectedRoot
-                    ? `Sub-categories under ${subtreeForSelectedRoot.name}`
-                    : 'Select sub-categories'}
+                    ? `Services offered under ${subtreeForSelectedRoot.name}`
+                    : 'Select Services offered'}
                 </Text>
                 <TouchableOpacity
                   onPress={() => setIsCategoryModalOpen(false)}
@@ -883,7 +965,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
               <TextInput
                 style={styles.modalSearchInput}
-                placeholder="Search sub-categories..."
+                placeholder="Search services offered..."
                 placeholderTextColor="#999"
                 value={searchQuery}
                 onChangeText={setSearchQuery}
@@ -897,8 +979,8 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
                 {filteredSubtree.length === 0 ? (
                   <Text style={styles.emptyText}>
                     {subtreeForSelectedRoot?.children?.length === 0
-                      ? 'No sub-categories'
-                      : 'No matching sub-categories'}
+                      ? 'No services offered'
+                      : 'No matching services offered'}
                   </Text>
                 ) : (
                   renderSubCategoryTree(filteredSubtree)
@@ -942,10 +1024,21 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         {/* Selected Events Display */}
         {selectedEventsWithPaths.length > 0 && (
           <View style={styles.selectedContainer}>
-            <Text style={styles.selectedLabel}>
-              Selected Events ({selectedEventsWithPaths.length}):
-            </Text>
-            {selectedEventsWithPaths.map((item: { id: string, path: string }) => {
+            <View style={styles.selectedHeader}>
+              <Text style={[styles.selectedLabel, { marginBottom: 0 }]}>
+                Selected Events ({selectedEventsWithPaths.length}):
+              </Text>
+              {selectedEventsWithPaths.length > 3 && (
+                <TouchableOpacity onPress={() => setIsEventsExpanded(!isEventsExpanded)}>
+                  <ChevronDown
+                    size={20}
+                    color="#666"
+                    style={{ transform: [{ rotate: isEventsExpanded ? '180deg' : '0deg' }] }}
+                  />
+                </TouchableOpacity>
+              )}
+            </View>
+            {(isEventsExpanded ? selectedEventsWithPaths : selectedEventsWithPaths.slice(0, 3)).map((item: { id: string, path: string }) => {
               const eventCategory = eventCategories.find((cat) => cat.id === item.id);
               return (
                 <View key={item.id} style={styles.selectedChip}>
@@ -981,7 +1074,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               onPress={(e) => e.stopPropagation()}
             >
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Select Event Types</Text>
+                <Text style={styles.modalTitle}>Select Events</Text>
                 <TouchableOpacity
                   onPress={() => setIsEventModalOpen(false)}
                   style={styles.closeButton}
@@ -996,6 +1089,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
                 placeholder="Search event types..."
                 placeholderTextColor="#999"
                 value={eventSearchQuery}
+                onFocus={onFocus}
                 onChangeText={setEventSearchQuery}
               />
 
@@ -1042,6 +1136,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           numberOfLines={4}
           textAlignVertical="top"
           returnKeyType="done"
+          onFocus={onFocus}
           blurOnSubmit={true}
         />
         {validationErrors.businessDescription && (
@@ -1084,6 +1179,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           placeholder="Enter starting price (e.g. 5000)"
           placeholderTextColor="#999"
           keyboardType="numeric"
+          onFocus={onFocus}
           returnKeyType="next"
         />
         {validationErrors.basePrice && (
@@ -1112,7 +1208,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           <Text style={styles.errorText}>{validationErrors.pricingUnit}</Text>
         )}
       </View>
-    </ScrollView>
+    </View>
   );
 });
 
@@ -1123,7 +1219,6 @@ export default ServicesExperienceStep;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
   },
   content: {
     padding: 24,
@@ -1223,6 +1318,12 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 4,
   },
+  selectedHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   selectedContainer: {
     marginBottom: 16,
     padding: 12,
@@ -1273,11 +1374,16 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     backgroundColor: '#fff',
-    borderRadius: 16,
-    width: '90%',
+    borderRadius: 20,
+    width: '92%',
     maxWidth: 500,
     maxHeight: '80%',
     padding: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 12,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1288,13 +1394,17 @@ const styles = StyleSheet.create({
     borderBottomColor: '#e0e0e0',
   },
   modalTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: '#1a1a1a',
+    flex: 1,
+    marginRight: 12,
   },
   closeButton: {
-    width: 32,
-    height: 32,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#f5f5f5',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1340,20 +1450,24 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   categoryItem: {
-    marginBottom: 4,
+    marginBottom: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
   categoryRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
+    alignItems: 'flex-start',
+    paddingVertical: 12,
     paddingRight: 12,
+    minHeight: 44,
   },
   expandButton: {
     width: 24,
     height: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 4,
+    marginRight: 6,
+    marginTop: 0,
   },
   radioButton: {
     width: 24,
@@ -1386,24 +1500,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   checkbox: {
-    width: 20,
-    height: 20,
-    marginRight: 8,
+    width: 22,
+    height: 22,
+    marginRight: 10,
+    marginTop: 0,
+    flexShrink: 0,
   },
   checkboxSelected: {
-    width: 20,
-    height: 20,
+    width: 22,
+    height: 22,
     backgroundColor: '#007AFF',
-    borderRadius: 4,
+    borderRadius: 6,
     justifyContent: 'center',
     alignItems: 'center',
   },
   checkboxUnselected: {
-    width: 20,
-    height: 20,
+    width: 22,
+    height: 22,
     borderWidth: 2,
-    borderColor: '#ccc',
-    borderRadius: 4,
+    borderColor: '#d0d0d0',
+    borderRadius: 6,
     backgroundColor: '#fff',
   },
   categoryIcon: {
@@ -1411,16 +1527,20 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   categoryName: {
-    fontSize: 16,
-    color: '#1a1a1a',
+    fontSize: 15,
+    color: '#333',
     flex: 1,
+    flexWrap: 'wrap',
+    lineHeight: 22,
   },
   categoryNameSelected: {
     fontWeight: '600',
     color: '#007AFF',
   },
   childrenContainer: {
-    marginLeft: 20,
+    marginLeft: 12,
+    borderLeftWidth: 1,
+    borderLeftColor: '#e8e8e8',
   },
   emptyText: {
     padding: 20,

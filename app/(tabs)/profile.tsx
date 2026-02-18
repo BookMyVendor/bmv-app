@@ -29,6 +29,7 @@ import Logo from '../../components/Logo';
 import { sendOTP, resendOTP } from '../../lib/otpAuthApi';
 import { confirmAccountDeletion } from '../../lib/accountDeletionApi';
 import { getAccessToken } from '../../lib/tokenStorage';
+import { stripCountryCode } from '../../lib/formatters';
 import ScreenBackground from '../../components/ScreenBackground';
 
 const profileSchema = Yup.object().shape({
@@ -60,17 +61,13 @@ export default function ProfileScreen() {
   const emailRef = useRef<TextInput>(null);
 
   const formattedPhone = () => {
-    const digits = profile?.phone?.replace(/\D/g, '') || '';
-    if (!digits) return '';
-    if (digits.length === 10) return `+91${digits}`;
-    if (digits.startsWith('91')) return `+${digits}`;
-    return `+${digits}`;
+    return stripCountryCode(profile?.phone) || '';
   };
 
   const handleRequestDeletionOtp = async () => {
     const phone = formattedPhone();
     if (!phone) {
-      setDeletionError('Phone number is missing from your profile.');
+      setDeletionError('Business contact number is missing from your profile.');
       return;
     }
 
@@ -204,7 +201,7 @@ export default function ProfileScreen() {
   }, [profile?.image_file_id]);
 
   useEffect(() => {
-    let timer: NodeJS.Timeout | undefined;
+    let timer: ReturnType<typeof setInterval> | undefined;
     if (resendCountdown > 0) {
       timer = setInterval(() => {
         setResendCountdown((prev) => (prev > 0 ? prev - 1 : 0));
@@ -621,8 +618,8 @@ export default function ProfileScreen() {
                 </TouchableOpacity>
 
                 <View style={styles.infoCard}>
-                  <Text style={styles.infoLabel}>Phone Number</Text>
-                  <Text style={styles.infoValue}>{profile?.phone}</Text>
+                  <Text style={styles.infoLabel}>Business Contact Number</Text>
+                  <Text style={styles.infoValue}>{stripCountryCode(profile?.phone)}</Text>
                 </View>
 
                 <View style={styles.inputGroup}>
