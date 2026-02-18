@@ -143,10 +143,8 @@ export default function BusinessRegistrationScreen() {
   }, [profile, isRestored]);
 
   const handleFieldFocus = () => {
-    // Add a small delay to ensure the keyboard has started showing
-    setTimeout(() => {
-      scrollViewRef.current?.scrollToEnd({ animated: true });
-    }, 200);
+    // Let the keyboard avoiding view handle scroll naturally
+    // Don't force scrollToEnd as it causes the entire screen to jump
   };
 
   // Clear saved data when registration is successfully submitted

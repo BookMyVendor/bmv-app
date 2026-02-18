@@ -59,6 +59,7 @@ export default function DashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [showFilterScrollIndicator, setShowFilterScrollIndicator] = useState(false);
   const [showBusinessScrollIndicator, setShowBusinessScrollIndicator] = useState(false);
+  const [businessScrollX, setBusinessScrollX] = useState(0);
   const filterScrollViewRef = useRef<ScrollView>(null);
   const businessScrollViewRef = useRef<ScrollView>(null);
   const { user } = useAuth();
@@ -466,6 +467,7 @@ export default function DashboardScreen() {
                   const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
                   const canScrollRight = contentOffset.x + layoutMeasurement.width < contentSize.width - 10;
                   setShowBusinessScrollIndicator(businesses.length > 1 && canScrollRight);
+                  setBusinessScrollX(contentOffset.x);
                 }}
                 scrollEventThrottle={16}
               >
@@ -525,7 +527,7 @@ export default function DashboardScreen() {
                   style={styles.scrollIndicatorRight}
                   onPress={() => {
                     businessScrollViewRef.current?.scrollTo({
-                      x: 300,
+                      x: businessScrollX + 296,
                       animated: true,
                     });
                   }}
@@ -537,7 +539,7 @@ export default function DashboardScreen() {
                     end={{ x: 1, y: 0 }}
                     style={styles.scrollGradient}
                   >
-                    <ChevronRight size={20} color="#666" />
+                    <ChevronRight size={32} color="#333" />
                   </LinearGradient>
                 </TouchableOpacity>
               )}

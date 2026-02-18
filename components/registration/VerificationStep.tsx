@@ -397,7 +397,7 @@ const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(
         );
       })}
 
-    </ScrollView>
+    </View>
   );
 });
 

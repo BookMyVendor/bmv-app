@@ -169,7 +169,7 @@ export default function LeadsScreen() {
           ...lead,
           business_name: business?.name || 'Unknown Business',
           city: business?.city || null,
-          event_type: eventType || 'Unknown Event',
+          event_type: eventType || lead.event_type || 'Unknown Event',
           status: lead.lead_status, // Map lead_status to status for compatibility
         } as Lead;
       });

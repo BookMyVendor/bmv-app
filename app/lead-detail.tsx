@@ -73,7 +73,7 @@ export default function LeadDetailScreen() {
 
       if (data) {
         // Fetch category name if category_id exists
-        let eventType = 'Unknown Event';
+        let eventType = data.event_type || 'Unknown Event';
         if (data.category_id) {
           const { data: categoryData } = await supabaseCore
             .from('categories')
