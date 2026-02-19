@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
-import { Session, User } from '@supabase/supabase-js';
+import { Session, User, AuthChangeEvent } from '@supabase/supabase-js';
 
 import { supabaseCore, supabaseCms, supabaseCrm } from '../lib/supabase';
 import { sendOTP, verifyOTP as verifyOTPApi, type VerifyOTPResponse } from '../lib/otpAuthApi';
@@ -149,6 +149,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             if (supabaseUser && !userError) {
               console.log('[AUTH] ✅ Token valid, user found:', supabaseUser.id);
+              console.log('[IOS LOG] userId:', supabaseUser.id);
 
               const session: Session = {
                 access_token: accessToken,
@@ -279,7 +280,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkStoredTokens();
 
     // Also listen to Supabase auth changes for backward compatibility
-    const { data: { subscription } } = supabaseCore.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabaseCore.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
       (async () => {
         if (isLoggingOutRef.current) {
           return;
@@ -475,6 +476,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           tokenSet: true,
           message: 'Auth complete. Profile loaded if existing user.'
         });
+        console.log('[IOS LOG] userId:', user.id);
 
         return { error: null };
       }
@@ -553,6 +555,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (sessionError) return { error: sessionError };
 
       await fetchProfile(userId);
+      console.log('[IOS LOG] userId:', userId);
       return { error: null };
     } catch (error) {
       return { error: error as Error };
