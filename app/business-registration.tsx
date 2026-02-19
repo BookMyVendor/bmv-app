@@ -51,6 +51,7 @@ interface BusinessData {
   locality?: string; // Add this
   serviceRadiusKm?: number; // Add this
   operatingLocations?: string[]; // Add this (for future use)
+  operatingHours?: string; // Added for 'Pan India' support
   gstNumber: string;
   panNumber: string; // Changed from businessRegistrationNumber
   verificationDocuments?: Record<string, any[]>; // Document files by type code
@@ -183,7 +184,8 @@ export default function BusinessRegistrationScreen() {
       const hasPincode = !!(businessData.pincode?.trim()) && businessData.pincode.length === 6;
       const hasCity = !!(businessData.city?.trim());
       const hasState = !!(businessData.state?.trim());
-      return hasAddress && hasPincode && hasCity && hasState;
+      const hasOperatingLocations = !!(businessData.operatingLocations && businessData.operatingLocations.length > 0);
+      return hasAddress && hasPincode && hasCity && hasState && hasOperatingLocations;
     } else if (currentPage === 3) {
       // Verification step
       const hasPanNumber = !!(businessData.panNumber?.trim());
@@ -280,6 +282,9 @@ export default function BusinessRegistrationScreen() {
       }
       if (!businessData.state || !businessData.state.trim()) {
         errors.state = 'State is required';
+      }
+      if (!businessData.operatingLocations || businessData.operatingLocations.length === 0) {
+        errors.operatingLocations = 'At least one operating location is required';
       }
     } else if (currentPage === 3) {
       // Verification step - validate PAN number and PAN card image
@@ -453,6 +458,10 @@ export default function BusinessRegistrationScreen() {
         delete updatedErrors.state;
         hasChanges = true;
       }
+      if (data.operatingLocations !== undefined && data.operatingLocations.length > 0 && updatedErrors.operatingLocations) {
+        delete updatedErrors.operatingLocations;
+        hasChanges = true;
+      }
       if (data.panNumber !== undefined && data.panNumber.trim() && updatedErrors.panNumber) {
         delete updatedErrors.panNumber;
         hasChanges = true;
@@ -550,6 +559,7 @@ export default function BusinessRegistrationScreen() {
           years_experience: parseYearsOfExperience(businessData.yearsOfExperience || '0'),
           gst_number: businessData.gstNumber || null,
           status: 'pending',
+          availability: businessData.operatingHours || null, // Map operatingHours to availability column
           subscription_status: 'trial',
         })
         .select()
