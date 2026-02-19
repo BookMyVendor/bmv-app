@@ -38,6 +38,7 @@ import {
   AlertCircle,
   Package,
   MoreVertical,
+  Search,
 } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { supabaseCore } from '../lib/supabase';
@@ -142,6 +143,38 @@ const PRICING_MAPPING: Record<string, string[]> = {
 
 const DEFAULT_PRICING_UNITS = ['Per event', 'Per day', 'Per hour'];
 
+const OPERATING_CITIES = [
+  'Pan India',
+  'Mumbai (Maharashtra)',
+  'Delhi (Delhi)',
+  'Bangalore (Karnataka)',
+  'Hyderabad (Telangana)',
+  'Chennai (Tamil Nadu)',
+  'Kolkata (West Bengal)',
+  'Pune (Maharashtra)',
+  'Ahmedabad (Gujarat)',
+  'Jaipur (Rajasthan)',
+  'Surat (Gujarat)',
+  'Lucknow (Uttar Pradesh)',
+  'Kanpur (Uttar Pradesh)',
+  'Nagpur (Maharashtra)',
+  'Indore (Madhya Pradesh)',
+  'Bhopal (Madhya Pradesh)',
+  'Visakhapatnam (Andhra Pradesh)',
+  'Patna (Bihar)',
+  'Vadodara (Gujarat)',
+  'Ghaziabad (Uttar Pradesh)',
+  'Ludhiana (Punjab)',
+  'Agra (Uttar Pradesh)',
+  'Nashik (Maharashtra)',
+  'Faridabad (Haryana)',
+  'Meerut (Uttar Pradesh)',
+  'Rajkot (Gujarat)',
+  'Varanasi (Uttar Pradesh)',
+  'Goa (Goa)',
+  'Udaipur (Rajasthan)',
+];
+
 type SectionType = 'offers' | 'gallery' | 'packages' | 'edit';
 
 export default function BusinessDetailsScreen() {
@@ -187,10 +220,9 @@ export default function BusinessDetailsScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
 
   const handleFieldFocus = () => {
-    // Add a small delay to ensure the keyboard has started showing
-    setTimeout(() => {
-      scrollViewRef.current?.scrollToEnd({ animated: true });
-    }, 200);
+    // Removed scrollToEnd call that was causing the screen to jump to the bottom
+    // when any field was focused. KeyboardAvoidingView and ScrollView 
+    // will handle focus visibility naturally.
   };
 
   // Category selection state
@@ -216,6 +248,9 @@ export default function BusinessDetailsScreen() {
   const [tempSelectedCategoryIds, setTempSelectedCategoryIds] = useState<string[]>([]);
   const [tempSelectedEventIds, setTempSelectedEventIds] = useState<string[]>([]);
 
+  const [isCityModalOpen, setIsCityModalOpen] = useState(false);
+  const [citySearchQuery, setCitySearchQuery] = useState('');
+
   // Pincode validation state
   const [validatingPincode, setValidatingPincode] = useState(false);
   const [pincodeStatus, setPincodeStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
@@ -234,13 +269,47 @@ export default function BusinessDetailsScreen() {
   const cityRef = useRef<TextInput>(null);
   const localityRef = useRef<TextInput>(null);
   const stateRef = useRef<TextInput>(null);
-  const serviceRadiusRef = useRef<TextInput>(null);
   const gstNumberRef = useRef<TextInput>(null);
   const panRef = useRef<TextInput>(null);
   const websiteUrlRef = useRef<TextInput>(null);
   const instagramUrlRef = useRef<TextInput>(null);
   const facebookUrlRef = useRef<TextInput>(null);
   const youtubeUrlRef = useRef<TextInput>(null);
+
+  const toggleCitySelection = (city: string) => {
+    setEditData((prev: any) => {
+      const current = prev.operating_locations || [];
+
+      if (city === 'Pan India') {
+        if (current.includes('*')) {
+          return { ...prev, operating_locations: [], availability: '' };
+        } else {
+          return { ...prev, operating_locations: ['*'], availability: '*' };
+        }
+      }
+
+      let newLocations = current.filter((c: string) => c !== '*');
+      let newAvailability = prev.availability === '*' ? '' : prev.availability;
+
+      if (newLocations.includes(city)) {
+        return {
+          ...prev,
+          operating_locations: newLocations.filter((c: string) => c !== city),
+          availability: newAvailability
+        };
+      } else {
+        return {
+          ...prev,
+          operating_locations: [...newLocations, city],
+          availability: newAvailability
+        };
+      }
+    });
+  };
+
+  const filteredCities = OPERATING_CITIES.filter(city =>
+    city.toLowerCase().includes(citySearchQuery.toLowerCase())
+  );
 
   useEffect(() => {
     if (id) {
@@ -1831,7 +1900,9 @@ export default function BusinessDetailsScreen() {
       const { base_price, pricing_unit, ...businessUpdateData } = editData;
 
       // Update business details
-      const finalUpdateData = { ...businessUpdateData };
+      const finalUpdateData = {
+        ...businessUpdateData
+      };
       if (finalUpdateData.contact_person_phone) {
         finalUpdateData.contact_person_phone = stripCountryCode(finalUpdateData.contact_person_phone);
       }
@@ -2184,6 +2255,10 @@ export default function BusinessDetailsScreen() {
         <ScrollView
           ref={scrollViewRef}
           style={styles.content}
+          contentContainerStyle={{
+            flexGrow: 1,
+            paddingBottom: Platform.OS === 'android' ? 20 : insets.bottom + 20
+          }}
           keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
@@ -2992,28 +3067,42 @@ export default function BusinessDetailsScreen() {
                     placeholderTextColor="#999"
                     returnKeyType="next"
                     onFocus={handleFieldFocus}
-                    onSubmitEditing={() => serviceRadiusRef.current?.focus()}
                   />
                 </View>
 
-                <View style={styles.field}>
-                  <Text style={styles.label}>Service Radius (km)</Text>
-                  <TextInput
-                    ref={serviceRadiusRef}
-                    style={styles.input}
-                    value={editData.service_radius_km?.toString() || ''}
-                    onChangeText={(text) => {
-                      const num = parseInt(text) || 0;
-                      setEditData({ ...editData, service_radius_km: num });
-                    }}
-                    placeholder="Enter service radius in kilometers"
-                    returnKeyType="next"
-                    onFocus={handleFieldFocus}
-                    onSubmitEditing={() => gstNumberRef.current?.focus()}
-                    keyboardType="numeric"
-                    maxLength={4}
-                    placeholderTextColor="#999"
-                  />
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Operating Locations *</Text>
+                  <TouchableOpacity
+                    style={[styles.dropdownTrigger]}
+                    onPress={() => setIsCityModalOpen(true)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.dropdownText,
+                      (!editData.operating_locations || editData.operating_locations.length === 0) && styles.placeholder
+                    ]}>
+                      {editData.operating_locations && editData.operating_locations.length > 0
+                        ? `${editData.operating_locations.length} locations selected`
+                        : 'Select operating locations'}
+                    </Text>
+                    <ChevronDown size={20} color="#666" />
+                  </TouchableOpacity>
+
+                  {editData.operating_locations && editData.operating_locations.length > 0 && (
+                    <View style={styles.selectedContainer}>
+                      {editData.operating_locations.map((city: string) => (
+                        <View key={city} style={styles.selectedChip}>
+                          <Text style={styles.selectedChipText}>{city === '*' ? 'Pan India' : city}</Text>
+                          <TouchableOpacity
+                            onPress={() => toggleCitySelection(city === '*' ? 'Pan India' : city)}
+                            style={styles.removeButton}
+                          >
+                            <X size={14} color="#fff" />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </View>
+                  )}
                 </View>
               </View>
 
@@ -3435,6 +3524,74 @@ export default function BusinessDetailsScreen() {
             )}
           </View>
         </Modal>
+        <Modal
+          visible={isCityModalOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setIsCityModalOpen(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Select Operating Locations</Text>
+                <TouchableOpacity
+                  onPress={() => setIsCityModalOpen(false)}
+                  style={styles.closeButton}
+                >
+                  <X size={24} color="#666" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.searchContainer}>
+                <Search size={20} color="#999" style={styles.searchIcon} />
+                <TextInput
+                  style={styles.modalSearchInput}
+                  placeholder="Search cities..."
+                  placeholderTextColor="#999"
+                  value={citySearchQuery}
+                  onChangeText={setCitySearchQuery}
+                />
+              </View>
+
+              <ScrollView style={styles.optionsList}>
+                {filteredCities.map((city) => {
+                  const isSelected = editData.operating_locations?.includes(city);
+                  return (
+                    <TouchableOpacity
+                      key={city}
+                      style={[
+                        styles.option,
+                        isSelected && styles.optionSelected
+                      ]}
+                      onPress={() => toggleCitySelection(city)}
+                    >
+                      <Text style={[
+                        styles.optionText,
+                        isSelected && styles.optionTextSelected
+                      ]}>
+                        {city}
+                      </Text>
+                      {isSelected && (
+                        <View style={styles.checkmark}>
+                          <Check size={14} color="#fff" />
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              <View style={styles.modalFooter}>
+                <TouchableOpacity
+                  style={styles.doneButton}
+                  onPress={() => setIsCityModalOpen(false)}
+                >
+                  <Text style={styles.doneButtonText}>Done</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </KeyboardAvoidingView>
     </ScreenBackground>
   );
@@ -3837,7 +3994,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: 'center',
     marginTop: 8,
-    marginBottom: 32,
+    marginBottom: 8,
   },
   saveButtonDisabled: {
     backgroundColor: '#ccc',
@@ -4436,6 +4593,62 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#1a1a1a',
   },
+  suggestionChipTextSelected: {
+    color: '#fff',
+    fontWeight: '500',
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  checkmark: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  doneButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  doneButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  option: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  optionSelected: {
+    backgroundColor: '#f0f7ff',
+  },
+  optionsList: {
+    paddingHorizontal: 0,
+  },
+  optionText: {
+    fontSize: 16,
+    color: '#1a1a1a',
+  },
+  optionTextSelected: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
   cityOptionTextSelected: {
     color: '#007AFF',
     fontWeight: '600',
@@ -4569,9 +4782,5 @@ const styles = StyleSheet.create({
   suggestionChipText: {
     fontSize: 13,
     color: '#666',
-  },
-  suggestionChipTextSelected: {
-    color: '#fff',
-    fontWeight: '500',
   },
 });
