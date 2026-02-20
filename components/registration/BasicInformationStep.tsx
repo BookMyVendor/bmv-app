@@ -54,7 +54,7 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
   return (
     <View style={styles.content}>
       <View style={styles.field}>
-        <Text style={styles.label}>Business Name *</Text>
+        <Text style={[styles.label, validationErrors.businessName && styles.labelError]}>Business Name *</Text>
         <TextInput
           ref={businessNameRef}
           style={[
@@ -75,7 +75,7 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Contact Person Name *</Text>
+        <Text style={[styles.label, validationErrors.contactPersonName && styles.labelError]}>Contact Person Name *</Text>
         <TextInput
           ref={contactPersonNameRef}
           style={[
@@ -111,7 +111,7 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Email *</Text>
+        <Text style={[styles.label, validationErrors.email && styles.labelError]}>Email *</Text>
         <TextInput
           ref={emailRef}
           style={[
@@ -134,7 +134,7 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Business Contact Number *</Text>
+        <Text style={[styles.label, validationErrors.phoneNumber && styles.labelError]}>Business Contact Number *</Text>
         <TextInput
           ref={phoneNumberRef}
           style={[
@@ -201,6 +201,9 @@ const styles = StyleSheet.create({
     borderColor: '#FF3B30',
     backgroundColor: '#fff5f5',
     borderWidth: 2,
+  },
+  labelError: {
+    color: '#FF3B30',
   },
   errorText: {
     fontSize: 12,

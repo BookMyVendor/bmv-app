@@ -857,7 +857,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   return (
     <View style={[styles.container, styles.content]}>
       <View style={styles.field}>
-        <Text style={styles.label}>Business Category *</Text>
+        <Text style={[styles.label, (validationErrors.selectedRootCategoryId || validationErrors.selectedCategoryIds) && styles.labelError]}>Business Category *</Text>
         <Dropdown
           options={rootDropdownOptions}
           value={selectedRootCategoryId || ''}
@@ -865,16 +865,12 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           onChange={(value: string) => handleRootSelection(value)}
           open={isRootDropdownOpen}
           onOpenChange={setIsRootDropdownOpen}
+          error={validationErrors.selectedRootCategoryId || validationErrors.selectedCategoryIds}
         />
-        {(validationErrors.selectedRootCategoryId || validationErrors.selectedCategoryIds) && (
-          <Text style={styles.errorText}>
-            {validationErrors.selectedRootCategoryId || validationErrors.selectedCategoryIds}
-          </Text>
-        )}
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Services Offered *</Text>
+        <Text style={[styles.label, validationErrors.selectedCategoryIds && styles.labelError]}>Services Offered *</Text>
         <TouchableOpacity
           style={[
             styles.dropdownTrigger,
@@ -1001,7 +997,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Event Types *</Text>
+        <Text style={[styles.label, validationErrors.selectedEventIds && styles.labelError]}>Event Types *</Text>
 
         {/* Event Dropdown Trigger */}
         <TouchableOpacity
@@ -1120,7 +1116,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Business Description *</Text>
+        <Text style={[styles.label, validationErrors.businessDescription && styles.labelError]}>Business Description *</Text>
         <TextInput
           ref={businessDescriptionRef}
           style={[
@@ -1145,7 +1141,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Years of Experience *</Text>
+        <Text style={[styles.label, validationErrors.yearsOfExperience && styles.labelError]}>Years of Experience *</Text>
         <Dropdown
           options={EXPERIENCE_OPTIONS.map((exp) => ({
             label: exp,
@@ -1156,14 +1152,12 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           onChange={(value: string) => handleChange('yearsOfExperience', value)}
           open={isExperienceDropdownOpen}
           onOpenChange={setIsExperienceDropdownOpen}
+          error={validationErrors.yearsOfExperience}
         />
-        {validationErrors.yearsOfExperience && (
-          <Text style={styles.errorText}>{validationErrors.yearsOfExperience}</Text>
-        )}
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Base Price (₹) *</Text>
+        <Text style={[styles.label, validationErrors.basePrice && styles.labelError]}>Base Price (₹) *</Text>
         <TextInput
           ref={basePriceRef}
           style={[
@@ -1188,7 +1182,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Pricing Unit *</Text>
+        <Text style={[styles.label, validationErrors.pricingUnit && styles.labelError]}>Pricing Unit *</Text>
         <Dropdown
           options={pricingUnitOptions.map((unit) => ({
             label: unit,
@@ -1200,12 +1194,10 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           open={isPricingUnitDropdownOpen}
           onOpenChange={setIsPricingUnitDropdownOpen}
           disabled={!data.selectedCategoryIds || data.selectedCategoryIds.length === 0}
+          error={validationErrors.pricingUnit}
         />
         {(!data.selectedCategoryIds || data.selectedCategoryIds.length === 0) && (
           <Text style={styles.helperText}>Select a service category first to see options</Text>
-        )}
-        {validationErrors.pricingUnit && (
-          <Text style={styles.errorText}>{validationErrors.pricingUnit}</Text>
         )}
       </View>
     </View>
@@ -1301,6 +1293,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0f0f0',
     borderColor: '#e8e8e8',
     opacity: 0.9,
+  },
+  labelError: {
+    color: '#FF3B30',
   },
   inputError: {
     borderColor: '#FF3B30',

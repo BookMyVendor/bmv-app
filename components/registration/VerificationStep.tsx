@@ -245,7 +245,7 @@ const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>PAN *</Text>
+        <Text style={[styles.label, (validationErrors.panNumber || validationErrors.panDocument) && styles.labelError]}>PAN *</Text>
         <Text style={styles.hint}>Required - Permanent Account Number</Text>
         <View style={styles.inputActionRow}>
           <TextInput
@@ -453,6 +453,9 @@ const styles = StyleSheet.create({
     borderColor: '#FF3B30',
     backgroundColor: '#fff5f5',
     borderWidth: 2,
+  },
+  labelError: {
+    color: '#FF3B30',
   },
   errorText: {
     fontSize: 12,
