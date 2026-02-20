@@ -187,7 +187,7 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
   return (
     <View style={[styles.container, styles.content]}>
       <View style={styles.field}>
-        <Text style={styles.label}>Business Address *</Text>
+        <Text style={[styles.label, validationErrors.businessAddress && styles.labelError]}>Business Address *</Text>
         <TextInput
           ref={businessAddressRef}
           style={[
@@ -213,7 +213,7 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Pincode *</Text>
+        <Text style={[styles.label, (validationErrors.pincode || pincodeStatus === 'invalid') && styles.labelError]}>Pincode *</Text>
         <View style={styles.inputWithStatus}>
           <TextInput
             ref={pincodeRef}
@@ -264,7 +264,7 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Area *</Text>
+        <Text style={[styles.label, validationErrors.city && styles.labelError]}>Area *</Text>
         <TextInput
           ref={cityRef}
           style={[
@@ -324,7 +324,7 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Operating Locations *</Text>
+        <Text style={[styles.label, validationErrors.operatingLocations && styles.labelError]}>Operating Locations *</Text>
         <TouchableOpacity
           style={[
             styles.input,
@@ -479,6 +479,11 @@ const styles = StyleSheet.create({
   },
   inputError: {
     borderColor: '#FF3B30',
+    backgroundColor: '#fff5f5',
+    borderWidth: 2,
+  },
+  labelError: {
+    color: '#FF3B30',
   },
   inputValid: {
     borderColor: '#34C759',
