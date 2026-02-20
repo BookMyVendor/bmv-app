@@ -207,6 +207,7 @@ export default function BusinessDetailsScreen() {
 
   const [editData, setEditData] = useState<any>({});
   const [savingDetails, setSavingDetails] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [verificationDocuments, setVerificationDocuments] = useState<VerificationDocument[]>([]);
   const [loadingDocuments, setLoadingDocuments] = useState(false);
   const [uploadingDocument, setUploadingDocument] = useState<string | null>(null); // document type code
@@ -1816,82 +1817,110 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleSaveDetails = async () => {
-    // 1. Validate Email (format if provided)
-    if (editData.business_email && editData.business_email.trim()) {
-      const error = getEmailError(editData.business_email);
-      if (error) {
-        setEmailError(error);
-        setSavingDetails(false);
-        return;
+    const errors: Record<string, string> = {};
+
+    // 1. Validate mandatory text fields
+    if (!editData.business_name || !editData.business_name.trim()) {
+      errors.business_name = 'Business name is required';
+    }
+    if (!editData.contact_person_name || !editData.contact_person_name.trim()) {
+      errors.contact_person_name = 'Contact person name is required';
+    }
+    if (!editData.business_email || !editData.business_email.trim()) {
+      errors.business_email = 'Email is required';
+    } else {
+      const emailErr = getEmailError(editData.business_email);
+      if (emailErr) {
+        errors.business_email = emailErr;
+        setEmailError(emailErr);
       }
     }
-
-    // 2. Validate Phone Number (10 digits if provided)
-    if (editData.contact_person_phone && editData.contact_person_phone.trim()) {
+    if (!editData.contact_person_phone || !editData.contact_person_phone.trim()) {
+      errors.contact_person_phone = 'Business contact number is required';
+    } else {
       const phoneRegex = /^\d{10}$/;
       if (!phoneRegex.test(editData.contact_person_phone)) {
-        Alert.alert('Validation Error', 'Business contact number must be exactly 10 digits.');
-        setSavingDetails(false);
-        return;
+        errors.contact_person_phone = 'Business contact number must be exactly 10 digits';
+      }
+    }
+    if (!editData.description || !editData.description.trim()) {
+      errors.description = 'Business description is required';
+    }
+    if (!editData.years_experience && editData.years_experience !== 0) {
+      errors.years_experience = 'Years of experience is required';
+    }
+    if (!editData.base_price || !String(editData.base_price).trim()) {
+      errors.base_price = 'Base price is required';
+    }
+    if (!editData.pricing_unit || !editData.pricing_unit.trim()) {
+      errors.pricing_unit = 'Pricing unit is required';
+    }
+    if (!editData.address || !editData.address.trim()) {
+      errors.address = 'Business address is required';
+    }
+    if (!editData.pincode || !editData.pincode.trim()) {
+      errors.pincode = 'Pincode is required';
+    } else if (editData.pincode.length !== 6) {
+      errors.pincode = 'Pincode must be 6 digits';
+    }
+    if (!editData.operating_locations || editData.operating_locations.length === 0) {
+      errors.operating_locations = 'At least one operating location is required';
+    }
+
+    // 2. Validate PAN (Required and format)
+    if (!editData.business_registration_number || !editData.business_registration_number.trim()) {
+      errors.business_registration_number = 'PAN number is required';
+    } else {
+      const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+      if (!panRegex.test(editData.business_registration_number.toUpperCase())) {
+        errors.business_registration_number = 'Please enter a valid PAN (e.g., ABCDE1234F)';
       }
     }
 
-    // 3. Validate PAN (Required and format [A-Z]{5}[0-9]{4}[A-Z]{1})
-    if (!editData.business_registration_number || !editData.business_registration_number.trim()) {
-      Alert.alert('Validation Error', 'PAN is required. Please enter your PAN number.');
-      setSavingDetails(false);
-      return;
-    }
-    const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
-    if (!panRegex.test(editData.business_registration_number.toUpperCase())) {
-      Alert.alert('Validation Error', 'Please enter a valid PAN number (e.g., ABCDE1234F).');
-      setSavingDetails(false);
-      return;
-    }
-
-    // 4. Validate GST (format if provided)
+    // 3. Validate GST (format if provided)
     if (editData.gst_number && editData.gst_number.trim()) {
       const gstRegex = /^\d{2}[A-Z]{5}\d{4}[A-Z]{1}\d{1}Z\d{1}$/;
       if (!gstRegex.test(editData.gst_number.toUpperCase())) {
-        Alert.alert('Validation Error', 'Please enter a valid GST number.');
-        setSavingDetails(false);
-        return;
+        errors.gst_number = 'Please enter a valid GST number';
       }
     }
 
-    // 5. Validate PAN document is uploaded
+    // 4. Validate PAN document is uploaded
     const panDocs = documentsByType['pan'] || [];
     if (panDocs.length === 0) {
-      Alert.alert('Validation Error', 'PAN card document is required. Please upload your PAN card.');
-      setSavingDetails(false);
-      return;
+      errors.panDocument = 'PAN card document is required';
     }
 
-    // 6. Validate at least one service category ONLY if categories are loaded
+    // 5. Validate at least one service category ONLY if categories are loaded
     if (allBusinessCategories.length > 0) {
       const hasSubCategory = selectedCategoryIds.some(id => {
         const cat = allBusinessCategories.find(c => c.id === id);
         return cat && cat.parent_category_id !== null;
       });
       if (!hasSubCategory) {
-        Alert.alert('Validation Error', 'At least one service offering must be selected.');
-        setSavingDetails(false);
-        return;
+        errors.selectedCategoryIds = 'At least one service offering must be selected';
       }
     }
 
-    // 7. Validate at least one event type ONLY if categories are loaded
+    // 6. Validate at least one event type ONLY if categories are loaded
     if (allEventCategories.length > 0) {
       const hasSubEventType = selectedEventIds.some(id => {
         const cat = allEventCategories.find(c => c.id === id);
         return cat && cat.parent_category_id !== null;
       });
       if (!hasSubEventType) {
-        Alert.alert('Validation Error', 'At least one event type must be selected.');
-        setSavingDetails(false);
-        return;
+        errors.selectedEventIds = 'At least one event type must be selected';
       }
     }
+
+    // If there are any validation errors, set them to highlight fields
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      return;
+    }
+
+    // Clear validation errors on successful validation
+    setValidationErrors({});
 
     try {
       setSavingDetails(true);
@@ -2168,9 +2197,9 @@ export default function BusinessDetailsScreen() {
         </View>
       </View>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
-        keyboardVerticalOffset={insets.top + 60}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 60 : 0}
       >
         <View style={styles.tabContainer}>
           {/*
@@ -2466,32 +2495,40 @@ export default function BusinessDetailsScreen() {
                 <Text style={styles.editSectionTitle}>Basic Information</Text>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Business Name</Text>
+                  <Text style={[styles.editLabel, validationErrors.business_name && styles.editLabelError]}>Business Name *</Text>
                   <TextInput
-                    style={styles.editInput}
+                    style={[styles.editInput, validationErrors.business_name && styles.validationInputInvalid]}
                     value={editData.business_name || ''}
-                    onChangeText={(text) => setEditData({ ...editData, business_name: text })}
+                    onChangeText={(text) => {
+                      setEditData({ ...editData, business_name: text });
+                      if (validationErrors.business_name) setValidationErrors(prev => { const { business_name, ...rest } = prev; return rest; });
+                    }}
                     placeholder="Enter business name"
                     placeholderTextColor="#999"
                     returnKeyType="next"
                     onFocus={handleFieldFocus}
                     onSubmitEditing={() => contactPersonNameRef.current?.focus()}
                   />
+                  {validationErrors.business_name && <Text style={styles.validationErrorText}>{validationErrors.business_name}</Text>}
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Contact Person Name</Text>
+                  <Text style={[styles.editLabel, validationErrors.contact_person_name && styles.editLabelError]}>Contact Person Name *</Text>
                   <TextInput
                     ref={contactPersonNameRef}
-                    style={styles.editInput}
+                    style={[styles.editInput, validationErrors.contact_person_name && styles.validationInputInvalid]}
                     value={editData.contact_person_name || ''}
-                    onChangeText={(text) => setEditData({ ...editData, contact_person_name: text })}
+                    onChangeText={(text) => {
+                      setEditData({ ...editData, contact_person_name: text });
+                      if (validationErrors.contact_person_name) setValidationErrors(prev => { const { contact_person_name, ...rest } = prev; return rest; });
+                    }}
                     placeholder="Enter contact person name"
                     placeholderTextColor="#999"
                     returnKeyType="next"
                     onFocus={handleFieldFocus}
                     onSubmitEditing={() => contactPersonRoleRef.current?.focus()}
                   />
+                  {validationErrors.contact_person_name && <Text style={styles.validationErrorText}>{validationErrors.contact_person_name}</Text>}
                 </View>
 
                 <View style={styles.editField}>
@@ -2510,13 +2547,14 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Email</Text>
+                  <Text style={[styles.editLabel, (validationErrors.business_email || emailError) && styles.editLabelError]}>Email *</Text>
                   <TextInput
                     ref={businessEmailRef}
-                    style={[styles.editInput, emailError && styles.validationInputInvalid]}
+                    style={[styles.editInput, (emailError || validationErrors.business_email) && styles.validationInputInvalid]}
                     value={editData.business_email || ''}
                     onChangeText={(text) => {
                       setEditData({ ...editData, business_email: text });
+                      if (validationErrors.business_email) setValidationErrors(prev => { const { business_email, ...rest } = prev; return rest; });
                       const error = getEmailError(text);
                       if (error && text.trim().length > 5) {
                         setEmailError(error);
@@ -2532,18 +2570,19 @@ export default function BusinessDetailsScreen() {
                     onFocus={handleFieldFocus}
                     onSubmitEditing={() => contactPersonPhoneRef.current?.focus()}
                   />
-                  {emailError && <Text style={styles.validationErrorText}>{emailError}</Text>}
+                  {(emailError || validationErrors.business_email) && <Text style={styles.validationErrorText}>{emailError || validationErrors.business_email}</Text>}
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Business Contact Number</Text>
+                  <Text style={[styles.editLabel, validationErrors.contact_person_phone && styles.editLabelError]}>Business Contact Number *</Text>
                   <TextInput
                     ref={contactPersonPhoneRef}
-                    style={styles.editInput}
+                    style={[styles.editInput, validationErrors.contact_person_phone && styles.validationInputInvalid]}
                     value={editData.contact_person_phone || ''}
                     onChangeText={(text) => {
                       const cleaned = text.replace(/\D/g, '').slice(0, 10);
                       setEditData({ ...editData, contact_person_phone: cleaned });
+                      if (validationErrors.contact_person_phone) setValidationErrors(prev => { const { contact_person_phone, ...rest } = prev; return rest; });
                     }}
                     placeholder="Enter business contact number"
                     placeholderTextColor="#999"
@@ -2553,6 +2592,7 @@ export default function BusinessDetailsScreen() {
                     onFocus={handleFieldFocus}
                     onSubmitEditing={() => businessDescriptionRef.current?.focus()}
                   />
+                  {validationErrors.contact_person_phone && <Text style={styles.validationErrorText}>{validationErrors.contact_person_phone}</Text>}
                 </View>
               </View>
 
@@ -2560,7 +2600,7 @@ export default function BusinessDetailsScreen() {
                 <Text style={styles.editSectionTitle}>Services & Experience</Text>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Business Category *</Text>
+                  <Text style={[styles.editLabel, (validationErrors.selectedCategoryIds || validationErrors.selectedRootCategoryId) && styles.editLabelError]}>Business Category *</Text>
                   <Dropdown
                     options={rootCategoriesForDropdown.map((n: any) => ({
                       label: n.icon ? `${n.icon} ${n.name}` : n.name,
@@ -2568,18 +2608,23 @@ export default function BusinessDetailsScreen() {
                     }))}
                     value={selectedRootCategoryId || ''}
                     placeholder="Select a category"
-                    onChange={(value: string) => handleRootSelection(value)}
+                    onChange={(value: string) => {
+                      handleRootSelection(value);
+                      if (validationErrors.selectedCategoryIds) setValidationErrors(prev => { const { selectedCategoryIds, ...rest } = prev; return rest; });
+                    }}
                     open={isRootDropdownOpen}
                     onOpenChange={setIsRootDropdownOpen}
+                    error={validationErrors.selectedCategoryIds}
                   />
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Services Offered *</Text>
+                  <Text style={[styles.editLabel, validationErrors.selectedCategoryIds && styles.editLabelError]}>Services Offered *</Text>
                   <TouchableOpacity
                     style={[
                       styles.dropdownTrigger,
                       !selectedRootCategoryId && styles.dropdownTriggerDisabled,
+                      validationErrors.selectedCategoryIds && styles.validationInputInvalid,
                     ]}
                     onPress={() => selectedRootCategoryId && handleCategoryModalOpen()}
                     activeOpacity={0.7}
@@ -2705,11 +2750,11 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Event Types *</Text>
+                  <Text style={[styles.editLabel, validationErrors.selectedEventIds && styles.editLabelError]}>Event Types *</Text>
 
                   {/* Event Dropdown Trigger */}
                   <TouchableOpacity
-                    style={styles.dropdownTrigger}
+                    style={[styles.dropdownTrigger, validationErrors.selectedEventIds && styles.validationInputInvalid]}
                     onPress={handleEventModalOpen}
                     activeOpacity={0.7}
                   >
@@ -2817,12 +2862,15 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Business Description</Text>
+                  <Text style={[styles.editLabel, validationErrors.description && styles.editLabelError]}>Business Description *</Text>
                   <TextInput
                     ref={businessDescriptionRef}
-                    style={[styles.editInput, styles.textArea]}
+                    style={[styles.editInput, styles.textArea, validationErrors.description && styles.validationInputInvalid]}
                     value={editData.description || ''}
-                    onChangeText={(text) => setEditData({ ...editData, description: text })}
+                    onChangeText={(text) => {
+                      setEditData({ ...editData, description: text });
+                      if (validationErrors.description) setValidationErrors(prev => { const { description, ...rest } = prev; return rest; });
+                    }}
                     placeholder="Describe your business"
                     placeholderTextColor="#999"
                     multiline
@@ -2831,10 +2879,11 @@ export default function BusinessDetailsScreen() {
                     onFocus={handleFieldFocus}
                     onSubmitEditing={() => addressRef.current?.focus()}
                   />
+                  {validationErrors.description && <Text style={styles.validationErrorText}>{validationErrors.description}</Text>}
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Years of Experience *</Text>
+                  <Text style={[styles.editLabel, validationErrors.years_experience && styles.editLabelError]}>Years of Experience *</Text>
                   <Dropdown
                     options={EXPERIENCE_OPTIONS.map((exp) => ({
                       label: exp,
@@ -2842,18 +2891,23 @@ export default function BusinessDetailsScreen() {
                     }))}
                     value={getExperienceDisplayValue(editData.years_experience)}
                     placeholder="Select experience"
-                    onChange={(value: string) => setEditData({ ...editData, years_experience: parseExperienceToNumber(value) })}
+                    onChange={(value: string) => {
+                      setEditData({ ...editData, years_experience: parseExperienceToNumber(value) });
+                      if (validationErrors.years_experience) setValidationErrors(prev => { const { years_experience, ...rest } = prev; return rest; });
+                    }}
+                    error={validationErrors.years_experience}
                   />
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Base Price (₹) *</Text>
+                  <Text style={[styles.editLabel, validationErrors.base_price && styles.editLabelError]}>Base Price (₹) *</Text>
                   <TextInput
-                    style={styles.editInput}
+                    style={[styles.editInput, validationErrors.base_price && styles.validationInputInvalid]}
                     value={editData.base_price ? String(editData.base_price) : ''}
                     onChangeText={(text) => {
                       const cleanText = text.replace(/[^0-9]/g, '');
                       setEditData({ ...editData, base_price: cleanText });
+                      if (validationErrors.base_price) setValidationErrors(prev => { const { base_price, ...rest } = prev; return rest; });
                     }}
                     placeholder="Enter starting price"
                     placeholderTextColor="#999"
@@ -2861,10 +2915,11 @@ export default function BusinessDetailsScreen() {
                     onFocus={handleFieldFocus}
                     returnKeyType="next"
                   />
+                  {validationErrors.base_price && <Text style={styles.validationErrorText}>{validationErrors.base_price}</Text>}
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Pricing Unit *</Text>
+                  <Text style={[styles.editLabel, validationErrors.pricing_unit && styles.editLabelError]}>Pricing Unit *</Text>
                   <Dropdown
                     options={pricingUnitOptions.map((unit) => ({
                       label: unit,
@@ -2872,10 +2927,14 @@ export default function BusinessDetailsScreen() {
                     }))}
                     value={editData.pricing_unit || ''}
                     placeholder="Select pricing unit"
-                    onChange={(value: string) => setEditData({ ...editData, pricing_unit: value })}
+                    onChange={(value: string) => {
+                      setEditData({ ...editData, pricing_unit: value });
+                      if (validationErrors.pricing_unit) setValidationErrors(prev => { const { pricing_unit, ...rest } = prev; return rest; });
+                    }}
                     open={isPricingUnitDropdownOpen}
                     onOpenChange={setIsPricingUnitDropdownOpen}
                     disabled={selectedCategoriesWithPaths.length === 0}
+                    error={validationErrors.pricing_unit}
                   />
                   {selectedCategoriesWithPaths.length === 0 && (
                     <Text style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
@@ -2889,22 +2948,26 @@ export default function BusinessDetailsScreen() {
                 <Text style={styles.editSectionTitle}>Location</Text>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Business Address</Text>
+                  <Text style={[styles.editLabel, validationErrors.address && styles.editLabelError]}>Business Address *</Text>
                   <TextInput
                     ref={addressRef}
-                    style={styles.editInput}
+                    style={[styles.editInput, validationErrors.address && styles.validationInputInvalid]}
                     value={editData.address || ''}
-                    onChangeText={(text) => setEditData({ ...editData, address: text })}
+                    onChangeText={(text) => {
+                      setEditData({ ...editData, address: text });
+                      if (validationErrors.address) setValidationErrors(prev => { const { address, ...rest } = prev; return rest; });
+                    }}
                     placeholder="Enter business address"
                     placeholderTextColor="#999"
                     returnKeyType="next"
                     onFocus={handleFieldFocus}
                     onSubmitEditing={() => pincodeRef.current?.focus()}
                   />
+                  {validationErrors.address && <Text style={styles.validationErrorText}>{validationErrors.address}</Text>}
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Pincode *</Text>
+                  <Text style={[styles.editLabel, validationErrors.pincode && styles.editLabelError]}>Pincode *</Text>
                   <View style={styles.inputWithStatus}>
                     <TextInput
                       ref={pincodeRef}
@@ -2913,11 +2976,13 @@ export default function BusinessDetailsScreen() {
                         styles.pincodeInput,
                         pincodeStatus === 'valid' && styles.inputValid,
                         pincodeStatus === 'invalid' && styles.inputInvalid,
+                        validationErrors.pincode && styles.validationInputInvalid,
                       ]}
                       value={editData.pincode || ''}
                       onChangeText={(text) => {
                         const cleanText = text.replace(/\D/g, '');
                         setEditData({ ...editData, pincode: cleanText });
+                        if (validationErrors.pincode) setValidationErrors(prev => { const { pincode, ...rest } = prev; return rest; });
                         if (pincodeStatus !== 'idle') {
                           setPincodeStatus('idle');
                           setPincodeError(null);
@@ -3071,9 +3136,9 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Operating Locations *</Text>
+                  <Text style={[styles.editLabel, validationErrors.operating_locations && styles.editLabelError]}>Operating Locations *</Text>
                   <TouchableOpacity
-                    style={[styles.dropdownTrigger]}
+                    style={[styles.dropdownTrigger, validationErrors.operating_locations && styles.validationInputInvalid]}
                     onPress={() => setIsCityModalOpen(true)}
                     activeOpacity={0.7}
                   >
@@ -3110,14 +3175,17 @@ export default function BusinessDetailsScreen() {
                 <Text style={styles.editSectionTitle}>Verification</Text>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>PAN *</Text>
+                  <Text style={[styles.editLabel, (validationErrors.business_registration_number || validationErrors.panDocument) && styles.editLabelError]}>PAN *</Text>
                   <Text style={styles.editHint}>Required - Permanent Account Number</Text>
                   <View style={styles.inputActionRow}>
                     <TextInput
                       ref={panRef}
-                      style={[styles.editInput, styles.flexInput]}
+                      style={[styles.editInput, styles.flexInput, validationErrors.business_registration_number && styles.validationInputInvalid]}
                       value={editData.business_registration_number || ''}
-                      onChangeText={(text) => setEditData({ ...editData, business_registration_number: text })}
+                      onChangeText={(text) => {
+                        setEditData({ ...editData, business_registration_number: text });
+                        if (validationErrors.business_registration_number) setValidationErrors(prev => { const { business_registration_number, ...rest } = prev; return rest; });
+                      }}
                       placeholder="Enter PAN"
                       placeholderTextColor="#999"
                       autoCapitalize="characters"
@@ -3162,6 +3230,9 @@ export default function BusinessDetailsScreen() {
                         </View>
                       ))}
                     </View>
+                  )}
+                  {(validationErrors.business_registration_number || validationErrors.panDocument) && (
+                    <Text style={styles.validationErrorText}>{validationErrors.business_registration_number || validationErrors.panDocument}</Text>
                   )}
                 </View>
 
@@ -3360,20 +3431,25 @@ export default function BusinessDetailsScreen() {
                 </View>
               </View>
 
-              <TouchableOpacity
-                style={[styles.saveButton, savingDetails && styles.saveButtonDisabled]}
-                onPress={handleSaveDetails}
-                disabled={savingDetails}
-              >
-                {savingDetails ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.saveButtonText}>Save Changes</Text>
-                )}
-              </TouchableOpacity>
             </View>
           )}
         </ScrollView>
+
+        {activeSection === 'edit' && (
+          <View style={[styles.stickyFooter, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+            <TouchableOpacity
+              style={[styles.saveButton, savingDetails && styles.saveButtonDisabled]}
+              onPress={handleSaveDetails}
+              disabled={savingDetails}
+            >
+              {savingDetails ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.saveButtonText}>Save Changes</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
 
         <Modal
           visible={showOfferModal}
@@ -3471,7 +3547,7 @@ export default function BusinessDetailsScreen() {
               </View>
             </ScrollView>
 
-            <View style={styles.modalFooter}>
+            <View style={[styles.modalFooter, { paddingBottom: Math.max(insets.bottom, 20) }]}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelButton]}
                 onPress={() => {
@@ -3530,8 +3606,8 @@ export default function BusinessDetailsScreen() {
           animationType="fade"
           onRequestClose={() => setIsCityModalOpen(false)}
         >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
+          <View style={styles.bottomSheetOverlay}>
+            <View style={styles.bottomSheetContent}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Select Operating Locations</Text>
                 <TouchableOpacity
@@ -3581,7 +3657,7 @@ export default function BusinessDetailsScreen() {
                 })}
               </ScrollView>
 
-              <View style={styles.modalFooter}>
+              <View style={[styles.modalFooter, { paddingBottom: Math.max(insets.bottom, 20) }]}>
                 <TouchableOpacity
                   style={styles.doneButton}
                   onPress={() => setIsCityModalOpen(false)}
@@ -4061,6 +4137,14 @@ const styles = StyleSheet.create({
   modalContent: {
     flex: 1,
     padding: 20,
+    backgroundColor: '#fff',
+  },
+  bottomSheetContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    height: '80%',
+    width: '100%',
   },
   categoryModalContent: {
     backgroundColor: '#fff',
@@ -4280,6 +4364,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+  },
+  bottomSheetOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
   },
   closeButton: {
     width: 36,
@@ -4563,7 +4652,11 @@ const styles = StyleSheet.create({
   },
   validationInputInvalid: {
     borderColor: '#FF3B30',
-    borderWidth: 1,
+    borderWidth: 2,
+    backgroundColor: '#fff5f5',
+  },
+  editLabelError: {
+    color: '#FF3B30',
   },
   pincodeSuccessText: {
     fontSize: 12,
@@ -4618,13 +4711,14 @@ const styles = StyleSheet.create({
   },
   doneButton: {
     backgroundColor: '#007AFF',
-    paddingVertical: 14,
     borderRadius: 12,
+    height: 56,
+    justifyContent: 'center',
     alignItems: 'center',
   },
   doneButtonText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
   },
   option: {
@@ -4652,6 +4746,10 @@ const styles = StyleSheet.create({
   cityOptionTextSelected: {
     color: '#007AFF',
     fontWeight: '600',
+  },
+  stickyFooter: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
   },
   documentTypeSection: {
     marginBottom: 16,

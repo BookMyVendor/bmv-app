@@ -200,19 +200,100 @@ export default function BusinessRegistrationScreen() {
     const errors: Record<string, string> = {};
 
     if (currentPage === 0) {
-      // Validate email format if it has been entered on Basic Information step
-      if (businessData.email && businessData.email.trim() && !validateEmail(businessData.email)) {
-        errors.email = 'Please enter a valid email address';
-        setValidationErrors(errors);
-        Alert.alert('Invalid Email', 'Please enter a valid email address');
-        return;
+      // Set validation errors for all empty mandatory fields so red borders appear
+      if (!businessData.businessName || !businessData.businessName.trim()) {
+        errors.businessName = 'Business name is required';
       }
+      if (!businessData.contactPersonName || !businessData.contactPersonName.trim()) {
+        errors.contactPersonName = 'Contact person name is required';
+      }
+      if (!businessData.email || !businessData.email.trim()) {
+        errors.email = 'Email is required';
+      } else if (!validateEmail(businessData.email)) {
+        errors.email = 'Please enter a valid email address';
+      }
+      if (!businessData.phoneNumber || !businessData.phoneNumber.trim()) {
+        errors.phoneNumber = 'Business contact number is required';
+      }
+
+      // Apply validation errors to highlight empty fields with red borders
+      if (Object.keys(errors).length > 0) {
+        setValidationErrors(errors);
+      }
+
+      // Focus the next empty mandatory field
       basicInfoStepRef.current?.focusNextEmptyField();
     } else if (currentPage === 1) {
+      // Set validation errors for all empty mandatory fields so red borders appear
+      if (!businessData.selectedCategoryIds || businessData.selectedCategoryIds.length === 0) {
+        errors.selectedCategoryIds = 'Please select at least one sub-category';
+      }
+      if (!businessData.selectedEventIds || businessData.selectedEventIds.length === 0) {
+        errors.selectedEventIds = 'Please select at least one event type';
+      }
+      if (!businessData.businessDescription || !businessData.businessDescription.trim()) {
+        errors.businessDescription = 'Business description is required';
+      }
+      if (!businessData.yearsOfExperience || !businessData.yearsOfExperience.trim()) {
+        errors.yearsOfExperience = 'Years of experience is required';
+      }
+      if (!businessData.basePrice || !businessData.basePrice.trim()) {
+        errors.basePrice = 'Base price is required';
+      }
+      if (!businessData.pricingUnit || !businessData.pricingUnit.trim()) {
+        errors.pricingUnit = 'Pricing unit is required';
+      }
+
+      // Apply validation errors to highlight empty fields with red borders
+      if (Object.keys(errors).length > 0) {
+        setValidationErrors(errors);
+      }
+
+      // Focus the next empty mandatory field
       servicesStepRef.current?.focusNextEmptyField();
     } else if (currentPage === 2) {
+      // Set validation errors for all empty mandatory fields so red borders appear
+      if (!businessData.businessAddress || !businessData.businessAddress.trim()) {
+        errors.businessAddress = 'Business address is required';
+      }
+      if (!businessData.pincode || !businessData.pincode.trim()) {
+        errors.pincode = 'Pincode is required';
+      } else if (businessData.pincode.length !== 6) {
+        errors.pincode = 'Pincode must be 6 digits';
+      }
+      if (!businessData.city || !businessData.city.trim()) {
+        errors.city = 'Area is required';
+      }
+      if (!businessData.state || !businessData.state.trim()) {
+        errors.state = 'State is required';
+      }
+      if (!businessData.operatingLocations || businessData.operatingLocations.length === 0) {
+        errors.operatingLocations = 'At least one operating location is required';
+      }
+
+      // Apply validation errors to highlight empty fields with red borders
+      if (Object.keys(errors).length > 0) {
+        setValidationErrors(errors);
+      }
+
+      // Focus the next empty mandatory field
       locationStepRef.current?.focusNextEmptyField();
     } else if (currentPage === 3) {
+      // Set validation errors for all empty mandatory fields so red borders appear
+      if (!businessData.panNumber || !businessData.panNumber.trim()) {
+        errors.panNumber = 'PAN number is required';
+      }
+      const panDocuments = businessData.verificationDocuments?.['pan'];
+      if (!panDocuments || panDocuments.length === 0) {
+        errors.panDocument = 'PAN card document is required. Please upload your PAN card.';
+      }
+
+      // Apply validation errors to highlight empty fields with red borders
+      if (Object.keys(errors).length > 0) {
+        setValidationErrors(errors);
+      }
+
+      // Focus the next empty mandatory field
       verificationStepRef.current?.focusNextEmptyField();
     }
   };
@@ -793,8 +874,8 @@ export default function BusinessRegistrationScreen() {
     <ScreenBackground style={{ flex: 1 }}>
       <KeyboardAvoidingView
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
         <View style={styles.header}>
           <View style={styles.headerTop}>
