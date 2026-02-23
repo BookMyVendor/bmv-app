@@ -23,29 +23,17 @@ public class AppDelegate: ExpoAppDelegate {
     
     // Initialize Crashlytics
     Crashlytics.crashlytics().setCrashlyticsCollectionEnabled(true)
-    print("💥 Firebase Crashlytics initialized")
     
     // Initialize Performance Monitoring
     Performance.sharedInstance().isInstrumentationEnabled = true
     Performance.sharedInstance().isDataCollectionEnabled = true
-    print("⚡ Firebase Performance Monitoring initialized")
     
     // Create a custom trace for app startup
     let startupTrace = Performance.startTrace(name: "app_startup")
     startupTrace?.start()
     
     // Set up user attributes for Crashlytics
-    Crashlytics.crashlytics().setUserID("test_user_\(UUID().uuidString)")
     Crashlytics.crashlytics().setCustomValue("iOS", forKey: "platform")
-    Crashlytics.crashlytics().setCustomValue("debug", forKey: "build_type")
-    print("👤 Crashlytics user attributes set")
-    
-    // Log a test event to verify Analytics is working
-//    Analytics.logEvent("app_launch_testiOS", parameters: [
-//      "launch_time": Date().timeIntervalSince1970,
-//      "debug_mode": false
-//    ])
-    print("📊 Analytics test event logged: app_launch_test")
     
     // Set up messaging delegate
     Messaging.messaging().delegate = self
@@ -81,17 +69,7 @@ public class AppDelegate: ExpoAppDelegate {
 
   // Complete the startup trace after app is fully loaded
   public override func applicationDidBecomeActive(_ application: UIApplication) {
-    // Stop the startup trace
-//    if let trace = Performance.startTrace(name: "app_startup") {
-//      trace.stop()
-//      print("⏱️ App startup trace completed")
-//    }
-//    
-//    // Log a custom event for analytics
-//    Analytics.logEvent("app_became_active", parameters: [
-//      "timestamp": Date().timeIntervalSince1970
-//    ])
-//    print("📊 App became active event logged")
+
   }
 
   // Linking API
