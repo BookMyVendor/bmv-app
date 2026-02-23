@@ -221,11 +221,14 @@ export default function LoginScreen() {
                     {step === 'phone' ? (
                       <>
                         <Text style={styles.formTitle}>Enter Mobile Number</Text>
+                        <Text style={styles.formHint}>
+                          We'll send the OTP via WhatsApp—use a number that has it.
+                        </Text>
                         <View style={styles.inputContainer}>
                           <Smartphone size={20} color="#FFA500" />
                           <TextInput
                             style={styles.input}
-                            placeholder="Mobile Number"
+                            placeholder="Mobile number"
                             placeholderTextColor="#1a1a1a"
                             keyboardType="phone-pad"
                             value={phone}
@@ -255,9 +258,10 @@ export default function LoginScreen() {
                       <>
                         <Text style={styles.formTitle}>Verify OTP</Text>
                         <View style={styles.otpHeader}>
-                          <Text style={styles.otpLabel}>Enter 6-digit OTP sent to</Text>
+                          <Text style={styles.otpLabel}>Enter the 6-digit OTP sent on WhatsApp to</Text>
                           <Text style={styles.phoneNumberDisplay}>{phone}</Text>
                         </View>
+                        <Text style={styles.otpHint}>Check your WhatsApp for the code.</Text>
 
                         <TextInput
                           style={styles.otpInput}
@@ -438,8 +442,16 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: Colors.text.primary,
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.sm,
     textAlign: 'center',
+  },
+
+  formHint: {
+    fontSize: 13,
+    color: Colors.text.secondary,
+    textAlign: 'center',
+    marginBottom: Spacing.lg,
+    paddingHorizontal: Spacing.sm,
   },
 
   stepIndicatorContainer: {
@@ -486,7 +498,14 @@ const styles = StyleSheet.create({
 
   otpHeader: {
     alignItems: 'center',
-    marginBottom: Spacing.xl,
+    marginBottom: Spacing.sm,
+  },
+
+  otpHint: {
+    fontSize: 13,
+    color: Colors.text.secondary,
+    textAlign: 'center',
+    marginBottom: Spacing.lg,
   },
 
   phoneDisplayContainer: {
