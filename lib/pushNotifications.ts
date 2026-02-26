@@ -179,6 +179,7 @@ export function setupPushNotifications(router: any) {
             android: {
                 channelId: 'default',
                 importance: AndroidImportance.HIGH,
+                smallIcon: 'ic_notification_logo',
                 pressAction: {
                     id: 'default',
                 },
