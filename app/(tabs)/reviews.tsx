@@ -10,8 +10,12 @@ import {
   ScrollView,
   RefreshControl,
   Image,
+  Modal,
+  Dimensions,
+  Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Video } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Star,
@@ -20,9 +24,11 @@ import {
   ArrowUpDown,
   MessageSquare,
   X,
+  Play,
 } from 'lucide-react-native';
 import { useAuth } from '../../contexts/AuthContext';
-import { supabaseCore, supabaseCrm } from '../../lib/supabase';
+import { supabaseCore, supabaseCrm, supabaseCms } from '../../lib/supabase';
+import { getPublicUrl } from '../../lib/businessApi';
 import FilterModal from '../../components/FilterModal';
 import SortModal from '../../components/SortModal';
 import ReplyModal from '../../components/ReplyModal';
@@ -44,6 +50,7 @@ interface Review {
   businesses: {
     business_name: string;
   };
+  mediaItems?: { url: string; mimeType?: string }[];
 }
 
 type SortOption = 'newest' | 'oldest' | 'highest' | 'lowest';
@@ -68,6 +75,11 @@ export default function ReviewsScreen() {
   const [showSortModal, setShowSortModal] = useState(false);
   const [showReplyModal, setShowReplyModal] = useState(false);
   const [selectedReview, setSelectedReview] = useState<Review | null>(null);
+  const [selectedMedia, setSelectedMedia] = useState<{
+    url: string;
+    mimeType?: string;
+  } | null>(null);
+  const [mediaLoadError, setMediaLoadError] = useState(false);
   const { user } = useAuth();
 
   useEffect(() => {
@@ -75,6 +87,10 @@ export default function ReviewsScreen() {
       fetchReviews();
     }
   }, [user?.id]);
+
+  useEffect(() => {
+    if (selectedMedia) setMediaLoadError(false);
+  }, [selectedMedia]);
 
   const fetchReviews = async () => {
     try {
@@ -187,6 +203,52 @@ export default function ReviewsScreen() {
         }
       }
 
+      // Fetch review media: cms.review_media → cms.file_storage → build mediaItems per review
+      const reviewIds = reviewsWithJoins.map((r: any) => r.id);
+      const reviewMediaMap = new Map<string, string[]>();
+      if (reviewIds.length > 0) {
+        const { data: reviewMediaData, error: reviewMediaError } = await supabaseCms
+          .from('review_media')
+          .select('review_id, file_id')
+          .in('review_id', reviewIds);
+
+        if (reviewMediaError) {
+          console.error('Error fetching review_media:', reviewMediaError);
+        } else if (reviewMediaData?.length) {
+          reviewMediaData.forEach((rm: any) => {
+            if (rm.review_id && rm.file_id) {
+              const list = reviewMediaMap.get(rm.review_id) || [];
+              list.push(rm.file_id);
+              reviewMediaMap.set(rm.review_id, list);
+            }
+          });
+        }
+      }
+
+      const allFileIds = [...new Set(Array.from(reviewMediaMap.values()).flat())];
+      const fileStorageMap = new Map<string, { url: string; mimeType?: string }>();
+      if (allFileIds.length > 0) {
+        const { data: fileStorageData, error: fileStorageError } = await supabaseCms
+          .from('file_storage')
+          .select('id, storage_bucket, file_path, mime_type')
+          .in('id', allFileIds);
+
+        if (fileStorageError) {
+          console.error('Error fetching file_storage for review media:', fileStorageError);
+        } else if (fileStorageData?.length) {
+          fileStorageData.forEach((fs: any) => {
+            const path = fs.file_path;
+            if (path) {
+              // Review media is always in the 'reviews' bucket
+              fileStorageMap.set(fs.id, {
+                url: getPublicUrl('reviews', path),
+                mimeType: fs.mime_type || undefined,
+              });
+            }
+          });
+        }
+      }
+
       // Map reviews to match the Review interface
       const reviewsWithBusiness = reviewsWithJoins.map((review: any) => {
         const customer = review.customers || {};
@@ -198,6 +260,11 @@ export default function ReviewsScreen() {
         const businessName = review.business_id
           ? (businessMap.get(review.business_id) || 'Unknown Business')
           : 'No Business';
+
+        const fileIdsForReview = reviewMediaMap.get(review.id) || [];
+        const mediaItems = fileIdsForReview
+          .map((fid) => fileStorageMap.get(fid))
+          .filter(Boolean) as { url: string; mimeType?: string }[];
 
         return {
           id: review.id,
@@ -213,6 +280,7 @@ export default function ReviewsScreen() {
           businesses: {
             business_name: businessName,
           },
+          mediaItems: mediaItems.length > 0 ? mediaItems : undefined,
         };
       });
 
@@ -454,6 +522,35 @@ export default function ReviewsScreen() {
 
       {item.comment && <Text style={styles.comment}>{item.comment}</Text>}
 
+      {item.mediaItems && item.mediaItems.length > 0 && (
+        <View style={styles.mediaGrid}>
+          {item.mediaItems.map((media, idx) => {
+            const isImage =
+              !media.mimeType || media.mimeType.startsWith('image/');
+            return (
+              <TouchableOpacity
+                key={`${media.url}-${idx}`}
+                style={styles.mediaThumb}
+                onPress={() => setSelectedMedia(media)}
+                activeOpacity={0.9}
+              >
+                {isImage ? (
+                  <Image
+                    source={{ uri: media.url }}
+                    style={styles.mediaThumbImage}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.mediaThumbVideo}>
+                    <Play size={28} color="#fff" fill="#fff" />
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
       {item.vendor_response && (
         <View style={styles.replyContainer}>
           <View style={styles.replyHeader}>
@@ -675,6 +772,84 @@ export default function ReviewsScreen() {
           existingReply={selectedReview.vendor_response}
         />
       )}
+
+      <Modal
+        visible={!!selectedMedia}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedMedia(null)}
+      >
+        <View style={styles.mediaModalOverlay}>
+          <TouchableOpacity
+            style={styles.mediaModalClose}
+            onPress={() => {
+              setSelectedMedia(null);
+              setMediaLoadError(false);
+            }}
+            activeOpacity={1}
+          >
+            <X size={28} color="#fff" />
+          </TouchableOpacity>
+          {selectedMedia && (
+            <>
+              {!selectedMedia.mimeType ||
+              selectedMedia.mimeType.startsWith('image/') ? (
+                <>
+                  <Image
+                    source={{ uri: selectedMedia.url }}
+                    style={styles.mediaModalImage}
+                    resizeMode="contain"
+                    onError={() => setMediaLoadError(true)}
+                    onLoad={() => setMediaLoadError(false)}
+                  />
+                  {mediaLoadError && (
+                    <Text style={styles.mediaModalVideoText}>
+                      Unable to load image
+                    </Text>
+                  )}
+                </>
+              ) : selectedMedia.mimeType.startsWith('video/') ? (
+                <View style={styles.mediaModalVideoContainer}>
+                  {mediaLoadError ? (
+                    <>
+                      <Text style={styles.mediaModalVideoText}>
+                        Could not play video
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.mediaModalVideoButton}
+                        onPress={() => Linking.openURL(selectedMedia.url)}
+                      >
+                        <Play size={20} color="#fff" />
+                        <Text style={styles.mediaModalVideoButtonText}>
+                          Open in browser
+                        </Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <Video
+                      source={{ uri: selectedMedia.url }}
+                      style={styles.mediaModalVideo}
+                      useNativeControls
+                      resizeMode="contain"
+                      shouldPlay
+                      onError={() => setMediaLoadError(true)}
+                    />
+                  )}
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.mediaModalVideoButton}
+                  onPress={() => Linking.openURL(selectedMedia.url)}
+                >
+                  <Text style={styles.mediaModalVideoButtonText}>
+                    Open link
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </>
+          )}
+        </View>
+      </Modal>
     </ScreenBackground>
   );
 }
@@ -1001,6 +1176,76 @@ const styles = StyleSheet.create({
     color: '#333',
     lineHeight: 22,
     marginBottom: 16,
+  },
+  mediaGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 16,
+  },
+  mediaThumb: {
+    width: 96,
+    height: 96,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#f0f0f0',
+  },
+  mediaThumbImage: {
+    width: '100%',
+    height: '100%',
+  },
+  mediaThumbVideo: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#333',
+  },
+  mediaModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mediaModalClose: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+    padding: 8,
+  },
+  mediaModalImage: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+  },
+  mediaModalVideoContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: Dimensions.get('window').width,
+    flex: 1,
+  },
+  mediaModalVideo: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height * 0.7,
+  },
+  mediaModalVideoText: {
+    fontSize: 16,
+    color: '#fff',
+    marginBottom: 16,
+  },
+  mediaModalVideoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#3B82F6',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  mediaModalVideoButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
   },
   replyContainer: {
     backgroundColor: Colors.secondary.light + '20',

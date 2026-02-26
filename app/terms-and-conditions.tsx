@@ -229,11 +229,6 @@ export default function TermsAndConditionsScreen() {
                 I have read and agree to the Terms & Conditions
               </Text>
             </View>
-            <Text style={styles.scrollHint}>
-              {hasScrolledToBottom
-                ? 'You can now accept the Terms & Conditions'
-                : 'Please scroll to the bottom to enable acceptance'}
-            </Text>
           </View>
         </View>
       </ScrollView>
@@ -289,14 +284,16 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   content: {
-    padding: 24,
+    paddingHorizontal: 24,
+    paddingBottom: 24,
   },
   lastUpdated: {
     fontSize: 12,
     color: '#999',
     textTransform: 'uppercase',
     letterSpacing: 1,
-    marginBottom: 24,
+    marginTop: 10,
+    marginBottom: 10,
   },
   sectionTitle: {
     fontSize: 18,

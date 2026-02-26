@@ -768,7 +768,8 @@ export interface UploadDocumentData {
 export const uploadVerificationDocument = async (
   businessId: string,
   documentTypeCode: string,
-  file: DocumentFile
+  file: DocumentFile,
+  userId?: string
 ): Promise<{ data: VerificationDocument | null; error: Error | null }> => {
   try {
     // Validate file type
@@ -783,11 +784,14 @@ export const uploadVerificationDocument = async (
     }
 
     // Get authenticated user ID (vendor_id) first for folder structure
-    const { data: { user } } = await supabaseCore.auth.getUser();
-    if (!user) {
-      throw new Error('User not authenticated');
+    let vendorId = userId;
+    if (!vendorId) {
+      const { data: { user } } = await supabaseCore.auth.getUser();
+      if (!user) {
+        throw new Error('User not authenticated');
+      }
+      vendorId = user.id;
     }
-    const vendorId = user.id;
 
     // Get document type ID
     const { data: docType, error: docTypeError } = await supabaseCore

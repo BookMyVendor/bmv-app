@@ -19,6 +19,7 @@ interface VerificationStepProps {
   data: any;
   onUpdate: (data: any) => void;
   validationErrors?: Record<string, string>;
+  onFocus?: () => void;
 }
 
 export interface VerificationStepRef {
@@ -41,6 +42,7 @@ const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(
   data,
   onUpdate,
   validationErrors = {},
+  onFocus,
 }, ref) => {
   const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([]);
   const [loadingTypes, setLoadingTypes] = useState(true);
@@ -230,55 +232,125 @@ const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <View style={[styles.container, styles.content]}>
       <View style={styles.infoBox}>
-        <Text style={styles.infoTitle}>Business Verification</Text>
+        <Text style={styles.infoTitle}>Get Verified, Get Noticed</Text>
         <Text style={styles.infoText}>
-          Adding verification details helps build trust with customers. PAN number and PAN card document upload are required. Other documents are optional.
+          Verified businesses earn more trust — and more bookings.{'\n\n'}
+          ✅ Customers prefer verified vendors{'\n'}
+          📈 Rank higher in search results{'\n'}
+          ⭐ Unlock premium features & badges{'\n'}
+          🔒 Protect your brand from impersonation
         </Text>
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>PAN *</Text>
+        <Text style={[styles.label, (validationErrors.panNumber || validationErrors.panDocument) && styles.labelError]}>PAN *</Text>
         <Text style={styles.hint}>Required - Permanent Account Number</Text>
-        <TextInput
-          ref={panNumberRef}
-          style={[
-            styles.input,
-            validationErrors.panNumber && styles.inputError
-          ]}
-          value={data.panNumber || ''}
-          onChangeText={(text) => handleChange('panNumber', text)}
-          placeholder="Enter PAN (e.g., ABCDE1234F)"
-          placeholderTextColor="#999"
-          autoCapitalize="characters"
-          maxLength={10}
-          returnKeyType="next"
-          onSubmitEditing={() => gstNumberRef.current?.focus()}
-        />
+        <View style={styles.inputActionRow}>
+          <TextInput
+            ref={panNumberRef}
+            style={[
+              styles.input,
+              styles.flexInput,
+              validationErrors.panNumber && styles.inputError
+            ]}
+            value={data.panNumber || ''}
+            onChangeText={(text) => handleChange('panNumber', text)}
+            placeholder="Enter PAN"
+            placeholderTextColor="#999"
+            autoCapitalize="characters"
+            maxLength={10}
+            returnKeyType="next"
+            onFocus={onFocus}
+            onSubmitEditing={() => gstNumberRef.current?.focus()}
+          />
+          <TouchableOpacity
+            style={[
+              styles.inlineUploadButton,
+              uploading === 'pan' && styles.uploadButtonDisabled,
+              validationErrors.panDocument && styles.uploadButtonError
+            ]}
+            onPress={() => handlePickDocuments('pan')}
+            disabled={uploading === 'pan'}
+          >
+            {uploading === 'pan' ? (
+              <ActivityIndicator size="small" color="#007AFF" />
+            ) : (
+              <>
+                <Upload size={18} color={validationErrors.panDocument ? '#FF3B30' : '#007AFF'} />
+                <Text style={[styles.inlineUploadButtonText, validationErrors.panDocument && styles.uploadButtonTextError]}>
+                  Add PAN
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
         {validationErrors.panNumber && (
           <Text style={styles.errorText}>{validationErrors.panNumber}</Text>
+        )}
+        {validationErrors.panDocument && (
+          <Text style={styles.errorText}>{validationErrors.panDocument}</Text>
+        )}
+
+        {/* PAN Document Preview */}
+        {data.verificationDocuments?.['pan']?.length > 0 && (
+          <View style={styles.documentsList}>
+            {data.verificationDocuments['pan'].map((file: any, index: number) =>
+              renderDocumentPreview(file, 'pan', index)
+            )}
+          </View>
         )}
       </View>
 
       <View style={styles.field}>
         <Text style={styles.label}>GST Number</Text>
-        <Text style={styles.hint}>Optional - For registered businesses</Text>
-        <TextInput
-          ref={gstNumberRef}
-          style={styles.input}
-          value={data.gstNumber || ''}
-          onChangeText={(text) => handleChange('gstNumber', text)}
-          placeholder="Enter GST number (e.g., 22AAAAA0000A1Z5)"
-          placeholderTextColor="#999"
-          autoCapitalize="characters"
-          maxLength={15}
-          returnKeyType="done"
-        />
+        <View style={styles.inputActionRow}>
+          <TextInput
+            ref={gstNumberRef}
+            style={[styles.input, styles.flexInput]}
+            value={data.gstNumber || ''}
+            onChangeText={(text) => handleChange('gstNumber', text)}
+            placeholder="Enter GST number"
+            placeholderTextColor="#999"
+            autoCapitalize="characters"
+            maxLength={15}
+            returnKeyType="done"
+            onFocus={onFocus}
+          />
+          <TouchableOpacity
+            style={[
+              styles.inlineUploadButton,
+              uploading === 'gst' && styles.uploadButtonDisabled
+            ]}
+            onPress={() => handlePickDocuments('gst')}
+            disabled={uploading === 'gst'}
+          >
+            {uploading === 'gst' ? (
+              <ActivityIndicator size="small" color="#007AFF" />
+            ) : (
+              <>
+                <Upload size={18} color="#007AFF" />
+                <Text style={styles.inlineUploadButtonText}>
+                  Add GST Cert
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {/* GST Document Preview */}
+        {data.verificationDocuments?.['gst']?.length > 0 && (
+          <View style={styles.documentsList}>
+            {data.verificationDocuments['gst'].map((file: any, index: number) =>
+              renderDocumentPreview(file, 'gst', index)
+            )}
+          </View>
+        )}
       </View>
 
-      {/* Document Upload Sections */}
-      {documentGroups.map((group) => {
+      {/* Other Document Upload Sections */}
+      {documentGroups.filter(g => g.typeCode !== 'pan' && g.typeCode !== 'gst').map((group) => {
         const typeName = group.typeName || group.typeCode;
         const isUploading = uploading === group.typeCode;
         const isMandatory = mandatoryDocumentTypes.includes(group.typeCode);
@@ -287,11 +359,6 @@ const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(
         return (
           <View key={group.typeCode} style={styles.field}>
             <Text style={styles.label}>{typeName} {isMandatory ? '*' : ''}</Text>
-            <Text style={[styles.hint, isMandatory && styles.mandatoryHint]}>
-              {isMandatory
-                ? 'Required - Upload PAN card image (jpg, png) or PDF (max 10MB)'
-                : 'Optional - Upload images (jpg, png) or PDF files (max 10MB each)'}
-            </Text>
 
             {/* Uploaded Documents */}
             {group.files.length > 0 && (
@@ -330,16 +397,7 @@ const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(
         );
       })}
 
-      <View style={styles.tipBox}>
-        <Text style={styles.tipTitle}>💡 Why verify?</Text>
-        <Text style={styles.tipText}>
-          • Builds customer confidence{'\n'}
-          • Appears higher in search results{'\n'}
-          • Eligible for premium features{'\n'}
-          • Protects your business identity
-        </Text>
-      </View>
-    </ScrollView>
+    </View>
   );
 });
 
@@ -350,7 +408,6 @@ export default VerificationStep;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
   },
   content: {
     padding: 24,
@@ -397,6 +454,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff5f5',
     borderWidth: 2,
   },
+  labelError: {
+    color: '#FF3B30',
+  },
   errorText: {
     fontSize: 12,
     color: '#FF3B30',
@@ -430,6 +490,33 @@ const styles = StyleSheet.create({
     color: '#FF3B30',
   },
   uploadButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  inputActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  flexInput: {
+    flex: 1,
+    minWidth: 150, // Break to next line if less than this
+  },
+  inlineUploadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#f0f7ff',
+    borderWidth: 1,
+    borderColor: '#007AFF',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    minHeight: 52,
+  },
+  inlineUploadButtonText: {
     fontSize: 14,
     fontWeight: '600',
     color: '#007AFF',

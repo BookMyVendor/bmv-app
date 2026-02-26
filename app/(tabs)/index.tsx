@@ -7,13 +7,17 @@ import {
   TouchableOpacity,
   Image,
   ActivityIndicator,
+  Alert,
+  Platform,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Plus, TrendingUp, Calendar, Eye, X, ChevronRight } from 'lucide-react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabaseCore, supabaseCrm } from '../../lib/supabase';
+import { checkNotificationPermission, requestNotificationPermission } from '../../lib/pushNotifications';
 import { STATUS_OPTIONS, LeadStatus } from '../../types/leads';
 import FilterChip from '../../components/FilterChip';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
@@ -55,6 +59,7 @@ export default function DashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [showFilterScrollIndicator, setShowFilterScrollIndicator] = useState(false);
   const [showBusinessScrollIndicator, setShowBusinessScrollIndicator] = useState(false);
+  const [businessScrollX, setBusinessScrollX] = useState(0);
   const filterScrollViewRef = useRef<ScrollView>(null);
   const businessScrollViewRef = useRef<ScrollView>(null);
   const { user } = useAuth();
@@ -74,6 +79,44 @@ export default function DashboardScreen() {
       setShowBusinessScrollIndicator(false);
     }
   }, [businesses.length]);
+
+  // Check notification permission on mount
+  useEffect(() => {
+    const checkPermissionStatus = async () => {
+      try {
+        const hasPermission = await checkNotificationPermission();
+        if (!hasPermission) {
+          const hasPrompted = await AsyncStorage.getItem('notificationPermissionPromptShown');
+          if (hasPrompted !== 'true') {
+            Alert.alert(
+              "Enable Notifications",
+              "Stay updated with new leads and important alerts. Enable notifications now?",
+              [
+                {
+                  text: "Later",
+                  style: "cancel",
+                  onPress: async () => {
+                    await AsyncStorage.setItem('notificationPermissionPromptShown', 'true');
+                  }
+                },
+                {
+                  text: "Enable",
+                  onPress: async () => {
+                    await requestNotificationPermission();
+                    await AsyncStorage.setItem('notificationPermissionPromptShown', 'true');
+                  }
+                }
+              ]
+            );
+          }
+        }
+      } catch (e) {
+        console.error("Permission check failed", e);
+      }
+    };
+
+    checkPermissionStatus();
+  }, []);
 
   // Refresh businesses when screen comes into focus (e.g., after editing)
   useFocusEffect(
@@ -394,7 +437,13 @@ export default function DashboardScreen() {
 
         <View style={styles.businessSection}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>My Businesses</Text>
+            <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>My Businesses</Text>
+            <TouchableOpacity
+              onPress={() => router.push('/business-registration')}
+              activeOpacity={0.6}
+            >
+              <Text style={styles.registerBusinessLink}>+ Add Business</Text>
+            </TouchableOpacity>
           </View>
 
           {businesses.length === 0 ? (
@@ -418,6 +467,7 @@ export default function DashboardScreen() {
                   const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
                   const canScrollRight = contentOffset.x + layoutMeasurement.width < contentSize.width - 10;
                   setShowBusinessScrollIndicator(businesses.length > 1 && canScrollRight);
+                  setBusinessScrollX(contentOffset.x);
                 }}
                 scrollEventThrottle={16}
               >
@@ -477,7 +527,7 @@ export default function DashboardScreen() {
                   style={styles.scrollIndicatorRight}
                   onPress={() => {
                     businessScrollViewRef.current?.scrollTo({
-                      x: 300,
+                      x: businessScrollX + 296,
                       animated: true,
                     });
                   }}
@@ -489,33 +539,13 @@ export default function DashboardScreen() {
                     end={{ x: 1, y: 0 }}
                     style={styles.scrollGradient}
                   >
-                    <ChevronRight size={20} color="#666" />
+                    <ChevronRight size={32} color="#333" />
                   </LinearGradient>
                 </TouchableOpacity>
               )}
             </View>
           )}
 
-          {/* Always show Register Business button */}
-          <View style={styles.primaryButtonContainer}>
-            <TouchableOpacity
-              style={[styles.primaryButton, businesses.length > 0 && styles.primaryButtonWithMargin]}
-              onPress={() => router.push('/business-registration')}
-              activeOpacity={0.8}
-            >
-              <LinearGradient
-                colors={[Colors.purple.main, Colors.purple.light]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.primaryButtonGradient}
-              >
-                <Plus size={20} color={Colors.neutral.black} strokeWidth={2.5} />
-                <Text style={styles.primaryButtonText}>
-                  Register Business
-                </Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
         </View>
       </ScrollView>
     </ScreenBackground>
@@ -660,21 +690,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  addButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.neutral.black,
+  registerBusinessLink: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1a1a1a',
   },
   emptyState: {
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 32,
     alignItems: 'center',
+    marginBottom: 16,
   },
   emptyStateTitle: {
     fontSize: 18,
@@ -699,7 +725,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   primaryButtonWithMargin: {
-    marginTop: 16,
+    marginTop: 8,
   },
   primaryButtonGradient: {
     flexDirection: 'row',
