@@ -25,6 +25,7 @@ import {
   MessageSquare,
   X,
   Play,
+  Store,
 } from 'lucide-react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabaseCore, supabaseCrm, supabaseCms } from '../../lib/supabase';
@@ -514,11 +515,21 @@ export default function ReviewsScreen() {
         <Text style={styles.reviewDate}>{formatDate(item.created_at)}</Text>
       </View>
 
-      {item.event_type && (
-        <View style={styles.eventBadge}>
-          <Text style={styles.eventBadgeText}>{item.event_type}</Text>
-        </View>
-      )}
+      <View style={styles.badgesContainer}>
+        {item.event_type && (
+          <View style={styles.eventBadge}>
+            <Text style={styles.eventBadgeText}>{item.event_type}</Text>
+          </View>
+        )}
+        {item.businesses?.business_name && (
+          <View style={styles.businessBadge}>
+            <Store size={14} color="#6366F1" style={{ marginTop: -1 }} />
+            <Text style={styles.businessBadgeText}>
+              {item.businesses.business_name}
+            </Text>
+          </View>
+        )}
+      </View>
 
       {item.comment && <Text style={styles.comment}>{item.comment}</Text>}
 
@@ -793,7 +804,7 @@ export default function ReviewsScreen() {
           {selectedMedia && (
             <>
               {!selectedMedia.mimeType ||
-              selectedMedia.mimeType.startsWith('image/') ? (
+                selectedMedia.mimeType.startsWith('image/') ? (
                 <>
                   <Image
                     source={{ uri: selectedMedia.url }}
@@ -1043,6 +1054,46 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.secondary.main,
   },
+  badgesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  eventBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: Colors.accent.light + '30',
+    marginBottom: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.accent.main,
+  },
+  businessBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    marginBottom: Spacing.md,
+    gap: 6,
+    shadowColor: '#6366F1',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  businessBadgeText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#4F46E5',
+    letterSpacing: 0.2,
+  },
   clearButton: {
     backgroundColor: '#fff',
     paddingHorizontal: 16,
@@ -1156,16 +1207,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#999',
   },
-  eventBadge: {
-    backgroundColor: Colors.accent.light + '30',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 6,
-    borderRadius: BorderRadius.lg,
-    alignSelf: 'flex-start',
-    marginBottom: Spacing.md,
-    borderWidth: 1,
-    borderColor: Colors.accent.main,
-  },
+
   eventBadgeText: {
     fontSize: 12,
     fontWeight: '600',
