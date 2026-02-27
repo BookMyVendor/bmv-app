@@ -1,4 +1,4 @@
-import { supabaseUrl } from './supabase';
+import { supabaseUrl } from './supabaseConfig';
 import { getDeviceInfo } from './deviceInfo';
 import { storeTokens, getRefreshToken, clearTokens } from './tokenStorage';
 
@@ -257,12 +257,23 @@ export async function verifyOTP(
   }
 }
 
+let isRefreshing = false;
+let refreshPromise: Promise<{ data?: RefreshTokenResponse; error?: AuthError }> | null = null;
+
 /**
  * Refresh access token using refresh token
  */
 export async function refreshAccessToken(): Promise<{ data?: RefreshTokenResponse; error?: AuthError }> {
-  try {
-    const refreshToken = await getRefreshToken();
+  // Concurrency lock to prevent multiple API calls triggering simultaneous refreshes
+  if (isRefreshing && refreshPromise) {
+    console.log('[AUTH] Token refresh already in progress. Waiting for result...');
+    return refreshPromise;
+  }
+
+  isRefreshing = true;
+  refreshPromise = (async () => {
+    try {
+      const refreshToken = await getRefreshToken();
     if (!refreshToken) {
       return {
         error: {
@@ -319,6 +330,12 @@ export async function refreshAccessToken(): Promise<{ data?: RefreshTokenRespons
         message: error.message || 'Network error. Please check your connection.',
       },
     };
+  } finally {
+    isRefreshing = false;
+    refreshPromise = null;
   }
+  })();
+
+  return refreshPromise;
 }
 

@@ -2,8 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 import 'react-native-url-polyfill/auto';
 
-export const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+import { supabaseUrl, supabaseAnonKey } from './supabaseConfig';
+import { apiFetch } from './apiClient';
 
 // Use a single shared storage key for all clients to ensure they share the same auth session
 // This reduces the "Multiple GoTrueClient instances" warning
@@ -146,7 +146,8 @@ const loggingFetch: typeof fetch = async (input, init) => {
   });
 
   try {
-    const response = await fetch(input as RequestInfo, init);
+    // Instead of raw fetch, we use our enhanced apiFetch that handles token expiry and 401s automatically
+    const response = await apiFetch(input, init);
     const preview = await getResponsePreview(response);
 
     const payload = {

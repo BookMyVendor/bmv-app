@@ -1,7 +1,7 @@
 import { Platform, PermissionsAndroid } from 'react-native';
 import messaging from '@react-native-firebase/messaging';
 import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
-import { supabaseUrl } from './supabase';
+import { supabaseUrl } from './supabaseConfig';
 import { apiFetch } from './apiClient';
 
 /**

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
-import { Session, User, AuthChangeEvent } from '@supabase/supabase-js';
+import { AppState, AppStateStatus } from 'react-native';
+import { Session, User } from '@supabase/supabase-js';
 
 import { supabaseCore, supabaseCms, supabaseCrm } from '../lib/supabase';
 import { sendOTP, verifyOTP as verifyOTPApi, type VerifyOTPResponse } from '../lib/otpAuthApi';
@@ -149,7 +150,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             if (supabaseUser && !userError) {
               console.log('[AUTH] ✅ Token valid, user found:', supabaseUser.id);
-              console.log('[IOS LOG] userId:', supabaseUser.id);
 
               const session: Session = {
                 access_token: accessToken,
@@ -280,7 +280,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkStoredTokens();
 
     // Also listen to Supabase auth changes for backward compatibility
-    const { data: { subscription } } = supabaseCore.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+    const { data: { subscription } } = supabaseCore.auth.onAuthStateChange((event, session) => {
       (async () => {
         if (isLoggingOutRef.current) {
           return;
@@ -358,32 +358,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [user?.id]);
 
-  // Auto-refresh token before expiration
-  // With 2-minute access tokens, we check every 1 minute.
-  // The 30-second buffer in isTokenExpiredOrExpiringSoon ensures we
-  // refresh before actual expiry.
+  // AppState listener to verify token on app resume
   useEffect(() => {
     if (!user?.id) {
       return;
     }
 
-    const checkAndRefreshToken = async () => {
-      if (await isTokenExpiredOrExpiringSoon()) {
-        console.log('[AUTH] Token expiring soon, triggering refresh...');
-        await refreshToken();
+    const handleAppStateChange = async (nextAppState: AppStateStatus) => {
+      // Check if we are transitioning to the 'active' foreground state
+      if (nextAppState === 'active') {
+        console.log('[AUTH] App resumed to foreground, verifying token...');
+        if (await isTokenExpiredOrExpiringSoon()) {
+          console.log('[AUTH] Token expired or expiring soon, triggering refresh...');
+          // Don't await if we want the callback to finish quickly, or await to be safe.
+          await refreshToken();
+        } else {
+          console.log('[AUTH] Token is still valid on resume.');
+        }
       }
     };
 
-    // Check immediately
-    checkAndRefreshToken();
-
-    // Then check every 20 seconds (safe for 2-min tokens)
-    const tokenRefreshInterval = setInterval(() => {
-      checkAndRefreshToken();
-    }, 20 * 1000);
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
 
     return () => {
-      clearInterval(tokenRefreshInterval);
+      subscription.remove();
     };
   }, [user?.id]);
 
@@ -476,7 +474,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           tokenSet: true,
           message: 'Auth complete. Profile loaded if existing user.'
         });
-        console.log('[IOS LOG] userId:', user.id);
 
         return { error: null };
       }
@@ -555,7 +552,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (sessionError) return { error: sessionError };
 
       await fetchProfile(userId);
-      console.log('[IOS LOG] userId:', userId);
       return { error: null };
     } catch (error) {
       return { error: error as Error };
