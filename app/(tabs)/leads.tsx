@@ -551,12 +551,14 @@ export default function LeadsScreen() {
         ))}
       </ScrollView>
 
-      {/* Lead count row */}
-      {!loading && (
-        <Text style={styles.leadCount}>
-          {filteredAndSortedLeads.length} lead{filteredAndSortedLeads.length !== 1 ? 's' : ''} found
-        </Text>
-      )}
+      {/* Lead count row - occupies space even when loading to prevent jumps */}
+      <View style={{ minHeight: 20 }}>
+        {!loading && (
+          <Text style={styles.leadCount}>
+            {filteredAndSortedLeads.length} lead{filteredAndSortedLeads.length !== 1 ? 's' : ''} found
+          </Text>
+        )}
+      </View>
 
       {loading ? (
         <View style={styles.loadingContainer}>
@@ -760,30 +762,26 @@ const styles = StyleSheet.create({
   },
   statusTabsRow: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 5, // Compact vertical padding for the row
     gap: 8,
     flexDirection: 'row',
   },
   statusTab: {
     paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#E0E2EB',
-    backgroundColor: '#fff',
+    paddingVertical: 6, // Compact padding for the chip itself
+    borderRadius: 20,
+    backgroundColor: '#eef0f4',
   },
   statusTabActive: {
-    backgroundColor: '#1E2A4A',
-    borderColor: '#1E2A4A',
+    backgroundColor: '#1a1a1a',
   },
   statusTabText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#666',
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#555',
   },
   statusTabTextActive: {
     color: '#fff',
-    fontWeight: '600',
   },
   leadCount: {
     fontSize: 13,
