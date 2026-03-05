@@ -157,7 +157,7 @@ export default function ProfileScreen() {
       return;
     }
 
-    const { error } = await confirmAccountDeletion({ accessToken });
+    const { error } = await confirmAccountDeletion();
     setDeletionLoading(false);
 
     if (error) {

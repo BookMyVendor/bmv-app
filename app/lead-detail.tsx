@@ -116,16 +116,27 @@ export default function LeadDetailScreen() {
       if (error) throw error;
 
       // Map lead_communications to LeadActivity format
-      const mappedActivities = (data || []).map((comm) => ({
-        id: comm.id,
-        lead_id: comm.lead_id,
-        activity_type: comm.communication_type as any,
-        title: getActivityTitle(comm.communication_type),
-        description: comm.message,
-        performed_by: comm.vendor_id,
-        created_at: comm.created_at,
-        metadata: comm.attachment_file_id ? { attachment_file_id: comm.attachment_file_id } : null,
-      }));
+      const mappedActivities = (data || []).map((comm) => {
+        let actType = comm.communication_type;
+        let msg = comm.message || '';
+
+        // Safely distinguish notes from regular messages
+        if (actType === 'message' && msg.startsWith('[NOTE] ')) {
+          actType = 'note';
+          msg = msg.substring(7);
+        }
+
+        return {
+          id: comm.id,
+          lead_id: comm.lead_id,
+          activity_type: actType as any,
+          title: getActivityTitle(actType),
+          description: msg,
+          performed_by: comm.vendor_id,
+          created_at: comm.created_at,
+          metadata: comm.attachment_file_id ? { attachment_file_id: comm.attachment_file_id } : null,
+        };
+      });
 
       setActivities(mappedActivities);
     } catch (error) {
@@ -266,21 +277,25 @@ export default function LeadDetailScreen() {
     try {
       setSavingNote(true);
 
-      // Use lead_communications with communication_type = 'message' for notes
-      await supabaseCrm.from('lead_communications').insert({
+      // Save as 'message' to bypass DB constraint, using a prefix to mark it as a note
+      const { error } = await supabaseCrm.from('lead_communications').insert({
         lead_id: lead.id,
         vendor_id: user?.id,
-        communication_type: 'note',
-        message: newNote.trim(),
+        communication_type: 'message',
+        message: `[NOTE] ${newNote.trim()}`,
         is_from_vendor: true,
       });
+
+      if (error) {
+        throw error;
+      }
 
       setNewNote('');
       fetchActivities();
       Alert.alert('Success', 'Note added successfully');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving note:', error);
-      Alert.alert('Error', 'Failed to save note');
+      Alert.alert('Error', error.message || 'Failed to save note');
     } finally {
       setSavingNote(false);
     }

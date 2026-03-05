@@ -5,7 +5,7 @@ import { refreshAccessToken } from './otpAuthApi';
  * Enhanced fetch with automatic token refresh and retry on 401
  */
 export async function apiFetch(
-  url: string,
+  input: RequestInfo | URL,
   options: RequestInit = {}
 ): Promise<Response> {
   // Get access token
@@ -30,8 +30,8 @@ export async function apiFetch(
     headers.set('Authorization', `Bearer ${accessToken}`);
   }
 
-  // Make the request
-  let response = await fetch(url, {
+  // Make the request using input instead of string url
+  let response = await fetch(input, {
     ...options,
     headers,
   });
@@ -44,7 +44,7 @@ export async function apiFetch(
     if (refreshResult.data) {
       // Retry with new token
       headers.set('Authorization', `Bearer ${refreshResult.data.accessToken}`);
-      response = await fetch(url, {
+      response = await fetch(input, {
         ...options,
         headers,
       });

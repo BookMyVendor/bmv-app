@@ -1,4 +1,5 @@
-import { supabaseUrl } from './supabase';
+import { supabaseUrl } from './supabaseConfig';
+import { apiFetch } from './apiClient';
 
 export interface AccountDeletionResponse {
     success: boolean;
@@ -20,19 +21,14 @@ function getProjectRef(): string {
     throw new Error('Invalid Supabase URL format');
 }
 
-export async function confirmAccountDeletion({
-    accessToken,
-}: {
-    accessToken: string;
-}): Promise<{ data?: AccountDeletionResponse; error?: AccountDeletionError }> {
+export async function confirmAccountDeletion(): Promise<{ data?: AccountDeletionResponse; error?: AccountDeletionError }> {
     try {
         const url = `https://${getProjectRef()}.supabase.co/functions/v1/auth-vendor-delete-account`;
 
-        const response = await fetch(url, {
+        const response = await apiFetch(url, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                Authorization: `Bearer ${accessToken}`,
             },
             body: JSON.stringify({}),
         });
