@@ -373,7 +373,7 @@ export default function LeadsScreen() {
     { label: 'New', value: 'new' },
     { label: 'Contacted', value: 'contacted' },
     { label: 'Quoted', value: 'quoted' },
-    { label: 'Won', value: 'converted' },
+    { label: 'Converted', value: 'converted' },
   ];
 
   const activeStatusTab = selectedStatuses.length === 1 ? selectedStatuses[0] : '';
@@ -528,6 +528,8 @@ export default function LeadsScreen() {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        alwaysBounceVertical={false}
+        style={styles.statusTabsScroll}
         contentContainerStyle={styles.statusTabsRow}
       >
         {STATUS_TABS.map((tab) => (
@@ -760,17 +762,25 @@ const styles = StyleSheet.create({
   clearSearchButton: {
     padding: 4,
   },
+  statusTabsScroll: {
+    flexShrink: 0,
+  },
   statusTabsRow: {
     paddingHorizontal: 16,
-    paddingVertical: 5, // Compact vertical padding for the row
+    paddingTop: 8,
+    paddingBottom: 6,
     gap: 8,
     flexDirection: 'row',
+    alignItems: 'center',
   },
   statusTab: {
-    paddingHorizontal: 12,
-    paddingVertical: 6, // Compact padding for the chip itself
+    paddingHorizontal: 14,
+    paddingVertical: 7,
     borderRadius: 20,
     backgroundColor: '#eef0f4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
   },
   statusTabActive: {
     backgroundColor: '#1a1a1a',
@@ -779,6 +789,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#555',
+    includeFontPadding: false,
+    lineHeight: 16,
+    textAlignVertical: 'center',
   },
   statusTabTextActive: {
     color: '#fff',

@@ -448,7 +448,8 @@ export default function DashboardScreen() {
                     styles.businessRow,
                     index < businesses.length - 1 && styles.businessRowBorder,
                   ]}
-                  onPress={() => router.push(`/business-details?id=${business.id}`)}
+                  // onPress={() => router.push(`/business-details?id=${business.id}`)}
+                  onPress={() => (router as any).push(`/business-profile?id=${business.id}`)}
                   activeOpacity={0.7}
                 >
                   {/* Avatar */}
