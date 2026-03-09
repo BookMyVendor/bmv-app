@@ -1,9 +1,12 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
   <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
-    <item name="android:enforceNavigationBarContrast" tools:targetApi="29">true</item>
     <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
     <item name="colorPrimary">@color/colorPrimary</item>
-    <item name="android:statusBarColor">@android:color/transparent</item>
+    <!-- Edge-to-edge: do NOT set android:statusBarColor or android:navigationBarColor here.
+         These are deprecated in Android 15+ (API 35). System bars are now transparent by default
+         when edge-to-edge is enforced. Use WindowInsetsControllerCompat in code instead. -->
+    <item name="android:enforceNavigationBarContrast" tools:targetApi="29">false</item>
+    <item name="android:windowOptOutEdgeToEdgeEnforcement" tools:targetApi="35">false</item>
   </style>
   <style name="Theme.App.SplashScreen" parent="Theme.SplashScreen">
     <item name="windowSplashScreenBackground">@color/splashscreen_background</item>

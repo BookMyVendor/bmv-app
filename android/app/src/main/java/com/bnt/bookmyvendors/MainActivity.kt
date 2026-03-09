@@ -4,6 +4,8 @@ import expo.modules.splashscreen.SplashScreenManager
 import android.os.Build
 import android.os.Bundle
 
+import androidx.core.view.WindowCompat
+
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
@@ -20,6 +22,11 @@ class MainActivity : ReactActivity() {
     // @generated begin expo-splashscreen - expo prebuild (DO NOT MODIFY) sync-f3ff59a738c56c9a6119210cb55f0b613eb8b6af
     SplashScreenManager.registerOnActivity(this)
     // @generated end expo-splashscreen
+
+    // Edge-to-edge: opt into drawing behind system bars (Android 15+ requirement).
+    // This replaces the deprecated Window.setStatusBarColor / Window.setNavigationBarColor APIs.
+    WindowCompat.setDecorFitsSystemWindows(window, false)
+
     super.onCreate(null)
   }
 

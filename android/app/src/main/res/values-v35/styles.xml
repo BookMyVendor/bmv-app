@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Android 15 (API 35) enforces edge-to-edge by default.
+       Setting windowOptOutEdgeToEdgeEnforcement to false ensures the app
+       embraces edge-to-edge rather than opting out.
+       Do NOT set statusBarColor or navigationBarColor here - those APIs are
+       deprecated and have no effect on API 35+. -->
+  <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+    <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
+    <item name="colorPrimary">@color/colorPrimary</item>
+    <item name="android:enforceNavigationBarContrast">false</item>
+    <item name="android:windowOptOutEdgeToEdgeEnforcement">false</item>
+  </style>
+</resources>
