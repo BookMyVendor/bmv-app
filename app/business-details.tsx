@@ -68,10 +68,7 @@ import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '../lib/docu
 import { validatePincode } from '../lib/pincodeValidation';
 import { validateEmail, getEmailError } from '../lib/validation';
 import { stripCountryCode } from '../lib/formatters';
-import Logo from '../components/Logo';
 import Dropdown from '../components/Dropdown';
-import PackageList from '../components/packages/PackageList';
-import { Colors } from '../constants/theme';
 import ScreenBackground from '../components/ScreenBackground';
 
 const EXPERIENCE_OPTIONS = [
@@ -2169,7 +2166,8 @@ export default function BusinessDetailsScreen() {
 
   return (
     <ScreenBackground style={styles.container}>
-      <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
+      {/* ── Top Bar ── */}
+      <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity
           style={styles.backBtn}
           onPress={() => {
@@ -2180,99 +2178,48 @@ export default function BusinessDetailsScreen() {
             }
           }}
         >
-          <ArrowLeft size={24} color="#007AFF" strokeWidth={2} />
+          <ArrowLeft size={22} color="#007AFF" strokeWidth={2.2} />
         </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Logo size={38} style={styles.headerLogo} />
-          <View style={styles.headerTitleContainer}>
-            <Text style={styles.headerTitle} numberOfLines={1}>
-              {business.business_name}
+        <View style={styles.topBarCenter}>
+          <Text style={styles.topBarTitle} numberOfLines={1}>
+            {business.business_name}
+          </Text>
+          {business.vendor_service_category ? (
+            <Text style={styles.topBarSubtitle} numberOfLines={1}>
+              {business.vendor_service_category}
             </Text>
-            {business.vendor_service_category ? (
-              <Text style={styles.headerSubtitle} numberOfLines={1}>
-                {business.vendor_service_category}
-              </Text>
-            ) : null}
-          </View>
+          ) : null}
         </View>
+        {/* Right placeholder to balance the back button */}
+        <View style={{ width: 36 }} />
       </View>
+
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
         keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 60 : 0}
       >
-        <View style={styles.tabContainer}>
-          {/*
+        {/* ── Modern Tab Bar ── */}
+        <View style={styles.tabsContainer}>
           <TouchableOpacity
-            style={[
-              styles.tab,
-              activeSection === 'offers' && styles.activeTab,
-            ]}
-            onPress={() => setActiveSection('offers')}
-          >
-            <Tag size={20} color={activeSection === 'offers' ? '#fff' : 'rgba(255,255,255,0.7)'} />
-            <Text
-              style={[
-                styles.tabText,
-                activeSection === 'offers' && styles.activeTabText,
-              ]}
-            >
-              Offers
-            </Text>
-          </TouchableOpacity>
-          */}
-
-          <TouchableOpacity
-            style={[
-              styles.tab,
-              activeSection === 'gallery' && styles.activeTab,
-            ]}
+            style={[styles.tab, activeSection === 'gallery' && styles.tabActive]}
             onPress={() => setActiveSection('gallery')}
+            activeOpacity={0.75}
           >
-            <ImageIcon size={20} color={activeSection === 'gallery' ? '#fff' : 'rgba(255,255,255,0.7)'} />
-            <Text
-              style={[
-                styles.tabText,
-                activeSection === 'gallery' && styles.activeTabText,
-              ]}
+            <ImageIcon size={16} color={activeSection === 'gallery' ? '#1a1a1a' : '#999'} strokeWidth={2} />
+            <Text style={[styles.tabText, activeSection === 'gallery' && styles.tabTextActive]}
               numberOfLines={1}
             >
               Gallery
             </Text>
           </TouchableOpacity>
-          {/*
-        <TouchableOpacity
-          style={[
-            styles.tab,
-            activeSection === 'packages' && styles.activeTab,
-          ]}
-          onPress={() => setActiveSection('packages')}
-        >
-          <Package size={20} color={activeSection === 'packages' ? '#fff' : 'rgba(255,255,255,0.7)'} />
-          <Text
-            style={[
-              styles.tabText,
-              activeSection === 'packages' && styles.activeTabText,
-            ]}
-            numberOfLines={1}
-          >
-            Packages
-          </Text>
-        </TouchableOpacity>
-        */}
           <TouchableOpacity
-            style={[
-              styles.tab,
-              activeSection === 'edit' && styles.activeTab,
-            ]}
+            style={[styles.tab, activeSection === 'edit' && styles.tabActive]}
             onPress={() => setActiveSection('edit')}
+            activeOpacity={0.75}
           >
-            <Edit size={20} color={activeSection === 'edit' ? '#fff' : 'rgba(255,255,255,0.7)'} />
-            <Text
-              style={[
-                styles.tabText,
-                activeSection === 'edit' && styles.activeTabText,
-              ]}
+            <Edit size={16} color={activeSection === 'edit' ? '#1a1a1a' : '#999'} strokeWidth={2} />
+            <Text style={[styles.tabText, activeSection === 'edit' && styles.tabTextActive]}
               numberOfLines={1}
             >
               Edit Details
@@ -2326,11 +2273,16 @@ export default function BusinessDetailsScreen() {
 
           {activeSection === 'gallery' && (
             <View style={styles.section}>
+              {/* Gallery header */}
               <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Business Gallery</Text>
+                <View>
+                  <Text style={styles.sectionTitle}>Business Gallery</Text>
+                  <Text style={styles.sectionSubtitle}>{images.length}/20 images uploaded</Text>
+                </View>
                 <View style={styles.buttonGroup}>
                   <TouchableOpacity
-                    style={[styles.addButton, styles.smallButton]}
+                    style={[styles.addButton, styles.smallButton,
+                    (uploading || uploadingMultiple || images.length >= 20) && styles.addButtonDisabled]}
                     onPress={handleUploadImage}
                     disabled={uploading || uploadingMultiple || images.length >= 20}
                   >
@@ -2338,13 +2290,14 @@ export default function BusinessDetailsScreen() {
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
                       <>
-                        <Plus size={18} color="#fff" />
+                        <Plus size={16} color="#fff" />
                         <Text style={styles.smallButtonText}>Single</Text>
                       </>
                     )}
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.addButton, styles.smallButton]}
+                    style={[styles.addButton, styles.smallButton,
+                    (uploading || uploadingMultiple || images.length >= 20) && styles.addButtonDisabled]}
                     onPress={handleUploadMultipleImages}
                     disabled={uploading || uploadingMultiple || images.length >= 20}
                   >
@@ -2352,7 +2305,7 @@ export default function BusinessDetailsScreen() {
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
                       <>
-                        <ImageIcon size={18} color="#fff" />
+                        <ImageIcon size={16} color="#fff" />
                         <Text style={styles.smallButtonText}>Multiple</Text>
                       </>
                     )}
@@ -2377,10 +2330,6 @@ export default function BusinessDetailsScreen() {
                   </View>
                 </View>
               )}
-
-              <Text style={styles.imageCounter}>
-                {images.length}/20 images uploaded
-              </Text>
 
               {images.length === 0 ? (
                 <View style={styles.emptyState}>
@@ -2489,7 +2438,10 @@ export default function BusinessDetailsScreen() {
 
           {activeSection === 'edit' && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Edit Business Details</Text>
+              <View style={styles.editPageHeader}>
+                <Text style={styles.sectionTitle}>Edit Business Details</Text>
+                <Text style={styles.sectionSubtitle}>Update your business information</Text>
+              </View>
 
               <View style={styles.editSection}>
                 <Text style={styles.editSectionTitle}>Basic Information</Text>
@@ -3441,6 +3393,7 @@ export default function BusinessDetailsScreen() {
               style={[styles.saveButton, savingDetails && styles.saveButtonDisabled]}
               onPress={handleSaveDetails}
               disabled={savingDetails}
+              activeOpacity={0.85}
             >
               {savingDetails ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -3676,65 +3629,63 @@ export default function BusinessDetailsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#f5f7fa',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#f5f7fa',
   },
   errorText: {
     fontSize: 16,
     color: '#666',
   },
-  header: {
+
+  // ─── Top Bar ───────────────────────────────────────────────────────────────
+  topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
-    paddingHorizontal: 20,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    backgroundColor: '#f5f7fa',
     zIndex: 10,
   },
   backBtn: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 4,
+    padding: 6,
   },
-  headerCenter: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  topBarCenter: {
     flex: 1,
-    gap: 0,
-    height: '100%',
+    alignItems: 'center',
+    paddingHorizontal: 8,
   },
-  headerLogo: {
-    marginRight: 4,
-    marginVertical: 0,
-  },
-  headerTitleContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    height: '100%',
-  },
-  headerTitle: {
-    fontSize: 18,
+  topBarTitle: {
+    fontSize: 17,
     fontWeight: '700',
     color: '#1a1a1a',
-    textAlignVertical: 'center',
-    includeFontPadding: false,
+    textAlign: 'center',
   },
-  headerSubtitle: {
-    fontSize: 13,
-    color: '#666',
-    lineHeight: 16,
-    textAlignVertical: 'center',
-    includeFontPadding: false,
+  topBarSubtitle: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+    marginTop: 1,
   },
-  tabContainer: {
+
+  // ─── Tab Bar ────────────────────────────────────────────────────────────────
+  tabsContainer: {
     flexDirection: 'row',
-    gap: 8,
-    backgroundColor: '#52aad9',
-    paddingHorizontal: 4,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   tab: {
     flex: 1,
@@ -3742,52 +3693,63 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
-    paddingHorizontal: 8,
-    minWidth: 0, // Allow flex shrinking on iOS
+    borderRadius: 10,
     gap: 6,
+    minWidth: 0,
   },
-  activeTab: {
-    backgroundColor: 'rgba(255,255,255,0.25)',
+  tabActive: {
+    backgroundColor: '#f5f7fa',
   },
   tabText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: 'rgba(255,255,255,0.7)',
-    flexShrink: 1, // Allow text to shrink on iOS if needed
+    color: '#999',
+    flexShrink: 1,
   },
-  activeTabText: {
-    color: '#fff',
+  tabTextActive: {
+    color: '#1a1a1a',
   },
   content: {
     flex: 1,
   },
   section: {
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 20,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
     gap: 12,
     flexWrap: 'wrap',
   },
   sectionTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: '#1a1a1a',
-    flex: 1,
-    minWidth: 120,
-    marginRight: 8,
+    marginBottom: 2,
+  },
+  sectionSubtitle: {
+    fontSize: 12,
+    color: '#888',
+    fontWeight: '500',
+  },
+  editPageHeader: {
+    marginBottom: 16,
   },
   addButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
     paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 12,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+  },
+  addButtonDisabled: {
+    opacity: 0.5,
   },
   addButtonText: {
     color: '#fff',
@@ -3800,18 +3762,18 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   smallButton: {
-    paddingVertical: 8,
+    paddingVertical: 7,
     paddingHorizontal: 12,
   },
   smallButtonText: {
     color: '#fff',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
   },
   imageCounter: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 16,
+    fontSize: 13,
+    color: '#888',
+    marginBottom: 12,
   },
   progressContainer: {
     backgroundColor: '#f8f8f8',
@@ -3833,7 +3795,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
     borderRadius: 3,
   },
   emptyState: {
@@ -4011,7 +3973,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 8,
     left: 8,
-    backgroundColor: '#2563EB',
+    backgroundColor: '#6aa3ce',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 4,
@@ -4027,58 +3989,69 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 20,
-    marginBottom: 16,
+    marginBottom: 14,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
-    shadowRadius: 8,
+    shadowRadius: 6,
     elevation: 2,
   },
   editSectionTitle: {
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '700',
-    color: '#1a1a1a',
+    color: '#6aa3ce',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
     marginBottom: 16,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f2f5',
   },
   editField: {
     marginBottom: 16,
   },
   editLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 8,
+    color: '#555',
+    marginBottom: 7,
   },
   editInput: {
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#f7f8fa',
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: '#e8eaed',
     borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    fontSize: 15,
     color: '#1a1a1a',
   },
   textArea: {
     minHeight: 100,
     textAlignVertical: 'top',
-    paddingTop: 14,
+    paddingTop: 13,
   },
   saveButton: {
-    backgroundColor: '#2563EB',
-    borderRadius: 12,
+    backgroundColor: '#6aa3ce',
+    borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 8,
+    shadowColor: '#6aa3ce',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   saveButtonDisabled: {
-    backgroundColor: '#ccc',
+    backgroundColor: '#aaa',
+    shadowOpacity: 0,
+    elevation: 0,
   },
   saveButtonText: {
     fontSize: 16,
     fontWeight: '700',
     color: '#fff',
+    letterSpacing: 0.3,
   },
   inputActionRow: {
     flexDirection: 'row',
@@ -4094,9 +4067,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#f0f7ff',
+    backgroundColor: '#f0f6fb',
     borderWidth: 1,
-    borderColor: '#007AFF',
+    borderColor: '#6aa3ce',
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 16,
@@ -4105,7 +4078,7 @@ const styles = StyleSheet.create({
   inlineUploadButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#007AFF',
+    color: '#6aa3ce',
   },
   inlineDocumentsList: {
     marginTop: 12,
@@ -4253,7 +4226,7 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   submitButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
   },
   submitButtonText: {
     fontSize: 16,
@@ -4289,9 +4262,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#f7f8fa',
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: '#e8eaed',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -4319,10 +4292,10 @@ const styles = StyleSheet.create({
   selectedContainer: {
     marginBottom: 16,
     padding: 12,
-    backgroundColor: '#f0f7ff',
+    backgroundColor: '#f0f6fb',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#007AFF',
+    borderColor: '#6aa3ce',
   },
   selectedLabel: {
     fontSize: 14,
@@ -4340,7 +4313,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 6,
     borderWidth: 1,
-    borderColor: '#007AFF',
+    borderColor: '#6aa3ce',
     minHeight: 36,
   },
   selectedChipText: {
@@ -4407,7 +4380,7 @@ const styles = StyleSheet.create({
     borderTopColor: '#f0f0f0',
   },
   categoryModalButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
@@ -4444,7 +4417,7 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 10,
     borderWidth: 2,
-    borderColor: '#007AFF',
+    borderColor: '#6aa3ce',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -4452,7 +4425,7 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
   },
   radioButtonOuter: {
     width: 20,
@@ -4472,7 +4445,7 @@ const styles = StyleSheet.create({
   checkboxSelected: {
     width: 22,
     height: 22,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
     borderRadius: 6,
     justifyContent: 'center',
     alignItems: 'center',
@@ -4498,7 +4471,7 @@ const styles = StyleSheet.create({
   },
   categoryNameSelected: {
     fontWeight: '600',
-    color: '#007AFF',
+    color: '#6aa3ce',
   },
   childrenContainer: {
     marginLeft: 12,
@@ -4526,7 +4499,7 @@ const styles = StyleSheet.create({
   },
   eventOptionTextSelected: {
     fontWeight: '600',
-    color: '#007AFF',
+    color: '#6aa3ce',
   },
   editHint: {
     fontSize: 12,
@@ -4543,8 +4516,8 @@ const styles = StyleSheet.create({
     paddingRight: 44,
   },
   inputValid: {
-    borderColor: '#34C759',
-    backgroundColor: '#f0fff4',
+    borderColor: '#6aa3ce',
+    backgroundColor: '#f0f6fb',
   },
   inputInvalid: {
     borderColor: '#FF3B30',
@@ -4705,12 +4678,12 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
     justifyContent: 'center',
     alignItems: 'center',
   },
   doneButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
     borderRadius: 12,
     height: 56,
     justifyContent: 'center',
@@ -4740,16 +4713,19 @@ const styles = StyleSheet.create({
     color: '#1a1a1a',
   },
   optionTextSelected: {
-    color: '#007AFF',
+    color: '#6aa3ce',
     fontWeight: '600',
   },
   cityOptionTextSelected: {
-    color: '#007AFF',
+    color: '#6aa3ce',
     fontWeight: '600',
   },
   stickyFooter: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    backgroundColor: '#f5f7fa',
+    borderTopWidth: 1,
+    borderTopColor: '#ececec',
   },
   documentTypeSection: {
     marginBottom: 16,
@@ -4789,10 +4765,10 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: '#f0f7ff',
+    backgroundColor: '#f0f6fb',
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: '#007AFF',
+    borderColor: '#6aa3ce',
   },
   addDocumentButtonDisabled: {
     opacity: 0.6,
@@ -4800,7 +4776,7 @@ const styles = StyleSheet.create({
   addDocumentButtonText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#007AFF',
+    color: '#6aa3ce',
   },
   documentsList: {
     gap: 8,
@@ -4874,8 +4850,8 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   suggestionChipSelected: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
+    borderColor: '#6aa3ce',
   },
   suggestionChipText: {
     fontSize: 13,

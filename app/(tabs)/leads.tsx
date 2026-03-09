@@ -525,33 +525,35 @@ export default function LeadsScreen() {
       </View>
 
       {/* Status pill tabs */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        alwaysBounceVertical={false}
-        style={styles.statusTabsScroll}
-        contentContainerStyle={styles.statusTabsRow}
-      >
-        {STATUS_TABS.map((tab) => (
-          <TouchableOpacity
-            key={tab.value}
-            style={[
-              styles.statusTab,
-              activeStatusTab === tab.value && styles.statusTabActive,
-            ]}
-            onPress={() => setStatusTab(tab.value)}
-          >
-            <Text
+      <View style={styles.statusTabsWrapper}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          alwaysBounceVertical={false}
+          style={styles.statusTabsScroll}
+          contentContainerStyle={styles.statusTabsRow}
+        >
+          {STATUS_TABS.map((tab) => (
+            <TouchableOpacity
+              key={tab.value}
               style={[
-                styles.statusTabText,
-                activeStatusTab === tab.value && styles.statusTabTextActive,
+                styles.statusTab,
+                activeStatusTab === tab.value && styles.statusTabActive,
               ]}
+              onPress={() => setStatusTab(tab.value)}
             >
-              {tab.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+              <Text
+                style={[
+                  styles.statusTabText,
+                  activeStatusTab === tab.value && styles.statusTabTextActive,
+                ]}
+              >
+                {tab.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
 
       {/* Lead count row - occupies space even when loading to prevent jumps */}
       <View style={{ minHeight: 20 }}>
@@ -762,7 +764,12 @@ const styles = StyleSheet.create({
   clearSearchButton: {
     padding: 4,
   },
+  statusTabsWrapper: {
+    height: 46,
+    justifyContent: 'center',
+  },
   statusTabsScroll: {
+    flexGrow: 0,
     flexShrink: 0,
   },
   statusTabsRow: {
