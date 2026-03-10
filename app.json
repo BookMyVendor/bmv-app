@@ -24,8 +24,10 @@
       },
       "icon": "./assets/images/bmv_internal_logo.png",
       "navigationBar": {
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#ffffff",
+        "enforceContrast": false
       },
+      "edgeToEdge": true,
       "package": "com.bnt.bookmyvendors"
     },
     "web": {
