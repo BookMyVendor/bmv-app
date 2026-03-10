@@ -385,9 +385,18 @@ export default function BusinessDetailsScreen() {
 
       setImages(allImages);
 
-      // Load categories first, then mappings
-      const fetchedBusinessCategories = await loadCategories();
-      // Load existing category mappings (this will set selectedCategoryIds)
+      // Run category chain and other independent fetches in parallel
+      const { getBusinessPackages } = await import('../lib/packageApi');
+      const [fetchedBusinessCategories, , packagesRes] = await Promise.all([
+        // Group A: categories (sequential chain handled inside)
+        loadCategories(),
+        // Group B: verification documents (independent)
+        loadVerificationDocuments(),
+        // Group C: packages (independent)
+        getBusinessPackages(id),
+      ]);
+
+      // Load existing category mappings after categories are ready
       const { businessIds } = await loadCategoryMappings();
 
       // After mappings are loaded, determine root category
@@ -414,14 +423,8 @@ export default function BusinessDetailsScreen() {
         }
       }
 
-      // Load verification documents
-      await loadVerificationDocuments();
-
-      // Load packages and extract price info
-      // We manually call getBusinessPackages here so we can use the result immediately
-      const { getBusinessPackages } = await import('../lib/packageApi');
-      const { data: packagesData } = await getBusinessPackages(id);
-
+      // Process packages result
+      const { data: packagesData } = packagesRes;
       const activePackages = (packagesData || []).filter((pkg: any) => pkg.is_active !== false);
       setPackages(activePackages);
 
@@ -3631,7 +3634,10 @@ export default function BusinessDetailsScreen() {
 
               <ScrollView style={styles.optionsList}>
                 {filteredCities.map((city) => {
-                  const isSelected = editData.operating_locations?.includes(city);
+                  // 'Pan India' is stored as '*' in operating_locations
+                  const isSelected = city === 'Pan India'
+                    ? editData.operating_locations?.includes('*')
+                    : editData.operating_locations?.includes(city);
                   return (
                     <TouchableOpacity
                       key={city}
