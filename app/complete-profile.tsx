@@ -351,8 +351,6 @@ export default function CompleteProfileScreen() {
       console.log('📤 Step 5: Refreshing profile');
       await refreshProfile();
 
-      // Wait longer to ensure profile state is updated in AuthContext
-      await new Promise(resolve => setTimeout(resolve, 500));
 
       // Check if user already has a business
       const { data: existingBusinesses, error: checkBusinessError } = await supabaseCore
@@ -366,7 +364,7 @@ export default function CompleteProfileScreen() {
         router.replace('/(tabs)');
       } else {
         console.log('✅ No business found - navigating to business-registration');
-        router.push('/business-registration');
+        router.replace('/business-registration');
       }
     } catch (error: any) {
       console.error('❌ Profile submission error:', error);

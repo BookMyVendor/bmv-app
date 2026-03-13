@@ -15,6 +15,7 @@ SplashScreen.preventAutoHideAsync();
 
 const ONBOARDING_STORAGE_KEY = 'has_seen_onboarding';
 const TERMS_ACCEPTANCE_KEY = 'vendor_terms_accepted';
+const SKIP_BUSINESS_REGISTRATION_KEY = 'skip_business_registration';
 
 function RootLayoutNav() {
   const { session, profile, loading, isNewUser } = useAuth();
@@ -23,22 +24,26 @@ function RootLayoutNav() {
   const [initialLoad, setInitialLoad] = useState(true);
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState<boolean | null>(null);
   const [termsAccepted, setTermsAccepted] = useState<boolean | null>(null);
+  const [skipBusinessRegistration, setSkipBusinessRegistration] = useState<boolean | null>(null);
   const [isCheckingTerms, setIsCheckingTerms] = useState(false);
 
   // Function to check storage values
   const checkStorage = useCallback(async () => {
     try {
-      const [onboardingValue, termsValue] = await Promise.all([
+      const [onboardingValue, termsValue, skipRegValue] = await Promise.all([
         AsyncStorage.getItem(ONBOARDING_STORAGE_KEY),
         AsyncStorage.getItem(TERMS_ACCEPTANCE_KEY),
+        AsyncStorage.getItem(SKIP_BUSINESS_REGISTRATION_KEY),
       ]);
       setHasSeenOnboarding(onboardingValue === 'true');
       setTermsAccepted(termsValue === 'true');
-      console.log('[STORAGE] Terms accepted:', termsValue === 'true', 'Onboarding seen:', onboardingValue === 'true');
+      setSkipBusinessRegistration(skipRegValue === 'true');
+      console.log('[STORAGE] Terms accepted:', termsValue === 'true', 'Onboarding seen:', onboardingValue === 'true', 'Skip Business Reg:', skipRegValue === 'true');
     } catch (error) {
       console.error('Error checking storage:', error);
       setHasSeenOnboarding(false);
       setTermsAccepted(false);
+      setSkipBusinessRegistration(false);
     }
   }, []);
 
@@ -173,13 +178,22 @@ function RootLayoutNav() {
         return;
       }
 
-      // EXISTING USER or PROFILE COMPLETE - route to dashboard
+      // EXISTING USER or PROFILE COMPLETE - check for business requirement
       if (session && isProfileComplete) {
-        console.log('[NAV] User has complete profile - navigating to dashboard');
+        const hasBusiness = profile?.has_business;
 
-        // Don't redirect if already on appropriate screen
-        if (inAuthGroup || inTermsAndConditions || inCompleteProfile || inOnboarding) {
-          console.log('[NAV] User profile complete - redirecting to dashboard');
+        if (!hasBusiness && !skipBusinessRegistration) {
+          // If profile is complete but no business exists, they must go to registration
+          if (!inBusinessReg) {
+            console.log('[NAV] Profile complete but no business - redirecting to registration');
+            router.replace('/business-registration');
+          }
+          return;
+        }
+
+        // Only redirect to dashboard if they are coming from an setup/auth screen
+        if (inAuthGroup || inTermsAndConditions || inOnboarding || inCompleteProfile) {
+          console.log('[NAV] User has profile and business - redirecting to dashboard');
           router.replace('/(tabs)');
         }
         return;
@@ -187,7 +201,7 @@ function RootLayoutNav() {
     };
 
     hideSplashAndNavigate();
-  }, [session, profile?.id, profile?.first_name, profile?.last_name, loading, segments, hasSeenOnboarding, termsAccepted, initialLoad]);
+  }, [session, profile?.id, profile?.first_name, profile?.last_name, loading, segments, hasSeenOnboarding, termsAccepted, skipBusinessRegistration, initialLoad]);
 
   // Show gradient splash screen during initial load
   if (loading && initialLoad) {

@@ -25,7 +25,6 @@ import VerificationStep, { VerificationStepRef } from '../components/registratio
 import PortfolioSocialStep from '../components/registration/PortfolioSocialStep';
 import { pickMultipleImages, uploadMultipleBusinessImages, uploadMultipleVerificationDocuments, UploadDocumentData, uploadBusinessImage, setCoverImage } from '../lib/businessApi';
 import Dropdown from '../components/Dropdown';
-import Logo from '../components/Logo';
 import { validateEmail, getEmailError } from '../lib/validation';
 import { createPackage } from '../lib/packageApi';
 import ScreenBackground from '../components/ScreenBackground';
@@ -37,6 +36,7 @@ interface BusinessData {
   contactPersonRole?: string; // Add this
   email: string;
   phoneNumber: string;
+  businessType?: 'services' | 'rental';
   selectedRootCategoryId?: string | null;
   selectedCategoryIds?: string[];
   selectedEventIds?: string[];
@@ -65,14 +65,15 @@ interface BusinessData {
 
 const STORAGE_KEY = 'business_registration_data';
 const STORAGE_PAGE_KEY = 'business_registration_page';
+const SKIP_BUSINESS_REGISTRATION_KEY = 'skip_business_registration';
 
 export default function BusinessRegistrationScreen() {
   const [currentPage, setCurrentPage] = useState(0);
-  const [businessData, setBusinessData] = useState<Partial<BusinessData>>({});
+  const [businessData, setBusinessData] = useState<Partial<BusinessData>>({ businessType: 'services' });
   const [submitting, setSubmitting] = useState(false);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [isRestored, setIsRestored] = useState(false);
-  const { user, profile } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const router = useRouter();
   const basicInfoStepRef = useRef<BasicInformationStepRef>(null);
   const servicesStepRef = useRef<ServicesExperienceStepRef>(null);
@@ -107,12 +108,20 @@ export default function BusinessRegistrationScreen() {
           const savedPage = await AsyncStorage.getItem(STORAGE_PAGE_KEY);
 
           if (savedData) {
-            const parsedData = JSON.parse(savedData);
-            setBusinessData(parsedData);
+            try {
+              const parsedData = JSON.parse(savedData);
+              setBusinessData({ businessType: 'services', ...parsedData });
+            } catch (e) {
+              setBusinessData({ businessType: 'services' });
+            }
+          } else {
+            setBusinessData({ businessType: 'services' });
           }
 
           if (savedPage) {
             setCurrentPage(parseInt(savedPage, 10));
+          } else {
+            setCurrentPage(0);
           }
 
           setIsRestored(true);
@@ -443,17 +452,23 @@ export default function BusinessRegistrationScreen() {
               text: 'Cancel',
               style: 'destructive',
               onPress: async () => {
-                // Clear saved data when user cancels
-                await clearSavedData();
-                console.log('Navigating to dashboard after cancel');
-                router.replace('/(tabs)');
+                  // Clear saved data and set skip flag when user cancels
+                  await Promise.all([
+                    clearSavedData(),
+                    AsyncStorage.setItem(SKIP_BUSINESS_REGISTRATION_KEY, 'true')
+                  ]);
+                  console.log('Navigating to dashboard after cancel');
+                  router.replace('/(tabs)');
               },
             },
           ]
         );
       } else {
-        // No data entered, clear saved data and navigate away
-        clearSavedData().then(() => {
+        // No data entered, clear saved data, set skip flag and navigate away
+        Promise.all([
+          clearSavedData(),
+          AsyncStorage.setItem(SKIP_BUSINESS_REGISTRATION_KEY, 'true')
+        ]).then(() => {
           console.log('Navigating to dashboard (no data entered)');
           router.replace('/(tabs)');
         }).catch(() => {
@@ -649,6 +664,21 @@ export default function BusinessRegistrationScreen() {
       if (businessError) throw businessError;
       if (!createdBusiness) throw new Error('Failed to create business');
 
+      // Step 2: Save businessType to vendor_business_form_data
+      if (businessData.businessType) {
+        const { error: formError } = await supabaseCore
+          .from('vendor_business_form_data')
+          .insert({
+            business_id: createdBusiness.id,
+            field_name: 'businessType',
+            field_value: businessData.businessType
+          });
+        
+        if (formError) {
+          console.error('Error saving businessType:', formError);
+        }
+      }
+
       // Step 3: Upload cover photo if provided (after business is created)
       if (businessData.coverPhotoUri) {
         try {
@@ -795,6 +825,15 @@ export default function BusinessRegistrationScreen() {
 
       // Clear saved form data before navigating
       await clearSavedData();
+      
+      // Reset local state to ensure next registration starts fresh
+      setBusinessData({ businessType: 'services' });
+      setCurrentPage(0);
+      setIsRestored(false); // Force re-restore check next time
+
+      // Update profile in AuthContext to include the new business flag
+      await refreshProfile();
+
       router.replace('/(tabs)');
     } catch (error: any) {
       console.error('Error submitting business:', error);
@@ -879,7 +918,6 @@ export default function BusinessRegistrationScreen() {
       >
         <View style={styles.header}>
           <View style={styles.headerTop}>
-            <Logo size={48} style={styles.headerLogo} />
             <View style={styles.headerTextContainer}>
               <Text style={styles.title}>{steps[currentPage].title}</Text>
               <Text style={styles.subtitle}>{steps[currentPage].subtitle}</Text>

@@ -22,7 +22,6 @@ import {
   Lead,
 } from '../types/leads';
 import Dropdown from '../components/Dropdown';
-import Logo from '../components/Logo';
 import { validateEmail, getEmailError } from '../lib/validation';
 import { stripCountryCode } from '../lib/formatters';
 import ScreenBackground from '../components/ScreenBackground';
@@ -330,7 +329,6 @@ export default function LeadFormScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <ArrowLeft size={24} color="#007AFF" strokeWidth={2} />
         </TouchableOpacity>
-        <Logo size={38} style={styles.headerLogo} />
         <Text style={styles.headerTitle}>
           {isEditMode ? 'Edit Lead' : 'Add New Lead'}
         </Text>

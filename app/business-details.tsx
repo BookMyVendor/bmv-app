@@ -17,6 +17,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -39,6 +40,7 @@ import {
   Package,
   MoreVertical,
   Search,
+  WifiOff,
 } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { supabaseCore } from '../lib/supabase';
@@ -68,10 +70,7 @@ import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '../lib/docu
 import { validatePincode } from '../lib/pincodeValidation';
 import { validateEmail, getEmailError } from '../lib/validation';
 import { stripCountryCode } from '../lib/formatters';
-import Logo from '../components/Logo';
 import Dropdown from '../components/Dropdown';
-import PackageList from '../components/packages/PackageList';
-import { Colors } from '../constants/theme';
 import ScreenBackground from '../components/ScreenBackground';
 
 const EXPERIENCE_OPTIONS = [
@@ -189,6 +188,7 @@ export default function BusinessDetailsScreen() {
   const [activeSection, setActiveSection] = useState<SectionType>('gallery');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
 
   const [showOfferModal, setShowOfferModal] = useState(false);
   const [showImagePreview, setShowImagePreview] = useState(false);
@@ -243,6 +243,7 @@ export default function BusinessDetailsScreen() {
   const [loadingCategories, setLoadingCategories] = useState(false);
   const [isCategoriesExpanded, setIsCategoriesExpanded] = useState(false);
   const [isEventsExpanded, setIsEventsExpanded] = useState(false);
+  const [businessType, setBusinessType] = useState<'services' | 'rental'>('services');
 
   // Temporary modal state - only committed when Done is clicked
   const [tempSelectedRootCategoryId, setTempSelectedRootCategoryId] = useState<string | null>(null);
@@ -331,13 +332,35 @@ export default function BusinessDetailsScreen() {
     try {
       setLoading(true);
 
+      // Check cache first
+      try {
+        const cachedBusiness = await AsyncStorage.getItem(`business_details_${id}`);
+        if (cachedBusiness) {
+          const parsedBusiness = JSON.parse(cachedBusiness);
+          setBusiness(parsedBusiness);
+          const dataToEdit = parsedBusiness ? { ...parsedBusiness } : {};
+          if (dataToEdit.contact_person_phone) {
+            dataToEdit.contact_person_phone = stripCountryCode(dataToEdit.contact_person_phone);
+          }
+          setEditData(dataToEdit);
+          setLoading(false); // Stop loading so user sees cached data immediately
+        }
+      } catch (cacheError) {
+        console.error("Cache read error:", cacheError);
+      }
+
       // 1. Fetch core business details FIRST and render immediately
       const businessRes = await getBusinessDetails(id);
 
       if (businessRes.error) throw businessRes.error;
 
       setBusiness(businessRes.data);
-      const dataToEdit = { ...businessRes.data } || {};
+      setIsOffline(false);
+      try {
+        AsyncStorage.setItem(`business_details_${id}`, JSON.stringify(businessRes.data));
+      } catch (e) {}
+
+      const dataToEdit = businessRes.data ? { ...businessRes.data } : {};
       if (dataToEdit.contact_person_phone) {
         dataToEdit.contact_person_phone = stripCountryCode(dataToEdit.contact_person_phone);
       }
@@ -385,19 +408,11 @@ export default function BusinessDetailsScreen() {
 
       setImages(allImages);
 
-      // Run category chain and other independent fetches in parallel
-      const { getBusinessPackages } = await import('../lib/packageApi');
-      const [fetchedBusinessCategories, , packagesRes] = await Promise.all([
-        // Group A: categories (sequential chain handled inside)
-        loadCategories(),
-        // Group B: verification documents (independent)
-        loadVerificationDocuments(),
-        // Group C: packages (independent)
-        getBusinessPackages(id),
-      ]);
+      // Load existing category mappings (this will determine businessType)
+      const { businessIds, businessType: determinedType } = await loadCategoryMappings();
 
-      // Load existing category mappings after categories are ready
-      const { businessIds } = await loadCategoryMappings();
+      // Load categories using the determined businessType
+      const fetchedBusinessCategories = await loadCategories(determinedType);
 
       // After mappings are loaded, determine root category
       if (businessIds.length > 0) {
@@ -423,8 +438,14 @@ export default function BusinessDetailsScreen() {
         }
       }
 
-      // Process packages result
-      const { data: packagesData } = packagesRes;
+      // Load verification documents
+      await loadVerificationDocuments();
+
+      // Load packages and extract price info
+      // We manually call getBusinessPackages here so we can use the result immediately
+      const { getBusinessPackages } = await import('../lib/packageApi');
+      const { data: packagesData } = await getBusinessPackages(id);
+
       const activePackages = (packagesData || []).filter((pkg: any) => pkg.is_active !== false);
       setPackages(activePackages);
 
@@ -447,7 +468,8 @@ export default function BusinessDetailsScreen() {
       }
     } catch (error: any) {
       console.error('Error loading business data:', error);
-      // Only show alert if we haven't loaded the business yet, otherwise it's a minor error
+      setIsOffline(true);
+      // Only show alert if we haven't loaded the business yet (from cache), otherwise it's a minor error
       if (!business) {
         Alert.alert('Error', error.message || 'Failed to load business details');
       }
@@ -458,7 +480,7 @@ export default function BusinessDetailsScreen() {
     }
   };
 
-  const loadCategoryMappings = async (): Promise<{ businessIds: string[]; eventIds: string[] }> => {
+  const loadCategoryMappings = async (): Promise<{ businessIds: string[]; eventIds: string[]; businessType: 'services' | 'rental' }> => {
     try {
       const { data: mappings, error } = await supabaseCore
         .from('vendor_business_category_mappings')
@@ -467,21 +489,23 @@ export default function BusinessDetailsScreen() {
 
       if (error) {
         console.error('Error loading category mappings:', error);
-        return { businessIds: [], eventIds: [] };
+        return { businessIds: [], eventIds: [], businessType: 'services' };
       }
+
+      let determinedBusinessType: 'services' | 'rental' = 'services';
 
       if (mappings && mappings.length > 0) {
         const allCategoryIds = mappings.map((m) => m.category_id);
 
-        // Fetch categories to determine their types
+        // Fetch categories to determine their types and business model
         const { data: categories, error: catError } = await supabaseCore
           .from('categories')
-          .select('id, category_type, category_level, parent_category_id')
+          .select('id, category_type, category_level, parent_category_id, business_model')
           .in('id', allCategoryIds);
 
         if (catError) {
           console.error('Error loading categories:', catError);
-          return { businessIds: [], eventIds: [] };
+          return { businessIds: [], eventIds: [], businessType: 'services' };
         }
 
         // Separate business and event categories
@@ -491,37 +515,55 @@ export default function BusinessDetailsScreen() {
         categories?.forEach((cat) => {
           if (cat.category_type === 'business') {
             businessCategoryIds.push(cat.id);
+            // Dynamic logic: if ANY category is rental, business type is rental
+            if (cat.business_model === 'rental') {
+              determinedBusinessType = 'rental';
+            }
           } else if (cat.category_type === 'event') {
             eventCategoryIds.push(cat.id);
           }
         });
 
+        setBusinessType(determinedBusinessType);
+        setEditData((prev: any) => ({ ...prev, businessType: determinedBusinessType }));
         setSelectedCategoryIds(businessCategoryIds);
         setSelectedEventIds(eventCategoryIds);
 
-        return { businessIds: businessCategoryIds, eventIds: eventCategoryIds };
+        return { 
+          businessIds: businessCategoryIds, 
+          eventIds: eventCategoryIds, 
+          businessType: determinedBusinessType 
+        };
       }
 
-      return { businessIds: [], eventIds: [] };
+      setBusinessType('services');
+      return { businessIds: [], eventIds: [], businessType: 'services' };
     } catch (error) {
       console.error('Error loading category mappings:', error);
-      return { businessIds: [], eventIds: [] };
+      return { businessIds: [], eventIds: [], businessType: 'services' };
     }
   };
 
 
 
-  const loadCategories = async () => {
+  const loadCategories = async (type?: 'services' | 'rental') => {
     let businessCatsResult: any[] = [];
     try {
       setLoadingCategories(true);
 
       // Fetch all business categories with hierarchy info
-      const { data: businessCats, error: businessError } = await supabaseCore
+      let businessQuery = supabaseCore
         .from('categories')
         .select('id, name, icon, parent_category_id, category_level, sort_order')
         .eq('category_type', 'business')
-        .eq('visible', true)
+        .eq('visible', true);
+
+      // If rental type is selected, filter by business_model = 'rental'
+      if (type === 'rental') {
+        businessQuery = businessQuery.eq('business_model', 'rental');
+      }
+
+      const { data: businessCats, error: businessError } = await businessQuery
         .order('sort_order', { ascending: true });
 
       if (businessError) {
@@ -550,6 +592,17 @@ export default function BusinessDetailsScreen() {
       setLoadingCategories(false);
     }
     return businessCatsResult;
+  };
+
+  const handleBusinessTypeChange = (type: 'services' | 'rental') => {
+    setBusinessType(type);
+    setEditData((prev: any) => ({ ...prev, businessType: type }));
+    // Reset category selections when type changes
+    setSelectedRootCategoryId(null);
+    setSelectedCategoryIds([]);
+    setExpandedCategoryIds(new Set());
+    // Re-fetch categories with new filter
+    loadCategories(type);
   };
 
   const onRefresh = () => {
@@ -877,7 +930,7 @@ export default function BusinessDetailsScreen() {
             {!hasChildren && <View style={styles.expandButton} />}
 
             {isRoot ? (
-              <View style={styles.radioButton}>
+              <View style={styles.categoryRadioButton}>
                 {isRootSelected ? (
                   <View style={styles.radioButtonSelected}>
                     <View style={styles.radioButtonInner} />
@@ -1929,7 +1982,7 @@ export default function BusinessDetailsScreen() {
       setSavingDetails(true);
 
       // Extract base_price and pricing_unit from editData as they are not columns on vendor_businesses
-      const { base_price, pricing_unit, ...businessUpdateData } = editData;
+      const { base_price, pricing_unit, businessType: editDataBusinessType, ...businessUpdateData } = editData;
 
       // Update business details
       const finalUpdateData = {
@@ -1941,6 +1994,8 @@ export default function BusinessDetailsScreen() {
       const { data, error } = await updateBusinessDetails(id, finalUpdateData);
       if (error) throw error;
       setBusiness(data);
+
+
 
       // Handle Package Update/Creation using the extracted price fields
       if (base_price && pricing_unit) {
@@ -2172,7 +2227,8 @@ export default function BusinessDetailsScreen() {
 
   return (
     <ScreenBackground style={styles.container}>
-      <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
+      {/* ── Top Bar ── */}
+      <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity
           style={styles.backBtn}
           onPress={() => {
@@ -2183,99 +2239,55 @@ export default function BusinessDetailsScreen() {
             }
           }}
         >
-          <ArrowLeft size={24} color="#007AFF" strokeWidth={2} />
+          <ArrowLeft size={22} color="#007AFF" strokeWidth={2.2} />
         </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Logo size={38} style={styles.headerLogo} />
-          <View style={styles.headerTitleContainer}>
-            <Text style={styles.headerTitle} numberOfLines={1}>
-              {business.business_name}
+        <View style={styles.topBarCenter}>
+          <Text style={styles.topBarTitle} numberOfLines={1}>
+            {business.business_name}
+          </Text>
+          {business.vendor_service_category ? (
+            <Text style={styles.topBarSubtitle} numberOfLines={1}>
+              {business.vendor_service_category}
             </Text>
-            {business.vendor_service_category ? (
-              <Text style={styles.headerSubtitle} numberOfLines={1}>
-                {business.vendor_service_category}
-              </Text>
-            ) : null}
-          </View>
+          ) : null}
         </View>
+        {/* Right placeholder to balance the back button */}
+        <View style={{ width: 36 }} />
       </View>
+
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <WifiOff size={16} color="#B45309" />
+          <Text style={styles.offlineText}>You're currently offline. Viewing cached data.</Text>
+        </View>
+      )}
+
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
         keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 60 : 0}
       >
-        <View style={styles.tabContainer}>
-          {/*
+        {/* ── Modern Tab Bar ── */}
+        <View style={styles.tabsContainer}>
           <TouchableOpacity
-            style={[
-              styles.tab,
-              activeSection === 'offers' && styles.activeTab,
-            ]}
-            onPress={() => setActiveSection('offers')}
-          >
-            <Tag size={20} color={activeSection === 'offers' ? '#fff' : 'rgba(255,255,255,0.7)'} />
-            <Text
-              style={[
-                styles.tabText,
-                activeSection === 'offers' && styles.activeTabText,
-              ]}
-            >
-              Offers
-            </Text>
-          </TouchableOpacity>
-          */}
-
-          <TouchableOpacity
-            style={[
-              styles.tab,
-              activeSection === 'gallery' && styles.activeTab,
-            ]}
+            style={[styles.tab, activeSection === 'gallery' && styles.tabActive]}
             onPress={() => setActiveSection('gallery')}
+            activeOpacity={0.75}
           >
-            <ImageIcon size={20} color={activeSection === 'gallery' ? '#fff' : 'rgba(255,255,255,0.7)'} />
-            <Text
-              style={[
-                styles.tabText,
-                activeSection === 'gallery' && styles.activeTabText,
-              ]}
+            <ImageIcon size={16} color={activeSection === 'gallery' ? '#1a1a1a' : '#999'} strokeWidth={2} />
+            <Text style={[styles.tabText, activeSection === 'gallery' && styles.tabTextActive]}
               numberOfLines={1}
             >
               Gallery
             </Text>
           </TouchableOpacity>
-          {/*
-        <TouchableOpacity
-          style={[
-            styles.tab,
-            activeSection === 'packages' && styles.activeTab,
-          ]}
-          onPress={() => setActiveSection('packages')}
-        >
-          <Package size={20} color={activeSection === 'packages' ? '#fff' : 'rgba(255,255,255,0.7)'} />
-          <Text
-            style={[
-              styles.tabText,
-              activeSection === 'packages' && styles.activeTabText,
-            ]}
-            numberOfLines={1}
-          >
-            Packages
-          </Text>
-        </TouchableOpacity>
-        */}
           <TouchableOpacity
-            style={[
-              styles.tab,
-              activeSection === 'edit' && styles.activeTab,
-            ]}
+            style={[styles.tab, activeSection === 'edit' && styles.tabActive]}
             onPress={() => setActiveSection('edit')}
+            activeOpacity={0.75}
           >
-            <Edit size={20} color={activeSection === 'edit' ? '#fff' : 'rgba(255,255,255,0.7)'} />
-            <Text
-              style={[
-                styles.tabText,
-                activeSection === 'edit' && styles.activeTabText,
-              ]}
+            <Edit size={16} color={activeSection === 'edit' ? '#1a1a1a' : '#999'} strokeWidth={2} />
+            <Text style={[styles.tabText, activeSection === 'edit' && styles.tabTextActive]}
               numberOfLines={1}
             >
               Edit Details
@@ -2329,11 +2341,16 @@ export default function BusinessDetailsScreen() {
 
           {activeSection === 'gallery' && (
             <View style={styles.section}>
+              {/* Gallery header */}
               <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Business Gallery</Text>
+                <View>
+                  <Text style={styles.sectionTitle}>Business Gallery</Text>
+                  <Text style={styles.sectionSubtitle}>{images.length}/20 images uploaded</Text>
+                </View>
                 <View style={styles.buttonGroup}>
                   <TouchableOpacity
-                    style={[styles.addButton, styles.smallButton]}
+                    style={[styles.addButton, styles.smallButton,
+                    (uploading || uploadingMultiple || images.length >= 20) && styles.addButtonDisabled]}
                     onPress={handleUploadImage}
                     disabled={uploading || uploadingMultiple || images.length >= 20}
                   >
@@ -2341,13 +2358,14 @@ export default function BusinessDetailsScreen() {
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
                       <>
-                        <Plus size={18} color="#fff" />
+                        <Plus size={16} color="#fff" />
                         <Text style={styles.smallButtonText}>Single</Text>
                       </>
                     )}
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.addButton, styles.smallButton]}
+                    style={[styles.addButton, styles.smallButton,
+                    (uploading || uploadingMultiple || images.length >= 20) && styles.addButtonDisabled]}
                     onPress={handleUploadMultipleImages}
                     disabled={uploading || uploadingMultiple || images.length >= 20}
                   >
@@ -2355,7 +2373,7 @@ export default function BusinessDetailsScreen() {
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
                       <>
-                        <ImageIcon size={18} color="#fff" />
+                        <ImageIcon size={16} color="#fff" />
                         <Text style={styles.smallButtonText}>Multiple</Text>
                       </>
                     )}
@@ -2380,10 +2398,6 @@ export default function BusinessDetailsScreen() {
                   </View>
                 </View>
               )}
-
-              <Text style={styles.imageCounter}>
-                {images.length}/20 images uploaded
-              </Text>
 
               {images.length === 0 ? (
                 <View style={styles.emptyState}>
@@ -2492,10 +2506,15 @@ export default function BusinessDetailsScreen() {
 
           {activeSection === 'edit' && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Edit Business Details</Text>
+              <View style={styles.editPageHeader}>
+                <Text style={styles.sectionTitle}>Edit Business Details</Text>
+                <Text style={styles.sectionSubtitle}>Update your business information</Text>
+              </View>
 
               <View style={styles.editSection}>
                 <Text style={styles.editSectionTitle}>Basic Information</Text>
+
+
 
                 <View style={styles.editField}>
                   <Text style={[styles.editLabel, validationErrors.business_name && styles.editLabelError]}>Business Name *</Text>
@@ -2601,6 +2620,32 @@ export default function BusinessDetailsScreen() {
 
               <View style={styles.editSection}>
                 <Text style={styles.editSectionTitle}>Services & Experience</Text>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Business Type *</Text>
+                  <View style={styles.radioGroup}>
+                    <TouchableOpacity
+                      style={styles.radioButton}
+                      activeOpacity={0.7}
+                      onPress={() => handleBusinessTypeChange('services')}
+                    >
+                      <View style={[styles.radioOuter, businessType === 'services' && styles.radioOuterSelected]}>
+                        {businessType === 'services' && <View style={styles.radioInner} />}
+                      </View>
+                      <Text style={styles.radioText}>Services</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.radioButton}
+                      activeOpacity={0.7}
+                      onPress={() => handleBusinessTypeChange('rental')}
+                    >
+                      <View style={[styles.radioOuter, businessType === 'rental' && styles.radioOuterSelected]}>
+                        {businessType === 'rental' && <View style={styles.radioInner} />}
+                      </View>
+                      <Text style={styles.radioText}>Rental</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
 
                 <View style={styles.editField}>
                   <Text style={[styles.editLabel, (validationErrors.selectedCategoryIds || validationErrors.selectedRootCategoryId) && styles.editLabelError]}>Business Category *</Text>
@@ -3444,6 +3489,7 @@ export default function BusinessDetailsScreen() {
               style={[styles.saveButton, savingDetails && styles.saveButtonDisabled]}
               onPress={handleSaveDetails}
               disabled={savingDetails}
+              activeOpacity={0.85}
             >
               {savingDetails ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -3621,10 +3667,10 @@ export default function BusinessDetailsScreen() {
                 </TouchableOpacity>
               </View>
 
-              <View style={styles.searchContainer}>
+              <View style={styles.citySearchContainer}>
                 <Search size={20} color="#999" style={styles.searchIcon} />
                 <TextInput
-                  style={styles.modalSearchInput}
+                  style={styles.citySearchInput}
                   placeholder="Search cities..."
                   placeholderTextColor="#999"
                   value={citySearchQuery}
@@ -3634,7 +3680,6 @@ export default function BusinessDetailsScreen() {
 
               <ScrollView style={styles.optionsList}>
                 {filteredCities.map((city) => {
-                  // 'Pan India' is stored as '*' in operating_locations
                   const isSelected = city === 'Pan India'
                     ? editData.operating_locations?.includes('*')
                     : editData.operating_locations?.includes(city);
@@ -3663,7 +3708,7 @@ export default function BusinessDetailsScreen() {
                 })}
               </ScrollView>
 
-              <View style={[styles.modalFooter, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+              <View style={[styles.cityModalFooter, { paddingBottom: Math.max(insets.bottom, 20) }]}>
                 <TouchableOpacity
                   style={styles.doneButton}
                   onPress={() => setIsCityModalOpen(false)}
@@ -3682,65 +3727,76 @@ export default function BusinessDetailsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#f5f7fa',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#f5f7fa',
   },
   errorText: {
     fontSize: 16,
     color: '#666',
   },
-  header: {
+
+  // ─── Top Bar ───────────────────────────────────────────────────────────────
+  topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
-    paddingHorizontal: 20,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    backgroundColor: '#f5f7fa',
     zIndex: 10,
   },
   backBtn: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 4,
+    padding: 6,
   },
-  headerCenter: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  topBarCenter: {
     flex: 1,
-    gap: 0,
-    height: '100%',
+    alignItems: 'center',
+    paddingHorizontal: 8,
   },
-  headerLogo: {
-    marginRight: 4,
-    marginVertical: 0,
-  },
-  headerTitleContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    height: '100%',
-  },
-  headerTitle: {
-    fontSize: 18,
+  topBarTitle: {
+    fontSize: 17,
     fontWeight: '700',
     color: '#1a1a1a',
-    textAlignVertical: 'center',
-    includeFontPadding: false,
+    textAlign: 'center',
   },
-  headerSubtitle: {
-    fontSize: 13,
-    color: '#666',
-    lineHeight: 16,
-    textAlignVertical: 'center',
-    includeFontPadding: false,
+  topBarSubtitle: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+    marginTop: 1,
   },
-  tabContainer: {
+  offlineBanner: {
+    backgroundColor: '#FEF3C7',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
-    backgroundColor: '#52aad9',
-    paddingHorizontal: 4,
+  },
+  offlineText: {
+    color: '#B45309',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+
+  // ─── Tab Bar ────────────────────────────────────────────────────────────────
+  tabsContainer: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   tab: {
     flex: 1,
@@ -3748,52 +3804,63 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
-    paddingHorizontal: 8,
-    minWidth: 0, // Allow flex shrinking on iOS
+    borderRadius: 10,
     gap: 6,
+    minWidth: 0,
   },
-  activeTab: {
-    backgroundColor: 'rgba(255,255,255,0.25)',
+  tabActive: {
+    backgroundColor: '#D3D6DE',
   },
   tabText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: 'rgba(255,255,255,0.7)',
-    flexShrink: 1, // Allow text to shrink on iOS if needed
+    color: '#999',
+    flexShrink: 1,
   },
-  activeTabText: {
-    color: '#fff',
+  tabTextActive: {
+    color: '#1a1a1a',
   },
   content: {
     flex: 1,
   },
   section: {
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 20,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
     gap: 12,
     flexWrap: 'wrap',
   },
   sectionTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: '#1a1a1a',
-    flex: 1,
-    minWidth: 120,
-    marginRight: 8,
+    marginBottom: 2,
+  },
+  sectionSubtitle: {
+    fontSize: 12,
+    color: '#888',
+    fontWeight: '500',
+  },
+  editPageHeader: {
+    marginBottom: 16,
   },
   addButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
     paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 12,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+  },
+  addButtonDisabled: {
+    opacity: 0.5,
   },
   addButtonText: {
     color: '#fff',
@@ -3806,18 +3873,18 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   smallButton: {
-    paddingVertical: 8,
+    paddingVertical: 7,
     paddingHorizontal: 12,
   },
   smallButtonText: {
     color: '#fff',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
   },
   imageCounter: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 16,
+    fontSize: 13,
+    color: '#888',
+    marginBottom: 12,
   },
   progressContainer: {
     backgroundColor: '#f8f8f8',
@@ -3839,7 +3906,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
     borderRadius: 3,
   },
   emptyState: {
@@ -4017,7 +4084,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 8,
     left: 8,
-    backgroundColor: '#2563EB',
+    backgroundColor: '#6aa3ce',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 4,
@@ -4033,58 +4100,69 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 20,
-    marginBottom: 16,
+    marginBottom: 14,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
-    shadowRadius: 8,
+    shadowRadius: 6,
     elevation: 2,
   },
   editSectionTitle: {
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '700',
-    color: '#1a1a1a',
+    color: '#6aa3ce',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
     marginBottom: 16,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f2f5',
   },
   editField: {
     marginBottom: 16,
   },
   editLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 8,
+    color: '#555',
+    marginBottom: 7,
   },
   editInput: {
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#f7f8fa',
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: '#e8eaed',
     borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    fontSize: 15,
     color: '#1a1a1a',
   },
   textArea: {
     minHeight: 100,
     textAlignVertical: 'top',
-    paddingTop: 14,
+    paddingTop: 13,
   },
   saveButton: {
-    backgroundColor: '#2563EB',
-    borderRadius: 12,
+    backgroundColor: '#6aa3ce',
+    borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 8,
+    shadowColor: '#6aa3ce',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   saveButtonDisabled: {
-    backgroundColor: '#ccc',
+    backgroundColor: '#aaa',
+    shadowOpacity: 0,
+    elevation: 0,
   },
   saveButtonText: {
     fontSize: 16,
     fontWeight: '700',
     color: '#fff',
+    letterSpacing: 0.3,
   },
   inputActionRow: {
     flexDirection: 'row',
@@ -4100,9 +4178,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#f0f7ff',
+    backgroundColor: '#f0f6fb',
     borderWidth: 1,
-    borderColor: '#007AFF',
+    borderColor: '#6aa3ce',
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 16,
@@ -4111,7 +4189,7 @@ const styles = StyleSheet.create({
   inlineUploadButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#007AFF',
+    color: '#6aa3ce',
   },
   inlineDocumentsList: {
     marginTop: 12,
@@ -4259,7 +4337,7 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   submitButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
   },
   submitButtonText: {
     fontSize: 16,
@@ -4295,9 +4373,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#f7f8fa',
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: '#e8eaed',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -4325,10 +4403,10 @@ const styles = StyleSheet.create({
   selectedContainer: {
     marginBottom: 16,
     padding: 12,
-    backgroundColor: '#f0f7ff',
+    backgroundColor: '#f0f6fb',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#007AFF',
+    borderColor: '#6aa3ce',
   },
   selectedLabel: {
     fontSize: 14,
@@ -4346,7 +4424,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 6,
     borderWidth: 1,
-    borderColor: '#007AFF',
+    borderColor: '#6aa3ce',
     minHeight: 36,
   },
   selectedChipText: {
@@ -4413,7 +4491,7 @@ const styles = StyleSheet.create({
     borderTopColor: '#f0f0f0',
   },
   categoryModalButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
@@ -4438,7 +4516,7 @@ const styles = StyleSheet.create({
     marginRight: 6,
     marginTop: 0,
   },
-  radioButton: {
+  categoryRadioButton: {
     width: 24,
     height: 24,
     justifyContent: 'center',
@@ -4450,7 +4528,7 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 10,
     borderWidth: 2,
-    borderColor: '#007AFF',
+    borderColor: '#6aa3ce',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -4458,7 +4536,7 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
   },
   radioButtonOuter: {
     width: 20,
@@ -4478,7 +4556,7 @@ const styles = StyleSheet.create({
   checkboxSelected: {
     width: 22,
     height: 22,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
     borderRadius: 6,
     justifyContent: 'center',
     alignItems: 'center',
@@ -4504,7 +4582,7 @@ const styles = StyleSheet.create({
   },
   categoryNameSelected: {
     fontWeight: '600',
-    color: '#007AFF',
+    color: '#6aa3ce',
   },
   childrenContainer: {
     marginLeft: 12,
@@ -4532,7 +4610,7 @@ const styles = StyleSheet.create({
   },
   eventOptionTextSelected: {
     fontWeight: '600',
-    color: '#007AFF',
+    color: '#6aa3ce',
   },
   editHint: {
     fontSize: 12,
@@ -4549,8 +4627,8 @@ const styles = StyleSheet.create({
     paddingRight: 44,
   },
   inputValid: {
-    borderColor: '#34C759',
-    backgroundColor: '#f0fff4',
+    borderColor: '#6aa3ce',
+    backgroundColor: '#f0f6fb',
   },
   inputInvalid: {
     borderColor: '#FF3B30',
@@ -4704,19 +4782,39 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
+  citySearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    marginHorizontal: 20,
+    marginVertical: 12,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+  },
+  citySearchInput: {
+    flex: 1,
+    height: 48,
+    fontSize: 16,
+    color: '#1a1a1a',
+  },
   searchIcon: {
     marginRight: 8,
+  },
+  cityModalFooter: {
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
   },
   checkmark: {
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
     justifyContent: 'center',
     alignItems: 'center',
   },
   doneButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
     borderRadius: 12,
     height: 56,
     justifyContent: 'center',
@@ -4746,16 +4844,19 @@ const styles = StyleSheet.create({
     color: '#1a1a1a',
   },
   optionTextSelected: {
-    color: '#007AFF',
+    color: '#6aa3ce',
     fontWeight: '600',
   },
   cityOptionTextSelected: {
-    color: '#007AFF',
+    color: '#6aa3ce',
     fontWeight: '600',
   },
   stickyFooter: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    backgroundColor: '#f5f7fa',
+    borderTopWidth: 1,
+    borderTopColor: '#ececec',
   },
   documentTypeSection: {
     marginBottom: 16,
@@ -4795,10 +4896,10 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: '#f0f7ff',
+    backgroundColor: '#f0f6fb',
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: '#007AFF',
+    borderColor: '#6aa3ce',
   },
   addDocumentButtonDisabled: {
     opacity: 0.6,
@@ -4806,7 +4907,7 @@ const styles = StyleSheet.create({
   addDocumentButtonText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#007AFF',
+    color: '#6aa3ce',
   },
   documentsList: {
     gap: 8,
@@ -4880,11 +4981,54 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   suggestionChipSelected: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
+    borderColor: '#6aa3ce',
   },
   suggestionChipText: {
     fontSize: 13,
     color: '#666',
+  },
+  confirmModalButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cancelModalButtonText: {
+    color: '#666',
+  },
+  dangerModalButtonText: {
+    color: '#fff',
+  },
+  radioGroup: {
+    flexDirection: 'row',
+    gap: 24,
+    marginTop: 4,
+  },
+  radioButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  radioOuter: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioOuterSelected: {
+    borderColor: '#6aa3ce',
+  },
+  radioInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#6aa3ce',
+  },
+  radioText: {
+    fontSize: 15,
+    color: '#1a1a1a',
+    fontWeight: '500',
   },
 });
