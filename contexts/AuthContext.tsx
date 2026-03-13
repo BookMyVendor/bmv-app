@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import { Session, User } from '@supabase/supabase-js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { supabaseCore, supabaseCms, supabaseCrm } from '../lib/supabase';
 import { sendOTP, verifyOTP as verifyOTPApi, type VerifyOTPResponse } from '../lib/otpAuthApi';
@@ -25,6 +26,7 @@ interface UserProfile {
   image_file_id: string | null;
   terms_accepted: boolean | null;
   terms_accepted_at: string | null;
+  has_business?: boolean;
 }
 
 interface AuthContextType {
@@ -40,6 +42,7 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   refreshToken: () => Promise<void>;
+  isOffline: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -50,6 +53,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isNewUser, setIsNewUser] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const userRef = useRef<User | null>(null);
   const isLoggingOutRef = useRef<boolean>(false);
   const isRefreshingRef = useRef<boolean>(false);
@@ -63,16 +67,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      // Try to load cached profile first for faster UI and offline support
+      try {
+        const cachedStr = await AsyncStorage.getItem(`cached_profile_${userId}`);
+        if (cachedStr) {
+          // Set immediately so we don't wait for network
+          setProfile(JSON.parse(cachedStr));
+        }
+      } catch (e) {
+        console.log('[AUTH] Error loading cached profile:', e);
+      }
+
       const { data, error } = await supabaseCore
         .from('vendors')
-        .select('*')
+        .select(`
+          *,
+          vendor_businesses (id)
+        `)
         .eq('id', userId)
+        .limit(1, { foreignTable: 'vendor_businesses' })
         .maybeSingle();
 
       if (error) throw error;
-      setProfile(data);
+      
+      if (data) {
+        setIsOffline(false);
+        const profileData = {
+          ...data,
+          has_business: data.vendor_businesses && data.vendor_businesses.length > 0
+        };
+        setProfile(profileData);
+        // Cache the updated profile
+        AsyncStorage.setItem(`cached_profile_${userId}`, JSON.stringify(profileData)).catch(e => console.log('[AUTH] Error caching profile:', e));
+      } else {
+        setProfile(null);
+        AsyncStorage.removeItem(`cached_profile_${userId}`).catch(e => console.log('[AUTH] Error removing profile cache:', e));
+      }
     } catch (error) {
       console.error('Error fetching profile:', error);
+      setIsOffline(true);
+      // We already tried loading cache at the start. 
+      // If we failed here, we just retain the state (which might be the loaded cache).
     }
   };
 
@@ -118,13 +153,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             isRefreshingRef.current = true;
             try {
               const refreshResult = await refreshAccessToken();
-              if (!refreshResult.data) {
+              if (refreshResult.error?.code === 'NETWORK_ERROR') {
+                console.log('[AUTH] ⚠️ Network error during manual refresh. Keeping tokens for offline mode.');
+                setIsOffline(true);
+              } else if (!refreshResult.data) {
                 console.error('[AUTH] ❌ Manual refresh failed on boot, clearing session');
                 await clearTokens();
                 setLoading(false);
                 return;
+              } else {
+                console.log('[AUTH] ✅ Token refreshed successfully');
               }
-              console.log('[AUTH] ✅ Token refreshed successfully');
             } finally {
               isRefreshingRef.current = false;
             }
@@ -171,6 +210,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 setSession(session);
                 setUser(session.user);
                 userRef.current = session.user;
+                await AsyncStorage.setItem('current_user_id', session.user.id).catch(console.error);
 
                 console.log('[AUTH] 👤 Fetching user profile...');
                 await fetchProfile(session.user.id);
@@ -179,7 +219,77 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 isRefreshingRef.current = false;
               }
             } else {
-              console.log('[AUTH] ❌ Token validation failed (likely expired), code:', userError?.status, userError?.code);
+              console.log('[AUTH] ❌ Token validation failed, code:', userError?.status, userError?.code, userError?.message);
+
+              const isNetworkError = userError?.message?.toLowerCase().includes('fetch') || 
+                                     userError?.message?.toLowerCase().includes('network') ||
+                                     userError?.name === 'TypeError';
+
+              if (isNetworkError) {
+                console.log('[AUTH] ⚠️ Network error during validation, entering offline mode');
+                setIsOffline(true);
+                
+                // Attempt to restore offline session
+                const { data: { session: sbSession } } = await supabaseCore.auth.getSession();
+                let fallbackUser = sbSession?.user;
+                
+                // Fallback to decode JWT manually if needed
+                if (!fallbackUser) {
+                  try {
+                    // Try to get from AsyncStorage first
+                    const storedUserId = await AsyncStorage.getItem('current_user_id');
+                    if (storedUserId) {
+                       fallbackUser = {
+                         id: storedUserId,
+                         app_metadata: {},
+                         user_metadata: {},
+                         aud: 'authenticated',
+                         created_at: new Date().toISOString(),
+                       } as User;
+                    } else {
+                      // Fallback: decode JWT robustly
+                      const payloadBase64 = accessToken.split('.')[1];
+                      // Custom base64 decode since atob is not available in all RN environments
+                      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+                      let str = payloadBase64.replace(/=+$/, '').replace(/-/g, '+').replace(/_/g, '/');
+                      let output = '';
+                      for (let bc = 0, bs = 0, buffer, i = 0; (buffer = str.charAt(i++)); ~buffer && (bs = bc % 4 ? bs * 64 + buffer : buffer, bc++ % 4) ? output += String.fromCharCode(255 & bs >> (-2 * bc & 6)) : 0) {
+                        buffer = chars.indexOf(buffer);
+                      }
+                      const decodedPayload = JSON.parse(output);
+                      fallbackUser = {
+                        id: decodedPayload.sub,
+                        app_metadata: {},
+                        user_metadata: {},
+                        aud: 'authenticated',
+                        created_at: new Date().toISOString(),
+                      } as User;
+                    }
+                  } catch (e) {
+                    console.error('[AUTH] Failed to decode JWT for offline user', e);
+                  }
+                }
+
+                if (fallbackUser) {
+                   const session: Session = {
+                     access_token: accessToken,
+                     refresh_token: refreshTokenValue || '',
+                     expires_at: expiryTime ? Math.floor(expiryTime / 1000) : Math.floor(Date.now() / 1000) + 3600,
+                     expires_in: 3600,
+                     token_type: 'bearer',
+                     user: fallbackUser,
+                   };
+                   await setSessionOnAllClients(session);
+                   setSession(session);
+                   setUser(fallbackUser);
+                   userRef.current = fallbackUser;
+                   await fetchProfile(fallbackUser.id);
+                   console.log('[AUTH] ✅ Session restored in offline mode');
+                } else {
+                   console.error('[AUTH] ❌ Critical: Could not reconstruct user object for offline mode');
+                   await clearTokens();
+                }
+              } else {
 
               // Only attempt refresh if it's actually an expiry error
               const isExpiryError = userError?.message?.includes('expired') || userError?.status === 401 || userError?.status === 403;
@@ -190,7 +300,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 isRefreshingRef.current = true;
                 try {
                   const refreshResult = await refreshAccessToken();
-                  if (refreshResult.error) {
+                  if (refreshResult.error?.code === 'NETWORK_ERROR') {
+                    console.log('[AUTH] ⚠️ Network error during fallback refresh, entering offline mode');
+                    setIsOffline(true);
+                    // Use JWT decoding fallback
+                    try {
+                      let fallbackUser: User | undefined;
+                      const storedUserId = await AsyncStorage.getItem('current_user_id');
+                      if (storedUserId) {
+                        fallbackUser = {
+                          id: storedUserId,
+                          app_metadata: {},
+                          user_metadata: {},
+                          aud: 'authenticated',
+                          created_at: new Date().toISOString(),
+                        } as User;
+                      } else {
+                        const payloadBase64 = accessToken.split('.')[1];
+                        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+                        let str = payloadBase64.replace(/=+$/, '').replace(/-/g, '+').replace(/_/g, '/');
+                        let output = '';
+                        for (let bc = 0, bs = 0, buffer, i = 0; (buffer = str.charAt(i++)); ~buffer && (bs = bc % 4 ? bs * 64 + buffer : buffer, bc++ % 4) ? output += String.fromCharCode(255 & bs >> (-2 * bc & 6)) : 0) {
+                          buffer = chars.indexOf(buffer);
+                        }
+                        const decodedPayload = JSON.parse(output);
+                        fallbackUser = {
+                          id: decodedPayload.sub,
+                          app_metadata: {},
+                          user_metadata: {},
+                          aud: 'authenticated',
+                          created_at: new Date().toISOString(),
+                        } as User;
+                      }
+                      
+                      const restoredSession: Session = {
+                        access_token: accessToken,
+                        refresh_token: refreshTokenValue || '',
+                        expires_at: expiryTime ? Math.floor(expiryTime / 1000) : Math.floor(Date.now() / 1000) + 3600,
+                        expires_in: 3600,
+                        token_type: 'bearer',
+                        user: fallbackUser,
+                      };
+                      await setSessionOnAllClients(restoredSession);
+                      setSession(restoredSession);
+                      setUser(fallbackUser);
+                      userRef.current = fallbackUser;
+                      await fetchProfile(fallbackUser.id);
+                      console.log('[AUTH] ✅ Session restored in offline mode from expired token');
+                    } catch (e) {
+                      console.error('[AUTH] ❌ Failed to assemble offline session:', e);
+                      await clearTokens();
+                    }
+                  } else if (refreshResult.error) {
                     console.error('[AUTH] ❌ Fallback refresh failed:', refreshResult.error);
 
                     // Log additional context for TOKEN_EXPIRED errors
@@ -244,9 +405,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   isRefreshingRef.current = false;
                 }
               } else {
-                console.error('[AUTH] ❌ Non-expiry error during validation, clearing session to be safe');
+                console.error('[AUTH] ❌ Non-expiry error during validation, clearing session to be safe:', userError);
                 await clearTokens();
               }
+            }
             }
           } else {
             console.warn('[AUTH] ⚠️ No access token found despite hasTokens=true');
@@ -467,6 +629,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(user);
         setIsNewUser(newUser);
         userRef.current = user;
+        await AsyncStorage.setItem('current_user_id', user.id).catch(console.error);
 
         console.log('[AUTH] OTP Verification successful:', {
           userId: user.id,
@@ -551,6 +714,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (sessionError) return { error: sessionError };
 
+      await AsyncStorage.setItem('current_user_id', userId).catch(console.error);
       await fetchProfile(userId);
       return { error: null };
     } catch (error) {
@@ -617,8 +781,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Set logout flag to prevent any profile fetches
       isLoggingOutRef.current = true;
 
-      // Clear tokens from secure storage
+       // Clear tokens from secure storage
       await clearTokens();
+
+      // Clear cached profile and user id
+      if (userRef.current?.id) {
+        await AsyncStorage.removeItem(`cached_profile_${userRef.current.id}`).catch(() => {});
+      }
+      await Promise.all([
+        AsyncStorage.removeItem('current_user_id').catch(() => {}),
+        AsyncStorage.removeItem('skip_business_registration').catch(() => {}),
+      ]);
 
       // Clear local state immediately for immediate UI feedback
       setSession(null);
@@ -678,13 +851,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           rotated: !!result.data.refreshToken
         });
       } else if (result.error) {
-        console.error('[AUTH] Token refresh returned error:', result.error);
-        await signOut();
+        if (result.error.code === 'NETWORK_ERROR') {
+          console.log('[AUTH] ⚠️ Network error during token refresh. Remaining in offline mode.');
+          setIsOffline(true);
+        } else {
+          console.error('[AUTH] Token refresh returned error:', result.error);
+          await signOut();
+        }
       }
     } catch (error) {
       console.error('Token refresh failed:', error);
-      // If refresh fails, sign out
-      await signOut();
+      // Determine if error is network related
+      const isNetworkError = error instanceof TypeError || 
+                             (error as any)?.message?.toLowerCase().includes('network') || 
+                             (error as any)?.message?.toLowerCase().includes('fetch');
+      if (isNetworkError) {
+        console.log('[AUTH] ⚠️ Network error caught during token refresh. Remaining in offline mode.');
+        setIsOffline(true);
+      } else {
+        await signOut();
+      }
     } finally {
       isRefreshingRef.current = false;
     }
@@ -711,6 +897,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signOut,
         refreshProfile,
         refreshToken,
+        isOffline,
       }}
     >
       {children}

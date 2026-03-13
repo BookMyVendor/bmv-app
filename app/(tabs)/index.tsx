@@ -14,19 +14,18 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { TrendingUp, Calendar, Eye, X, ChevronRight, Bell } from 'lucide-react-native';
+import { TrendingUp, Calendar, Eye, X, ChevronRight, Bell, WifiOff } from 'lucide-react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabaseCore, supabaseCrm } from '../../lib/supabase';
 import { checkNotificationPermission, requestNotificationPermission } from '../../lib/pushNotifications';
 import { STATUS_OPTIONS, LeadStatus } from '../../types/leads';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
-import Logo from '../../components/Logo';
 import ScreenBackground from '../../components/ScreenBackground';
 
 interface Business {
   id: string;
   business_name: string;
-  vendor_service_category: string;
+  business_category: string;
   business_description: string;
   cover_photo_url: string | null;
   city: string;
@@ -72,6 +71,7 @@ export default function DashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [showFilterScrollIndicator, setShowFilterScrollIndicator] = useState(false);
   const [businessLeadCounts, setBusinessLeadCounts] = useState<Record<string, number>>({});
+  const [isOffline, setIsOffline] = useState(false);
   const filterScrollViewRef = useRef<ScrollView>(null);
   const { user } = useAuth();
   const router = useRouter();
@@ -134,6 +134,14 @@ export default function DashboardScreen() {
       setLoading(false);
       return;
     }
+
+    try {
+      const cachedStr = await AsyncStorage.getItem(`dashboard_businesses_${user.id}`);
+      if (cachedStr) {
+        setBusinesses(JSON.parse(cachedStr));
+      }
+    } catch { }
+
     try {
       const { data, error } = await supabaseCore
         .from('vendor_businesses')
@@ -150,26 +158,39 @@ export default function DashboardScreen() {
 
       if (error) throw error;
 
-      const formattedBusinesses = (data || []).map((business: any) => ({
-        ...business,
-        business_description: business.description,
-        vendor_service_category:
-          business.vendor_business_category_mappings?.[0]?.categories?.name || 'General',
-      }));
+      const formattedBusinesses = (data || []).map((business: any) => {
+        const category = business.vendor_business_category_mappings?.[0]?.categories?.name;
+
+        return {
+          ...business,
+          business_description: business.description,
+          business_category: category || 'General',
+        };
+      });
 
       setBusinesses(formattedBusinesses);
+      AsyncStorage.setItem(`dashboard_businesses_${user.id}`, JSON.stringify(formattedBusinesses)).catch(() => { });
+      setIsOffline(false);
 
       if (formattedBusinesses.length > 0) {
         fetchBusinessLeadCounts(formattedBusinesses.map((b: Business) => b.id));
       }
     } catch (error) {
       console.error('Error fetching businesses:', error);
+      setIsOffline(true);
     } finally {
       setLoading(false);
     }
   };
 
   const fetchBusinessLeadCounts = async (businessIds: string[]) => {
+    try {
+      const cachedStr = await AsyncStorage.getItem(`dashboard_business_counts_${user?.id}`);
+      if (cachedStr) {
+        setBusinessLeadCounts(JSON.parse(cachedStr));
+      }
+    } catch { }
+
     try {
       const counts: Record<string, number> = {};
       await Promise.all(
@@ -182,13 +203,24 @@ export default function DashboardScreen() {
         })
       );
       setBusinessLeadCounts(counts);
+      AsyncStorage.setItem(`dashboard_business_counts_${user?.id}`, JSON.stringify(counts)).catch(() => { });
+      setIsOffline(false);
     } catch (error) {
       console.error('Error fetching business lead counts:', error);
+      setIsOffline(true);
     }
   };
 
   const fetchLeadStats = async () => {
     if (!user?.id) return;
+
+    try {
+      const cachedStr = await AsyncStorage.getItem(`dashboard_lead_stats_${user.id}_${selectedStatuses.join(',')}`);
+      if (cachedStr) {
+        setLeadStats(JSON.parse(cachedStr));
+      }
+    } catch { }
+
     try {
       const { data: businessData } = await supabaseCore
         .from('vendor_businesses')
@@ -249,14 +281,19 @@ export default function DashboardScreen() {
         }
       });
 
-      setLeadStats({
+      const stats = {
         total: totalCount || 0,
         monthly: monthlyCount || 0,
         today: todayCount || 0,
         byStatus: statusCounts,
-      });
+      };
+
+      setLeadStats(stats);
+      AsyncStorage.setItem(`dashboard_lead_stats_${user.id}_${selectedStatuses.join(',')}`, JSON.stringify(stats)).catch(() => { });
+      setIsOffline(false);
     } catch (error) {
       console.error('Error fetching lead stats:', error);
+      setIsOffline(true);
     }
   };
 
@@ -273,7 +310,6 @@ export default function DashboardScreen() {
       {/* ── Header ── */}
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <View style={styles.headerLeft}>
-          <Logo size={38} style={styles.headerLogo} />
           <View>
             <Text style={styles.headerGreeting}>
               {getGreeting(user?.user_metadata?.full_name || user?.user_metadata?.name)}
@@ -285,6 +321,13 @@ export default function DashboardScreen() {
           <Bell size={20} color="#333" strokeWidth={1.8} />
         </TouchableOpacity>
       </View>
+
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <WifiOff size={16} color="#B45309" />
+          <Text style={styles.offlineText}>You're currently offline. Data may be outdated.</Text>
+        </View>
+      )}
 
       <ScrollView
         contentContainerStyle={styles.content}
@@ -478,7 +521,7 @@ export default function DashboardScreen() {
                       {business.business_name}
                     </Text>
                     <Text style={styles.businessCategory} numberOfLines={1}>
-                      {business.vendor_service_category}
+                      {business.business_category}
                     </Text>
                   </View>
 
@@ -487,7 +530,7 @@ export default function DashboardScreen() {
                     {businessLeadCounts[business.id] !== undefined && (
                       <View style={styles.leadsBadge}>
                         <Text style={styles.leadsBadgeText}>
-                          {businessLeadCounts[business.id]} leads
+                          {businessLeadCounts[business.id]} {businessLeadCounts[business.id] === 1 ? 'lead' : 'leads'}
                         </Text>
                       </View>
                     )}
@@ -500,10 +543,12 @@ export default function DashboardScreen() {
         )}
 
         {/* ── Quick Actions ── */}
-        <View style={[styles.section, { marginBottom: 12 }]}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
+        <View style={[styles.section]}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+          </View>
           <View style={styles.quickRow}>
-            <TouchableOpacity
+            {/* <TouchableOpacity
               style={styles.quickCard}
               activeOpacity={0.75}
               onPress={() => router.push('/leads')}
@@ -512,7 +557,7 @@ export default function DashboardScreen() {
                 <TrendingUp size={24} color="#7c5cfc" strokeWidth={2} />
               </View>
               <Text style={styles.quickLabel}>Add Lead</Text>
-            </TouchableOpacity>
+            </TouchableOpacity> */}
 
             <TouchableOpacity
               style={styles.quickCard}
@@ -528,7 +573,7 @@ export default function DashboardScreen() {
             <TouchableOpacity
               style={styles.quickCard}
               activeOpacity={0.75}
-              onPress={() => router.push('/leads')}
+              onPress={() => (router as any).push('/schedule')}
             >
               <View style={[styles.quickIconWrap, { backgroundColor: '#fef3dc' }]}>
                 <Calendar size={24} color="#FBBC04" strokeWidth={2} />
@@ -595,6 +640,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#ececec',
+  },
+  offlineBanner: {
+    backgroundColor: '#FEF3C7',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  offlineText: {
+    color: '#B45309',
+    fontSize: 13,
+    fontWeight: '500',
   },
 
   /* Content layout */

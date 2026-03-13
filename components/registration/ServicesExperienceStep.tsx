@@ -132,9 +132,24 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     },
   }));
 
+  const isInitialMount = useRef(true);
+
+  // Fetch categories on mount and re-fetch when business type changes
   useEffect(() => {
-    fetchCategories();
-  }, []);
+    fetchCategories(data.businessType);
+
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+    } else {
+      // Reset selected categories only when business type actually changes (not on initial mount)
+      setSelectedRootCategoryId(null);
+      setSelectedCategoryIds([]);
+      onUpdate({
+        selectedRootCategoryId: null,
+        selectedCategoryIds: [],
+      });
+    }
+  }, [data.businessType]);
 
   useEffect(() => {
     // Update parent component when selections change
@@ -164,16 +179,23 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     }
   }, [allBusinessCategories, selectedCategoryIds, selectedRootCategoryId]);
 
-  const fetchCategories = async () => {
+  const fetchCategories = async (businessType?: string) => {
     try {
       setLoading(true);
 
       // Fetch all business categories with hierarchy info
-      const { data: businessCats, error: businessError } = await supabaseCore
+      let businessQuery = supabaseCore
         .from('categories')
         .select('id, name, icon, parent_category_id, category_level, sort_order')
         .eq('category_type', 'business')
-        .eq('visible', true)
+        .eq('visible', true);
+
+      // If rental is selected, filter by business_model = 'rental'
+      if (businessType === 'rental') {
+        businessQuery = businessQuery.eq('business_model', 'rental');
+      }
+
+      const { data: businessCats, error: businessError } = await businessQuery
         .order('sort_order', { ascending: true });
 
       if (businessError) {
@@ -856,6 +878,47 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
   return (
     <View style={[styles.container, styles.content]}>
+      <View style={styles.field}>
+        <Text style={styles.label}>Business Type *</Text>
+        <View style={styles.businessTypeGroup}>
+          <TouchableOpacity
+            style={styles.businessTypeButton}
+            activeOpacity={0.7}
+            onPress={() => onUpdate({ businessType: 'services' })}
+          >
+            <View
+              style={[
+                styles.businessTypeRadioOuter,
+                data.businessType === 'services' && styles.businessTypeRadioOuterSelected,
+              ]}
+            >
+              {data.businessType === 'services' && (
+                <View style={styles.businessTypeRadioInner} />
+              )}
+            </View>
+            <Text style={styles.businessTypeRadioText}>Services</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.businessTypeButton}
+            activeOpacity={0.7}
+            onPress={() => onUpdate({ businessType: 'rental' })}
+          >
+            <View
+              style={[
+                styles.businessTypeRadioOuter,
+                data.businessType === 'rental' && styles.businessTypeRadioOuterSelected,
+              ]}
+            >
+              {data.businessType === 'rental' && (
+                <View style={styles.businessTypeRadioInner} />
+              )}
+            </View>
+            <Text style={styles.businessTypeRadioText}>Rental</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
       <View style={styles.field}>
         <Text style={[styles.label, (validationErrors.selectedRootCategoryId || validationErrors.selectedCategoryIds) && styles.labelError]}>Business Category *</Text>
         <Dropdown
@@ -1542,5 +1605,38 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#999',
     fontSize: 14,
+  },
+  businessTypeGroup: {
+    flexDirection: 'row',
+    gap: 24,
+    marginTop: 4,
+  },
+  businessTypeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  businessTypeRadioOuter: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  businessTypeRadioOuterSelected: {
+    borderColor: '#6aa3ce',
+  },
+  businessTypeRadioInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#6aa3ce',
+  },
+  businessTypeRadioText: {
+    fontSize: 15,
+    color: '#1a1a1a',
+    fontWeight: '500',
   },
 });

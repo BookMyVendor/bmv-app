@@ -11,9 +11,10 @@ import {
   TextInput,
   Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Phone, Mail, ChevronRight, Search, X, MoveVertical as MoreVertical, SquareCheck as CheckSquare, Square } from 'lucide-react-native';
+import { Phone, Mail, ChevronRight, Search, X, MoveVertical as MoreVertical, SquareCheck as CheckSquare, Square, WifiOff } from 'lucide-react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabaseCore, supabaseCrm } from '../../lib/supabase';
@@ -49,6 +50,7 @@ export default function LeadsScreen() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const { user } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -109,15 +111,27 @@ export default function LeadsScreen() {
         setLoading(true);
       }
 
-      const { data: businessData } = await supabaseCore
+      try {
+        const cachedLeadsStr = await AsyncStorage.getItem(`leads_data_${user?.id}`);
+        if (cachedLeadsStr) {
+          setLeads(JSON.parse(cachedLeadsStr));
+        }
+      } catch (cacheError) {
+        console.error('Error loading cached leads:', cacheError);
+      }
+
+      const { data: businessData, error: businessError } = await supabaseCore
         .from('vendor_businesses')
         .select('id, business_name, city')
         .eq('vendor_id', user?.id);
+
+      if (businessError) throw businessError;
 
       if (!businessData || businessData.length === 0) {
         setLeads([]);
         if (showLoading) setLoading(false);
         hasLoadedLeads.current = true;
+        setIsOffline(false);
         return;
       }
 
@@ -176,10 +190,16 @@ export default function LeadsScreen() {
       console.log(`✅ Fetched ${leadsWithDetails.length} leads`);
       console.log('Sample lead IDs:', leadsWithDetails.slice(0, 3).map(l => l.id));
       setLeads(leadsWithDetails);
+      setIsOffline(false);
+      AsyncStorage.setItem(`leads_data_${user?.id}`, JSON.stringify(leadsWithDetails)).catch(() => {});
       hasLoadedLeads.current = true;
     } catch (error) {
       console.error('❌ Error fetching leads:', error);
-      Alert.alert('Error', 'Failed to load leads. Please try again.');
+      setIsOffline(true);
+      // We don't alert here if we have cached leads to show
+      if (leads.length === 0) {
+        // Alert.alert('Error', 'Failed to load leads. Please try again.');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -564,7 +584,14 @@ export default function LeadsScreen() {
         )}
       </View>
 
-      {loading ? (
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <WifiOff size={16} color="#B45309" />
+          <Text style={styles.offlineText}>You're currently offline.</Text>
+        </View>
+      )}
+
+      {loading && leads.length === 0 ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
         </View>
@@ -693,7 +720,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#f0f0f0',
   },
   headerTitle: {
-    fontSize: 26,
+    fontSize: 18,
     fontWeight: '700',
     color: '#1a1a1a',
   },
@@ -716,6 +743,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#3D5AFE',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  offlineBanner: {
+    backgroundColor: '#FEF3C7',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  offlineText: {
+    color: '#B45309',
+    fontSize: 13,
+    fontWeight: '500',
   },
   bulkActionsBar: {
     flexDirection: 'row',

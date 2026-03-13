@@ -17,6 +17,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -39,6 +40,7 @@ import {
   Package,
   MoreVertical,
   Search,
+  WifiOff,
 } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { supabaseCore } from '../lib/supabase';
@@ -186,6 +188,7 @@ export default function BusinessDetailsScreen() {
   const [activeSection, setActiveSection] = useState<SectionType>('gallery');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
 
   const [showOfferModal, setShowOfferModal] = useState(false);
   const [showImagePreview, setShowImagePreview] = useState(false);
@@ -240,6 +243,7 @@ export default function BusinessDetailsScreen() {
   const [loadingCategories, setLoadingCategories] = useState(false);
   const [isCategoriesExpanded, setIsCategoriesExpanded] = useState(false);
   const [isEventsExpanded, setIsEventsExpanded] = useState(false);
+  const [businessType, setBusinessType] = useState<'services' | 'rental'>('services');
 
   // Temporary modal state - only committed when Done is clicked
   const [tempSelectedRootCategoryId, setTempSelectedRootCategoryId] = useState<string | null>(null);
@@ -328,13 +332,35 @@ export default function BusinessDetailsScreen() {
     try {
       setLoading(true);
 
+      // Check cache first
+      try {
+        const cachedBusiness = await AsyncStorage.getItem(`business_details_${id}`);
+        if (cachedBusiness) {
+          const parsedBusiness = JSON.parse(cachedBusiness);
+          setBusiness(parsedBusiness);
+          const dataToEdit = parsedBusiness ? { ...parsedBusiness } : {};
+          if (dataToEdit.contact_person_phone) {
+            dataToEdit.contact_person_phone = stripCountryCode(dataToEdit.contact_person_phone);
+          }
+          setEditData(dataToEdit);
+          setLoading(false); // Stop loading so user sees cached data immediately
+        }
+      } catch (cacheError) {
+        console.error("Cache read error:", cacheError);
+      }
+
       // 1. Fetch core business details FIRST and render immediately
       const businessRes = await getBusinessDetails(id);
 
       if (businessRes.error) throw businessRes.error;
 
       setBusiness(businessRes.data);
-      const dataToEdit = { ...businessRes.data } || {};
+      setIsOffline(false);
+      try {
+        AsyncStorage.setItem(`business_details_${id}`, JSON.stringify(businessRes.data));
+      } catch (e) {}
+
+      const dataToEdit = businessRes.data ? { ...businessRes.data } : {};
       if (dataToEdit.contact_person_phone) {
         dataToEdit.contact_person_phone = stripCountryCode(dataToEdit.contact_person_phone);
       }
@@ -382,10 +408,11 @@ export default function BusinessDetailsScreen() {
 
       setImages(allImages);
 
-      // Load categories first, then mappings
-      const fetchedBusinessCategories = await loadCategories();
-      // Load existing category mappings (this will set selectedCategoryIds)
-      const { businessIds } = await loadCategoryMappings();
+      // Load existing category mappings (this will determine businessType)
+      const { businessIds, businessType: determinedType } = await loadCategoryMappings();
+
+      // Load categories using the determined businessType
+      const fetchedBusinessCategories = await loadCategories(determinedType);
 
       // After mappings are loaded, determine root category
       if (businessIds.length > 0) {
@@ -441,7 +468,8 @@ export default function BusinessDetailsScreen() {
       }
     } catch (error: any) {
       console.error('Error loading business data:', error);
-      // Only show alert if we haven't loaded the business yet, otherwise it's a minor error
+      setIsOffline(true);
+      // Only show alert if we haven't loaded the business yet (from cache), otherwise it's a minor error
       if (!business) {
         Alert.alert('Error', error.message || 'Failed to load business details');
       }
@@ -452,7 +480,7 @@ export default function BusinessDetailsScreen() {
     }
   };
 
-  const loadCategoryMappings = async (): Promise<{ businessIds: string[]; eventIds: string[] }> => {
+  const loadCategoryMappings = async (): Promise<{ businessIds: string[]; eventIds: string[]; businessType: 'services' | 'rental' }> => {
     try {
       const { data: mappings, error } = await supabaseCore
         .from('vendor_business_category_mappings')
@@ -461,21 +489,23 @@ export default function BusinessDetailsScreen() {
 
       if (error) {
         console.error('Error loading category mappings:', error);
-        return { businessIds: [], eventIds: [] };
+        return { businessIds: [], eventIds: [], businessType: 'services' };
       }
+
+      let determinedBusinessType: 'services' | 'rental' = 'services';
 
       if (mappings && mappings.length > 0) {
         const allCategoryIds = mappings.map((m) => m.category_id);
 
-        // Fetch categories to determine their types
+        // Fetch categories to determine their types and business model
         const { data: categories, error: catError } = await supabaseCore
           .from('categories')
-          .select('id, category_type, category_level, parent_category_id')
+          .select('id, category_type, category_level, parent_category_id, business_model')
           .in('id', allCategoryIds);
 
         if (catError) {
           console.error('Error loading categories:', catError);
-          return { businessIds: [], eventIds: [] };
+          return { businessIds: [], eventIds: [], businessType: 'services' };
         }
 
         // Separate business and event categories
@@ -485,37 +515,55 @@ export default function BusinessDetailsScreen() {
         categories?.forEach((cat) => {
           if (cat.category_type === 'business') {
             businessCategoryIds.push(cat.id);
+            // Dynamic logic: if ANY category is rental, business type is rental
+            if (cat.business_model === 'rental') {
+              determinedBusinessType = 'rental';
+            }
           } else if (cat.category_type === 'event') {
             eventCategoryIds.push(cat.id);
           }
         });
 
+        setBusinessType(determinedBusinessType);
+        setEditData((prev: any) => ({ ...prev, businessType: determinedBusinessType }));
         setSelectedCategoryIds(businessCategoryIds);
         setSelectedEventIds(eventCategoryIds);
 
-        return { businessIds: businessCategoryIds, eventIds: eventCategoryIds };
+        return { 
+          businessIds: businessCategoryIds, 
+          eventIds: eventCategoryIds, 
+          businessType: determinedBusinessType 
+        };
       }
 
-      return { businessIds: [], eventIds: [] };
+      setBusinessType('services');
+      return { businessIds: [], eventIds: [], businessType: 'services' };
     } catch (error) {
       console.error('Error loading category mappings:', error);
-      return { businessIds: [], eventIds: [] };
+      return { businessIds: [], eventIds: [], businessType: 'services' };
     }
   };
 
 
 
-  const loadCategories = async () => {
+  const loadCategories = async (type?: 'services' | 'rental') => {
     let businessCatsResult: any[] = [];
     try {
       setLoadingCategories(true);
 
       // Fetch all business categories with hierarchy info
-      const { data: businessCats, error: businessError } = await supabaseCore
+      let businessQuery = supabaseCore
         .from('categories')
         .select('id, name, icon, parent_category_id, category_level, sort_order')
         .eq('category_type', 'business')
-        .eq('visible', true)
+        .eq('visible', true);
+
+      // If rental type is selected, filter by business_model = 'rental'
+      if (type === 'rental') {
+        businessQuery = businessQuery.eq('business_model', 'rental');
+      }
+
+      const { data: businessCats, error: businessError } = await businessQuery
         .order('sort_order', { ascending: true });
 
       if (businessError) {
@@ -544,6 +592,17 @@ export default function BusinessDetailsScreen() {
       setLoadingCategories(false);
     }
     return businessCatsResult;
+  };
+
+  const handleBusinessTypeChange = (type: 'services' | 'rental') => {
+    setBusinessType(type);
+    setEditData((prev: any) => ({ ...prev, businessType: type }));
+    // Reset category selections when type changes
+    setSelectedRootCategoryId(null);
+    setSelectedCategoryIds([]);
+    setExpandedCategoryIds(new Set());
+    // Re-fetch categories with new filter
+    loadCategories(type);
   };
 
   const onRefresh = () => {
@@ -871,7 +930,7 @@ export default function BusinessDetailsScreen() {
             {!hasChildren && <View style={styles.expandButton} />}
 
             {isRoot ? (
-              <View style={styles.radioButton}>
+              <View style={styles.categoryRadioButton}>
                 {isRootSelected ? (
                   <View style={styles.radioButtonSelected}>
                     <View style={styles.radioButtonInner} />
@@ -1923,7 +1982,7 @@ export default function BusinessDetailsScreen() {
       setSavingDetails(true);
 
       // Extract base_price and pricing_unit from editData as they are not columns on vendor_businesses
-      const { base_price, pricing_unit, ...businessUpdateData } = editData;
+      const { base_price, pricing_unit, businessType: editDataBusinessType, ...businessUpdateData } = editData;
 
       // Update business details
       const finalUpdateData = {
@@ -1935,6 +1994,8 @@ export default function BusinessDetailsScreen() {
       const { data, error } = await updateBusinessDetails(id, finalUpdateData);
       if (error) throw error;
       setBusiness(data);
+
+
 
       // Handle Package Update/Creation using the extracted price fields
       if (base_price && pricing_unit) {
@@ -2194,6 +2255,13 @@ export default function BusinessDetailsScreen() {
         <View style={{ width: 36 }} />
       </View>
 
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <WifiOff size={16} color="#B45309" />
+          <Text style={styles.offlineText}>You're currently offline. Viewing cached data.</Text>
+        </View>
+      )}
+
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
@@ -2446,6 +2514,8 @@ export default function BusinessDetailsScreen() {
               <View style={styles.editSection}>
                 <Text style={styles.editSectionTitle}>Basic Information</Text>
 
+
+
                 <View style={styles.editField}>
                   <Text style={[styles.editLabel, validationErrors.business_name && styles.editLabelError]}>Business Name *</Text>
                   <TextInput
@@ -2550,6 +2620,32 @@ export default function BusinessDetailsScreen() {
 
               <View style={styles.editSection}>
                 <Text style={styles.editSectionTitle}>Services & Experience</Text>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Business Type *</Text>
+                  <View style={styles.radioGroup}>
+                    <TouchableOpacity
+                      style={styles.radioButton}
+                      activeOpacity={0.7}
+                      onPress={() => handleBusinessTypeChange('services')}
+                    >
+                      <View style={[styles.radioOuter, businessType === 'services' && styles.radioOuterSelected]}>
+                        {businessType === 'services' && <View style={styles.radioInner} />}
+                      </View>
+                      <Text style={styles.radioText}>Services</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.radioButton}
+                      activeOpacity={0.7}
+                      onPress={() => handleBusinessTypeChange('rental')}
+                    >
+                      <View style={[styles.radioOuter, businessType === 'rental' && styles.radioOuterSelected]}>
+                        {businessType === 'rental' && <View style={styles.radioInner} />}
+                      </View>
+                      <Text style={styles.radioText}>Rental</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
 
                 <View style={styles.editField}>
                   <Text style={[styles.editLabel, (validationErrors.selectedCategoryIds || validationErrors.selectedRootCategoryId) && styles.editLabelError]}>Business Category *</Text>
@@ -3571,10 +3667,10 @@ export default function BusinessDetailsScreen() {
                 </TouchableOpacity>
               </View>
 
-              <View style={styles.searchContainer}>
+              <View style={styles.citySearchContainer}>
                 <Search size={20} color="#999" style={styles.searchIcon} />
                 <TextInput
-                  style={styles.modalSearchInput}
+                  style={styles.citySearchInput}
                   placeholder="Search cities..."
                   placeholderTextColor="#999"
                   value={citySearchQuery}
@@ -3584,7 +3680,9 @@ export default function BusinessDetailsScreen() {
 
               <ScrollView style={styles.optionsList}>
                 {filteredCities.map((city) => {
-                  const isSelected = editData.operating_locations?.includes(city);
+                  const isSelected = city === 'Pan India'
+                    ? editData.operating_locations?.includes('*')
+                    : editData.operating_locations?.includes(city);
                   return (
                     <TouchableOpacity
                       key={city}
@@ -3610,7 +3708,7 @@ export default function BusinessDetailsScreen() {
                 })}
               </ScrollView>
 
-              <View style={[styles.modalFooter, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+              <View style={[styles.cityModalFooter, { paddingBottom: Math.max(insets.bottom, 20) }]}>
                 <TouchableOpacity
                   style={styles.doneButton}
                   onPress={() => setIsCityModalOpen(false)}
@@ -3672,6 +3770,19 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 1,
   },
+  offlineBanner: {
+    backgroundColor: '#FEF3C7',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  offlineText: {
+    color: '#B45309',
+    fontSize: 13,
+    fontWeight: '500',
+  },
 
   // ─── Tab Bar ────────────────────────────────────────────────────────────────
   tabsContainer: {
@@ -3698,7 +3809,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   tabActive: {
-    backgroundColor: '#f5f7fa',
+    backgroundColor: '#D3D6DE',
   },
   tabText: {
     fontSize: 13,
@@ -4405,7 +4516,7 @@ const styles = StyleSheet.create({
     marginRight: 6,
     marginTop: 0,
   },
-  radioButton: {
+  categoryRadioButton: {
     width: 24,
     height: 24,
     justifyContent: 'center',
@@ -4671,8 +4782,28 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
+  citySearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    marginHorizontal: 20,
+    marginVertical: 12,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+  },
+  citySearchInput: {
+    flex: 1,
+    height: 48,
+    fontSize: 16,
+    color: '#1a1a1a',
+  },
   searchIcon: {
     marginRight: 8,
+  },
+  cityModalFooter: {
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
   },
   checkmark: {
     width: 24,
@@ -4856,5 +4987,48 @@ const styles = StyleSheet.create({
   suggestionChipText: {
     fontSize: 13,
     color: '#666',
+  },
+  confirmModalButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cancelModalButtonText: {
+    color: '#666',
+  },
+  dangerModalButtonText: {
+    color: '#fff',
+  },
+  radioGroup: {
+    flexDirection: 'row',
+    gap: 24,
+    marginTop: 4,
+  },
+  radioButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  radioOuter: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioOuterSelected: {
+    borderColor: '#6aa3ce',
+  },
+  radioInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#6aa3ce',
+  },
+  radioText: {
+    fontSize: 15,
+    color: '#1a1a1a',
+    fontWeight: '500',
   },
 });

@@ -14,8 +14,9 @@ import {
   Dimensions,
   Linking,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Video } from 'expo-av';
+import { Video, ResizeMode } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Star,
@@ -27,6 +28,7 @@ import {
   TrendingUp,
   X,
   Play,
+  WifiOff,
 } from 'lucide-react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabaseCore, supabaseCrm, supabaseCms } from '../../lib/supabase';
@@ -35,7 +37,6 @@ import FilterModal from '../../components/FilterModal';
 import SortModal from '../../components/SortModal';
 import ReplyModal from '../../components/ReplyModal';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
-import Logo from '../../components/Logo';
 import ScreenBackground from '../../components/ScreenBackground';
 
 interface Review {
@@ -82,7 +83,7 @@ export default function ReviewsScreen() {
     mimeType?: string;
   } | null>(null);
   const [mediaLoadError, setMediaLoadError] = useState(false);
-  const { user } = useAuth();
+  const { user, isOffline: authIsOffline } = useAuth();
 
   useEffect(() => {
     if (user?.id) {
@@ -100,6 +101,16 @@ export default function ReviewsScreen() {
 
       const isRefresh = refreshing;
       if (!isRefresh) setLoading(true);
+
+      // Check cache first
+      try {
+        const cachedReviews = await AsyncStorage.getItem(`vendor_reviews_${user.id}`);
+        if (cachedReviews) {
+          setReviews(JSON.parse(cachedReviews));
+        }
+      } catch (cacheError) {
+        console.error("Cache read error:", cacheError);
+      }
 
       // Get business data for mapping business_id to business_name
       const { data: businessData, error: businessError } = await supabaseCore
@@ -288,9 +299,15 @@ export default function ReviewsScreen() {
 
       console.log(`Mapped ${reviewsWithBusiness.length} reviews`);
       setReviews(reviewsWithBusiness);
+
+      // Update cache
+      try {
+        AsyncStorage.setItem(`vendor_reviews_${user.id}`, JSON.stringify(reviewsWithBusiness));
+      } catch (e) { }
     } catch (error) {
       console.error('Error fetching reviews:', error);
-      setReviews([]);
+      // We do not clear reviews here to allow showing cached data
+      // setReviews([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -608,9 +625,9 @@ export default function ReviewsScreen() {
 
   const renderListHeader = () => (
     <>
-      {/* Stat Cards Row */}
-      <View style={styles.statCardsRow}>
-        <View style={styles.statCard}>
+      {/* Stat Cards Container */}
+      <View style={styles.statCardsContainer}>
+        <View style={styles.individualStatCard}>
           <View style={[styles.statIconWrap, { backgroundColor: '#FFF6DC' }]}>
             <Star size={20} color="#FFB800" fill="#FFB800" />
           </View>
@@ -618,9 +635,7 @@ export default function ReviewsScreen() {
           <Text style={styles.statLabel}>Avg. Rating</Text>
         </View>
 
-        <View style={styles.statCardDivider} />
-
-        <View style={styles.statCard}>
+        <View style={styles.individualStatCard}>
           <View style={[styles.statIconWrap, { backgroundColor: '#EAF0FF' }]}>
             <MessageSquare size={20} color="#6B7FD7" />
           </View>
@@ -628,35 +643,13 @@ export default function ReviewsScreen() {
           <Text style={styles.statLabel}>Total</Text>
         </View>
 
-        <View style={styles.statCardDivider} />
-
-        <View style={styles.statCard}>
+        <View style={styles.individualStatCard}>
           <View style={[styles.statIconWrap, { backgroundColor: '#E6F9EE' }]}>
             <TrendingUp size={20} color="#4CAF50" />
           </View>
           <Text style={styles.statValue}>{fiveStarCount}</Text>
           <Text style={styles.statLabel}>5-Star</Text>
         </View>
-      </View>
-
-      {/* Search */}
-      <View style={styles.searchContainer}>
-        <Search size={18} color="#aaa" style={styles.searchIcon} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search reviews..."
-          placeholderTextColor="#aaa"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-        {searchQuery.length > 0 && (
-          <TouchableOpacity
-            onPress={() => setSearchQuery('')}
-            style={styles.clearSearchButton}
-          >
-            <X size={18} color="#aaa" />
-          </TouchableOpacity>
-        )}
       </View>
 
       {/* Filter / Sort row */}
@@ -701,12 +694,18 @@ export default function ReviewsScreen() {
     <ScreenBackground style={[styles.container, { backgroundColor: '#ECEEF5' }]}>
       <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
         <View style={styles.headerLeft}>
-          <Logo size={38} style={styles.headerLogo} />
           <Text style={styles.headerTitle}>Reviews</Text>
         </View>
       </View>
 
-      {loading ? (
+      {authIsOffline && (
+        <View style={styles.offlineBanner}>
+          <WifiOff size={16} color="#B45309" />
+          <Text style={styles.offlineText}>You're currently offline. Viewing cached data.</Text>
+        </View>
+      )}
+
+      {loading && reviews.length === 0 ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#3B82F6" />
         </View>
@@ -850,7 +849,7 @@ export default function ReviewsScreen() {
                       source={{ uri: selectedMedia.url }}
                       style={styles.mediaModalVideo}
                       useNativeControls
-                      resizeMode="contain"
+                      resizeMode={ResizeMode.CONTAIN}
                       shouldPlay
                       onError={() => setMediaLoadError(true)}
                     />
@@ -890,12 +889,20 @@ const styles = StyleSheet.create({
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 0,
-    height: '100%',
+    gap: 12,
   },
-  headerLogo: {
-    marginRight: 4,
-    marginVertical: 0,
+  offlineBanner: {
+    backgroundColor: '#FEF3C7',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  offlineText: {
+    color: '#B45309',
+    fontSize: 13,
+    fontWeight: '500',
   },
   headerTitle: {
     fontSize: 18,
@@ -912,49 +919,44 @@ const styles = StyleSheet.create({
   },
 
   // ── Stat Cards ──────────────────────────────────────
-  statCardsRow: {
+  statCardsContainer: {
     flexDirection: 'row',
-    alignItems: 'stretch',
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 14,
-    borderRadius: 16,
-    paddingVertical: 20,
-    paddingHorizontal: 8,
-    shadowColor: '#8090B0',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.10,
-    shadowRadius: 8,
-    elevation: 3,
+    marginTop: 4,
+    marginBottom: 20,
+    gap: 12,
   },
-  statCard: {
+  individualStatCard: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
-  },
-  statCardDivider: {
-    width: 1,
-    backgroundColor: '#ECEEF5',
-    marginVertical: 4,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    paddingVertical: 20,
+    borderWidth: 1,
+    borderColor: '#F0F2F8',
+    shadowColor: '#8090B8',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
   },
   statIconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 2,
+    marginBottom: 10,
   },
   statValue: {
     fontSize: 22,
     fontWeight: '700',
     color: '#1C2340',
+    marginBottom: 4,
   },
   statLabel: {
     fontSize: 12,
-    color: '#9AA0BB',
+    color: '#8A94A6',
     fontWeight: '500',
   },
 
@@ -966,32 +968,6 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 10,
     marginTop: 2,
-  },
-
-  // ── Search ──────────────────────────────────────────
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginBottom: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E4E7F0',
-  },
-  searchIcon: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 15,
-    color: '#1C2340',
-    padding: 0,
-  },
-  clearSearchButton: {
-    padding: 4,
   },
 
   // ── Filter/Sort ─────────────────────────────────────

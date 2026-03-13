@@ -5,6 +5,7 @@ import {
   TextInput,
   StyleSheet,
   ScrollView,
+  TouchableOpacity,
 } from 'react-native';
 import { stripCountryCode } from '../../lib/formatters';
 
@@ -35,7 +36,6 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
   const contactPersonRoleRef = useRef<TextInput>(null);
   const emailRef = useRef<TextInput>(null);
   const phoneNumberRef = useRef<TextInput>(null);
-
   // Expose method to focus next empty mandatory field
   useImperativeHandle(ref, () => ({
     focusNextEmptyField: () => {
@@ -53,6 +53,7 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
 
   return (
     <View style={styles.content}>
+
       <View style={styles.field}>
         <Text style={[styles.label, validationErrors.businessName && styles.labelError]}>Business Name *</Text>
         <TextInput

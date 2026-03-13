@@ -397,7 +397,9 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
 
             <ScrollView style={styles.optionsList}>
               {filteredCities.map((city) => {
-                const isSelected = data.operatingLocations?.includes(city);
+                const isSelected = city === 'Pan India'
+                  ? data.operatingLocations?.includes('*')
+                  : data.operatingLocations?.includes(city);
                 return (
                   <TouchableOpacity
                     key={city}
@@ -413,7 +415,7 @@ const LocationCoverageStep = forwardRef<LocationCoverageStepRef, LocationCoverag
                     ]}>
                       {city}
                     </Text>
-                    {isSelected || (city === 'Pan India' && data.operatingLocations?.includes('*')) ? (
+                    {isSelected ? (
                       <View style={styles.checkmark}>
                         <Check size={14} color="#fff" />
                       </View>

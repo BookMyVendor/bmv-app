@@ -11,6 +11,7 @@ import {
     Animated,
     RefreshControl,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -24,6 +25,7 @@ import {
     ChevronRight,
     TrendingUp,
     Edit2,
+    WifiOff,
 } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { supabaseCore, supabaseCrm } from '../lib/supabase';
@@ -36,7 +38,7 @@ import ScreenBackground from '../components/ScreenBackground';
 interface Business {
     id: string;
     business_name: string;
-    vendor_service_category: string;
+    business_category: string;
     cover_photo_url: string | null;
 }
 
@@ -94,6 +96,7 @@ export default function BusinessProfileScreen() {
     const [business, setBusiness] = useState<Business | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [isOffline, setIsOffline] = useState(false);
 
     // Stats
     const [totalLeads, setTotalLeads] = useState(0);
@@ -153,6 +156,11 @@ export default function BusinessProfileScreen() {
 
     const fetchBusiness = async () => {
         try {
+            const cachedParams = await AsyncStorage.getItem(`business_profile_${id}`);
+            if(cachedParams) {
+               setBusiness(JSON.parse(cachedParams));
+            }
+
             const { data, error } = await supabaseCore
                 .from('vendor_businesses')
                 .select(`
@@ -169,16 +177,21 @@ export default function BusinessProfileScreen() {
 
             if (error) throw error;
             if (data) {
-                setBusiness({
+                const category = (data as any).vendor_business_category_mappings?.[0]?.categories?.name;
+
+                const businessData = {
                     id: data.id,
                     business_name: data.business_name,
-                    vendor_service_category:
-                        (data as any).vendor_business_category_mappings?.[0]?.categories?.name || 'General',
+                    business_category: category || 'General',
                     cover_photo_url: data.cover_photo_url,
-                });
+                };
+                setBusiness(businessData);
+                setIsOffline(false);
+                AsyncStorage.setItem(`business_profile_${id}`, JSON.stringify(businessData));
             }
         } catch (err) {
             console.error('Error fetching business:', err);
+            setIsOffline(true);
         }
     };
 
@@ -186,6 +199,20 @@ export default function BusinessProfileScreen() {
         if (!id || !user?.id) return;
         try {
             setLeadsLoading(true);
+
+            // Check cache first
+            try {
+                const cachedLeads = await AsyncStorage.getItem(`business_leads_${id}`);
+                if (cachedLeads) {
+                    const parsedLeads = JSON.parse(cachedLeads);
+                    setLeads(parsedLeads);
+                    setTotalLeads(parsedLeads.length);
+                    setWonLeads(parsedLeads.filter((l: Lead) => l.lead_status === 'converted').length);
+                }
+            } catch (cacheError) {
+                console.error("Cache read error:", cacheError);
+            }
+
             const { data, error } = await supabaseCrm
                 .from('customer_leads')
                 .select('*')
@@ -197,6 +224,11 @@ export default function BusinessProfileScreen() {
 
             const leadsData = (data || []) as Lead[];
             setLeads(leadsData);
+            
+            // Update cache
+            try {
+                 AsyncStorage.setItem(`business_leads_${id}`, JSON.stringify(leadsData));
+            } catch(e) {}
 
             // Compute stats
             const total = leadsData.length;
@@ -214,6 +246,23 @@ export default function BusinessProfileScreen() {
         if (!id || !user?.id) return;
         try {
             setReviewsLoading(true);
+
+            // Check cache first
+            try {
+                const cachedReviews = await AsyncStorage.getItem(`business_reviews_${id}`);
+                if (cachedReviews) {
+                    const parsedReviews = JSON.parse(cachedReviews);
+                    setReviews(parsedReviews);
+                    setReviewCount(parsedReviews.length);
+                    if (parsedReviews.length > 0) {
+                        const avg = parsedReviews.reduce((sum: number, r: Review) => sum + r.rating, 0) / parsedReviews.length;
+                        setAvgReview(parseFloat(avg.toFixed(1)));
+                    }
+                }
+            } catch (cacheError) {
+                console.error("Cache read error:", cacheError);
+            }
+
             const { data, error } = await supabaseCrm
                 .from('customer_reviews')
                 .select('id, rating, review_text, review_title, created_at, customer_id')
@@ -245,6 +294,11 @@ export default function BusinessProfileScreen() {
             }));
 
             setReviews(mapped);
+            
+             // Update cache
+             try {
+                 AsyncStorage.setItem(`business_reviews_${id}`, JSON.stringify(mapped));
+             } catch(e) {}
 
             // Compute average
             if (mapped.length > 0) {
@@ -435,6 +489,13 @@ export default function BusinessProfileScreen() {
                 </TouchableOpacity>
             </View>
 
+            {isOffline && (
+                <View style={styles.offlineBanner}>
+                    <WifiOff size={16} color="#B45309" />
+                    <Text style={styles.offlineText}>You're currently offline.</Text>
+                </View>
+            )}
+
             <ScrollView
                 showsVerticalScrollIndicator={false}
                 refreshControl={
@@ -460,7 +521,7 @@ export default function BusinessProfileScreen() {
                         </LinearGradient>
                     )}
                     <Text style={styles.businessName}>{business?.business_name || 'Business'}</Text>
-                    <Text style={styles.businessCategory}>{business?.vendor_service_category || ''}</Text>
+                    <Text style={styles.businessCategory}>{business?.business_category || ''}</Text>
                 </View>
 
                 {/* ── Stat Cards ── */}
@@ -657,6 +718,19 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         backgroundColor: '#f5f7fa',
     },
+    offlineBanner: {
+        backgroundColor: '#FEF3C7',
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    offlineText: {
+        color: '#B45309',
+        fontSize: 13,
+        fontWeight: '500',
+    },
 
     // Top bar
     topBar: {
@@ -777,7 +851,7 @@ const styles = StyleSheet.create({
         gap: 6,
     },
     tabActive: {
-        backgroundColor: '#f5f7fa',
+        backgroundColor: '#D3D6DE',
     },
     tabText: {
         fontSize: 13,

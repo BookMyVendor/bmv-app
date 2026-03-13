@@ -18,14 +18,13 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { Camera, LogOut, Save, ShieldAlert, Trash2 } from 'lucide-react-native';
+import { Camera, LogOut, Save, ShieldAlert, Trash2, WifiOff } from 'lucide-react-native';
 import { Formik } from 'formik';
 import * as Yup from 'yup';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabaseCore, supabaseCms } from '../../lib/supabase';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
 import { validateEmail } from '../../lib/validation';
-import Logo from '../../components/Logo';
 import { sendOTP, resendOTP } from '../../lib/otpAuthApi';
 import { confirmAccountDeletion } from '../../lib/accountDeletionApi';
 import { getAccessToken } from '../../lib/tokenStorage';
@@ -43,7 +42,7 @@ const profileSchema = Yup.object().shape({
 });
 
 export default function ProfileScreen() {
-  const { user, profile, signOut, refreshProfile, verifyOTP: authVerifyOTP } = useAuth();
+  const { user, profile, signOut, refreshProfile, verifyOTP: authVerifyOTP, isOffline: authIsOffline } = useAuth();
   const insets = useSafeAreaInsets();
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -552,20 +551,23 @@ export default function ProfileScreen() {
 
   return (
     <ScreenBackground style={styles.container}>
-      <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
-        <View style={styles.headerLeft}>
-          <Logo size={38} style={styles.headerLogo} />
-          <Text style={styles.headerTitle}>Profile</Text>
-        </View>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+        <Text style={styles.headerTitle}>Profile</Text>
         <TouchableOpacity
           style={styles.signOutButton}
           onPress={() => handleSignOut()}
           activeOpacity={0.7}
-          disabled={false}
         >
-          <LogOut size={20} color={Colors.neutral.black} strokeWidth={2} />
+          <LogOut size={18} color="#555" strokeWidth={2} />
         </TouchableOpacity>
       </View>
+
+      {authIsOffline && (
+        <View style={styles.offlineBanner}>
+          <WifiOff size={16} color="#B45309" />
+          <Text style={styles.offlineText}>You're currently offline.</Text>
+        </View>
+      )}
 
       <KeyboardAvoidingView
         style={styles.keyboardView}
@@ -617,11 +619,6 @@ export default function ProfileScreen() {
                   </LinearGradient>
                 </TouchableOpacity>
 
-                <View style={styles.infoCard}>
-                  <Text style={styles.infoLabel}>Business Contact Number</Text>
-                  <Text style={styles.infoValue}>{stripCountryCode(profile?.phone)}</Text>
-                </View>
-
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>
                     First Name <Text style={styles.required}>*</Text>
@@ -658,6 +655,15 @@ export default function ProfileScreen() {
                   {touched.lastName && errors.lastName && (
                     <Text style={styles.errorText}>{errors.lastName}</Text>
                   )}
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Business Contact Number</Text>
+                  <TextInput
+                    style={[styles.input, styles.inputDisabled]}
+                    value={stripCountryCode(profile?.phone)}
+                    editable={false}
+                  />
                 </View>
 
                 <View style={styles.inputGroup}>
@@ -707,15 +713,15 @@ export default function ProfileScreen() {
                 <View style={styles.dangerCardContainer}>
                   {!showDeletionCard ? (
                     <TouchableOpacity
-                      style={[styles.dangerButton, styles.fullWidthButton]}
+                      style={[styles.deleteAccountLink, styles.fullWidthButton]}
                       onPress={() => {
                         resetDeletionFlow();
                         setShowDeletionCard(true);
                       }}
-                      activeOpacity={0.9}
+                      activeOpacity={0.7}
                     >
-                      <Trash2 size={18} color={Colors.neutral.white} />
-                      <Text style={styles.dangerButtonText}>Delete Account</Text>
+                      <Trash2 size={16} color={Colors.error.main} />
+                      <Text style={styles.deleteAccountLinkText}>Delete Account</Text>
                     </TouchableOpacity>
                   ) : (
                     <View style={styles.dangerCard}>
@@ -814,35 +820,37 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     backgroundColor: '#fff',
     paddingHorizontal: 20,
+    paddingBottom: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 0,
-    height: '100%',
-  },
-  headerLogo: {
-    marginRight: 4,
-    marginVertical: 0,
+    borderBottomColor: '#efefef',
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
     color: '#1a1a1a',
-    lineHeight: 22,
-    textAlignVertical: 'center',
-    includeFontPadding: false,
   },
   signOutButton: {
-    padding: Spacing.sm,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 20,
     width: 40,
     height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f4f4f4',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ececec',
+  },
+  offlineBanner: {
+    backgroundColor: '#FEF3C7',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  offlineText: {
+    color: '#B45309',
+    fontSize: 13,
+    fontWeight: '500',
   },
   keyboardView: {
     flex: 1,
@@ -884,21 +892,9 @@ const styles = StyleSheet.create({
     borderColor: Colors.neutral.white,
     ...Shadows.medium,
   },
-  infoCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 24,
-  },
-  infoLabel: {
-    fontSize: 12,
-    color: '#999',
-    marginBottom: 4,
-  },
-  infoValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1a1a1a',
+  inputDisabled: {
+    backgroundColor: '#f5f7fa',
+    color: Colors.text.secondary,
   },
   inputGroup: {
     marginBottom: 20,
@@ -978,6 +974,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     gap: Spacing.sm,
+  },
+  deleteAccountLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.lg,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: '#ffe0e0',
+    backgroundColor: '#fff',
+  },
+  deleteAccountLinkText: {
+    color: Colors.error.main,
+    fontWeight: '600',
+    fontSize: 14,
   },
   fullWidthButton: {
     width: '100%',
