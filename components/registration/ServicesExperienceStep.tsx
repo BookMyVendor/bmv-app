@@ -107,9 +107,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   const [isCategoriesExpanded, setIsCategoriesExpanded] = useState(false);
   const [isEventsExpanded, setIsEventsExpanded] = useState(false);
 
-  // Refs for keyboard navigation
-  const businessDescriptionRef = useRef<TextInput>(null);
-  const basePriceRef = useRef<TextInput>(null);
+
 
   // Expose method to focus next empty mandatory field
   useImperativeHandle(ref, () => ({
@@ -120,14 +118,6 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         setIsCategoryModalOpen(true);
       } else if (!data.selectedEventIds || data.selectedEventIds.length === 0) {
         setIsEventModalOpen(true);
-      } else if (!data.businessDescription || !data.businessDescription.trim()) {
-        businessDescriptionRef.current?.focus();
-      } else if (!data.yearsOfExperience || !data.yearsOfExperience.trim()) {
-        setIsExperienceDropdownOpen(true);
-      } else if (!data.basePrice || !data.basePrice.trim()) {
-        basePriceRef.current?.focus();
-      } else if (!data.pricingUnit || !data.pricingUnit.trim()) {
-        setIsPricingUnitDropdownOpen(true);
       }
     },
   }));
@@ -791,6 +781,9 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
   // Get display text for event dropdown
   const getEventDropdownDisplayText = (): string => {
+    if (loading) {
+      return 'Loading event types...';
+    }
     if (selectedEventsWithPaths.length === 0) {
       return 'Select event types';
     }
@@ -836,14 +829,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
 
 
-  if (loading) {
-    return (
-      <View style={[styles.container, styles.centerContent]}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Loading categories...</Text>
-      </View>
-    );
-  }
+  // Loading indicator overlay removed to prevent UI jumping. Components will display inline loading states.
 
   const handleCategoryDone = () => {
     const hasSubCategory = selectedCategoryIds.some(id => {
@@ -869,6 +855,61 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       return;
     }
     setIsEventModalOpen(false);
+  };
+
+  // Select All / Deselect All helpers for Services modal
+  const getAllSubtreeIds = (): string[] => {
+    if (!subtreeForSelectedRoot) return [];
+    const getAllIds = (nodes: any[]): string[] => {
+      let ids: string[] = [];
+      nodes.forEach((node) => {
+        ids.push(node.id);
+        if (node.children?.length > 0) ids = [...ids, ...getAllIds(node.children)];
+      });
+      return ids;
+    };
+    return getAllIds(subtreeForSelectedRoot.children || []);
+  };
+
+  const handleSelectAllServices = () => {
+    const allIds = getAllSubtreeIds();
+    const allSelected = allIds.every((id) => selectedCategoryIds.includes(id));
+    if (allSelected) {
+      setSelectedCategoryIds([]);
+    } else {
+      setSelectedCategoryIds(allIds);
+      // Auto-expand all selected categories
+      setExpandedCategoryIds((prev) => new Set([...prev, ...allIds]));
+    }
+  };
+
+  const isAllServicesSelected = (): boolean => {
+    const allIds = getAllSubtreeIds();
+    return allIds.length > 0 && allIds.every((id) => selectedCategoryIds.includes(id));
+  };
+
+  // Select All / Deselect All helpers for Events modal
+  const getAllEventIds = (): string[] => {
+    return eventCategories.map((c) => c.id);
+  };
+
+  const handleSelectAllEvents = () => {
+    const allIds = getAllEventIds();
+    const currentEventIds = data.selectedEventIds || [];
+    const allSelected = allIds.every((id) => currentEventIds.includes(id));
+    if (allSelected) {
+      handleChange('selectedEventIds', []);
+    } else {
+      handleChange('selectedEventIds', allIds);
+      // Auto-expand all event categories
+      setExpandedEventIds((prev) => new Set([...prev, ...allIds]));
+    }
+  };
+
+  const isAllEventsSelected = (): boolean => {
+    const allIds = getAllEventIds();
+    const currentEventIds = data.selectedEventIds || [];
+    return allIds.length > 0 && allIds.every((id) => currentEventIds.includes(id));
   };
 
   const rootDropdownOptions = rootCategories.map((c) => ({
@@ -924,7 +965,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         <Dropdown
           options={rootDropdownOptions}
           value={selectedRootCategoryId || ''}
-          placeholder="Select a category"
+          placeholder={loading ? 'Loading categories...' : 'Select a category'}
           onChange={(value: string) => handleRootSelection(value)}
           open={isRootDropdownOpen}
           onOpenChange={setIsRootDropdownOpen}
@@ -953,11 +994,13 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           >
             {!selectedRootCategoryId
               ? 'Select a category first'
-              : selectedCategoriesWithPaths.length === 0
-                ? 'Select services offered'
-                : selectedCategoriesWithPaths.length === 1
-                  ? selectedCategoriesWithPaths[0].path
-                  : `${selectedCategoriesWithPaths.length} services selected`}
+              : loading
+                ? 'Loading services...'
+                : selectedCategoriesWithPaths.length === 0
+                  ? 'Select services offered'
+                  : selectedCategoriesWithPaths.length === 1
+                    ? selectedCategoriesWithPaths[0].path
+                    : `${selectedCategoriesWithPaths.length} services selected`}
           </Text>
           <ChevronDown size={20} color={selectedRootCategoryId ? '#666' : '#ccc'} />
         </TouchableOpacity>
@@ -1029,6 +1072,20 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
                 value={searchQuery}
                 onChangeText={setSearchQuery}
               />
+
+              {/* Select All strip */}
+              <TouchableOpacity
+                style={styles.selectAllRow}
+                onPress={handleSelectAllServices}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.selectAllCheck, isAllServicesSelected() && styles.selectAllCheckActive]}>
+                  {isAllServicesSelected() && <Check size={12} color="#fff" strokeWidth={3} />}
+                </View>
+                <Text style={[styles.selectAllText, isAllServicesSelected() && styles.selectAllTextActive]}>
+                  {isAllServicesSelected() ? 'Deselect All' : 'Select All'}
+                </Text>
+              </TouchableOpacity>
 
               <ScrollView
                 style={styles.modalCategoryTree}
@@ -1152,6 +1209,20 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
                 onChangeText={setEventSearchQuery}
               />
 
+              {/* Select All strip */}
+              <TouchableOpacity
+                style={styles.selectAllRow}
+                onPress={handleSelectAllEvents}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.selectAllCheck, isAllEventsSelected() && styles.selectAllCheckActive]}>
+                  {isAllEventsSelected() && <Check size={12} color="#fff" strokeWidth={3} />}
+                </View>
+                <Text style={[styles.selectAllText, isAllEventsSelected() && styles.selectAllTextActive]}>
+                  {isAllEventsSelected() ? 'Deselect All' : 'Select All'}
+                </Text>
+              </TouchableOpacity>
+
               {/* Event Category Tree */}
               <ScrollView
                 style={styles.modalCategoryTree}
@@ -1178,91 +1249,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         </Modal>
       </View>
 
-      <View style={styles.field}>
-        <Text style={[styles.label, validationErrors.businessDescription && styles.labelError]}>Business Description *</Text>
-        <TextInput
-          ref={businessDescriptionRef}
-          style={[
-            styles.input,
-            styles.textArea,
-            validationErrors.businessDescription && styles.inputError
-          ]}
-          value={data.businessDescription || ''}
-          onChangeText={(text) => handleChange('businessDescription', text)}
-          placeholder="Describe your services and what makes your business unique"
-          placeholderTextColor="#999"
-          multiline
-          numberOfLines={4}
-          textAlignVertical="top"
-          returnKeyType="done"
-          onFocus={onFocus}
-          blurOnSubmit={true}
-        />
-        {validationErrors.businessDescription && (
-          <Text style={styles.errorText}>{validationErrors.businessDescription}</Text>
-        )}
-      </View>
 
-      <View style={styles.field}>
-        <Text style={[styles.label, validationErrors.yearsOfExperience && styles.labelError]}>Years of Experience *</Text>
-        <Dropdown
-          options={EXPERIENCE_OPTIONS.map((exp) => ({
-            label: exp,
-            value: exp,
-          }))}
-          value={data.yearsOfExperience || ''}
-          placeholder="Select experience"
-          onChange={(value: string) => handleChange('yearsOfExperience', value)}
-          open={isExperienceDropdownOpen}
-          onOpenChange={setIsExperienceDropdownOpen}
-          error={validationErrors.yearsOfExperience}
-        />
-      </View>
-
-      <View style={styles.field}>
-        <Text style={[styles.label, validationErrors.basePrice && styles.labelError]}>Base Price (₹) *</Text>
-        <TextInput
-          ref={basePriceRef}
-          style={[
-            styles.input,
-            validationErrors.basePrice && styles.inputError
-          ]}
-          value={data.basePrice || ''}
-          onChangeText={(text) => {
-            // Only allow numeric input
-            const cleanText = text.replace(/[^0-9]/g, '');
-            handleChange('basePrice', cleanText);
-          }}
-          placeholder="Enter starting price (e.g. 5000)"
-          placeholderTextColor="#999"
-          keyboardType="numeric"
-          onFocus={onFocus}
-          returnKeyType="next"
-        />
-        {validationErrors.basePrice && (
-          <Text style={styles.errorText}>{validationErrors.basePrice}</Text>
-        )}
-      </View>
-
-      <View style={styles.field}>
-        <Text style={[styles.label, validationErrors.pricingUnit && styles.labelError]}>Pricing Unit *</Text>
-        <Dropdown
-          options={pricingUnitOptions.map((unit) => ({
-            label: unit,
-            value: unit,
-          }))}
-          value={data.pricingUnit || ''}
-          placeholder="Select pricing unit"
-          onChange={(value: string) => handleChange('pricingUnit', value)}
-          open={isPricingUnitDropdownOpen}
-          onOpenChange={setIsPricingUnitDropdownOpen}
-          disabled={!data.selectedCategoryIds || data.selectedCategoryIds.length === 0}
-          error={validationErrors.pricingUnit}
-        />
-        {(!data.selectedCategoryIds || data.selectedCategoryIds.length === 0) && (
-          <Text style={styles.helperText}>Select a service category first to see options</Text>
-        )}
-      </View>
     </View>
   );
 });
@@ -1276,7 +1263,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    padding: 24,
+    paddingHorizontal: 24,
+    paddingTop: 0,
+    paddingBottom: 24,
   },
   centerContent: {
     justifyContent: 'center',
@@ -1498,6 +1487,38 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  selectAllRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    backgroundColor: '#fafafa',
+  },
+  selectAllCheck: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#ccc',
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  selectAllCheckActive: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  selectAllText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
+  },
+  selectAllTextActive: {
+    color: '#007AFF',
   },
   categoryTreeContainer: {
     backgroundColor: '#f8f8f8',

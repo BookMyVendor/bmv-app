@@ -28,8 +28,35 @@ interface Business {
   business_category: string;
   business_description: string;
   cover_photo_url: string | null;
-  city: string;
-  state: string;
+  city: string | null;
+  state: string | null;
+  // Mandatory fields for completion calculation (from vendor_businesses)
+  description?: string | null;
+  address?: string | null;
+  pincode?: string | null;
+  contact_person_name?: string | null;
+  business_email?: string | null;
+  contact_person_phone?: string | null;
+  years_experience?: number | null;
+  operating_locations?: string[] | null;
+  // Joined fields for mandatory completion checks
+  vendor_business_category_mappings?: {
+    categories?: {
+      category_type: string;
+    }
+  }[] | null;
+  vendor_business_pricing_packages?: {
+    id: string;
+    base_price: number;
+    price_unit: string;
+  }[] | null;
+  // Optional fields (not counted in mandatory progress)
+  website_url?: string | null;
+  instagram_url?: string | null;
+  facebook_url?: string | null;
+  youtube_url?: string | null;
+  gst_number?: string | null;
+  pan_number?: string | null;
 }
 
 interface LeadStats {
@@ -37,6 +64,33 @@ interface LeadStats {
   monthly: number;
   today: number;
   byStatus: Record<LeadStatus, number>;
+}
+
+// Returns a 0-100 integer representing how complete the business profile is
+// Returns a 0-100 integer representing how complete the business profile is based ONLY on mandatory fields (*)
+function calculateProfileCompletion(business: Business): number {
+  const checks = [
+    // 1-4. Basic Info
+    !!(business.business_name?.trim()),
+    !!(business.contact_person_name?.trim()),
+    !!(business.business_email?.trim()),
+    !!(business.contact_person_phone?.trim()),
+    // 5-6. Services & Experience
+    !!(business.description?.trim() || business.business_description?.trim()),
+    !!(business.years_experience !== null && business.years_experience !== undefined),
+    // 7-9. Location
+    !!(business.address?.trim()),
+    !!(business.pincode?.trim()),
+    !!(business.operating_locations && business.operating_locations.length > 0),
+    // 10. Pricing (Package exists)
+    !!(business.vendor_business_pricing_packages && business.vendor_business_pricing_packages.length > 0),
+    // 11. Services Offered Mapped
+    !!(business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'business')),
+    // 12. Event Types Mapped
+    !!(business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'event')),
+  ];
+  const filled = checks.filter(Boolean).length;
+  return Math.round((filled / checks.length) * 100);
 }
 
 function getGreeting(userName?: string) {
@@ -149,8 +203,15 @@ export default function DashboardScreen() {
           *,
           vendor_business_category_mappings (
             categories (
-              name
+              name,
+              category_type,
+              parent_category_id
             )
+          ),
+          vendor_business_pricing_packages (
+            id,
+            base_price,
+            price_unit
           )
         `)
         .eq('vendor_id', user.id)
@@ -159,12 +220,20 @@ export default function DashboardScreen() {
       if (error) throw error;
 
       const formattedBusinesses = (data || []).map((business: any) => {
-        const category = business.vendor_business_category_mappings?.[0]?.categories?.name;
+        // Find the root business category (parent_category_id is null)
+        const rootCategoryMatch = business.vendor_business_category_mappings?.find((m: any) =>
+          m.categories?.category_type === 'business' && m.categories?.parent_category_id === null
+        );
+
+        // Fallback: if no root is found, try any business category, then index 0
+        const categoryName = rootCategoryMatch?.categories?.name ||
+          business.vendor_business_category_mappings?.find((m: any) => m.categories?.category_type === 'business')?.categories?.name ||
+          business.vendor_business_category_mappings?.[0]?.categories?.name;
 
         return {
           ...business,
           business_description: business.description,
-          business_category: category || 'General',
+          business_category: categoryName || 'General',
         };
       });
 
@@ -476,68 +545,86 @@ export default function DashboardScreen() {
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>My Businesses</Text>
-              <TouchableOpacity
-                onPress={() => router.push('/business-registration')}
-                activeOpacity={0.6}
-              >
-              </TouchableOpacity>
             </View>
 
-            <View style={styles.businessCard}>
-              {businesses.map((business, index) => (
-                <TouchableOpacity
-                  key={business.id}
-                  style={[
-                    styles.businessRow,
-                    index < businesses.length - 1 && styles.businessRowBorder,
-                  ]}
-                  // onPress={() => router.push(`/business-details?id=${business.id}`)}
-                  onPress={() => (router as any).push(`/business-profile?id=${business.id}`)}
-                  activeOpacity={0.7}
-                >
-                  {/* Avatar */}
-                  {business.cover_photo_url ? (
-                    <Image
-                      source={{ uri: business.cover_photo_url }}
-                      style={styles.businessAvatar}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <LinearGradient
-                      colors={AVATAR_COLORS[index % AVATAR_COLORS.length]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={styles.businessAvatar}
-                    >
-                      <Text style={styles.businessAvatarLetter}>
-                        {business.business_name.charAt(0).toUpperCase()}
-                      </Text>
-                    </LinearGradient>
-                  )}
+            <View style={styles.businessList}>
+              {businesses.map((business, index) => {
+                const completion = calculateProfileCompletion(business);
+                const isIncomplete = completion < 100;
+                // Color: amber at low%, transitions to green near 100%
+                const barColor = completion >= 80 ? '#34A853' : completion >= 50 ? '#FBBC04' : '#FF9C42';
 
-                  {/* Info */}
-                  <View style={styles.businessInfo}>
-                    <Text style={styles.businessName} numberOfLines={1}>
-                      {business.business_name}
-                    </Text>
-                    <Text style={styles.businessCategory} numberOfLines={1}>
-                      {business.business_category}
-                    </Text>
-                  </View>
+                return (
+                  <TouchableOpacity
+                    key={business.id}
+                    style={styles.businessCardItem}
+                    onPress={() => (router as any).push(`/business-profile?id=${business.id}`)}
+                    activeOpacity={0.7}
+                  >
+                    {/* Main row */}
+                    <View style={styles.businessRow}>
+                      {/* Avatar */}
+                      {business.cover_photo_url ? (
+                        <Image
+                          source={{ uri: business.cover_photo_url }}
+                          style={styles.businessAvatar}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <LinearGradient
+                          colors={AVATAR_COLORS[index % AVATAR_COLORS.length]}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
+                          style={styles.businessAvatar}
+                        >
+                          <Text style={styles.businessAvatarLetter}>
+                            {business.business_name.charAt(0).toUpperCase()}
+                          </Text>
+                        </LinearGradient>
+                      )}
 
-                  {/* Right side */}
-                  <View style={styles.businessRight}>
-                    {businessLeadCounts[business.id] !== undefined && (
-                      <View style={styles.leadsBadge}>
-                        <Text style={styles.leadsBadgeText}>
-                          {businessLeadCounts[business.id]} {businessLeadCounts[business.id] === 1 ? 'lead' : 'leads'}
+                      {/* Info */}
+                      <View style={styles.businessInfo}>
+                        <Text style={styles.businessName} numberOfLines={1}>
+                          {business.business_name}
+                        </Text>
+                        <Text style={styles.businessCategory} numberOfLines={1}>
+                          {business.business_category}
+                        </Text>
+                      </View>
+
+                      {/* Right side */}
+                      <View style={styles.businessRight}>
+                        {businessLeadCounts[business.id] !== undefined && (
+                          <View style={styles.leadsBadge}>
+                            <Text style={styles.leadsBadgeText}>
+                              {businessLeadCounts[business.id]} {businessLeadCounts[business.id] === 1 ? 'lead' : 'leads'}
+                            </Text>
+                          </View>
+                        )}
+                        <ChevronRight size={16} color="#c8c8c8" strokeWidth={2} />
+                      </View>
+                    </View>
+
+                    {/* Profile completion bar — only shown when incomplete */}
+                    {isIncomplete && (
+                      <View style={styles.completionWrap}>
+                        <View style={styles.completionBarBg}>
+                          <View
+                            style={[
+                              styles.completionBarFill,
+                              { width: `${completion}%` as any, backgroundColor: barColor },
+                            ]}
+                          />
+                        </View>
+                        <Text style={[styles.completionLabel, { color: barColor }]}>
+                          {completion}%
                         </Text>
                       </View>
                     )}
-                    <ChevronRight size={16} color="#c8c8c8" strokeWidth={2} />
-                  </View>
-                </TouchableOpacity>
-              ))}
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
         )}
@@ -794,8 +881,11 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 14,
   },
 
-  /* Business list */
-  businessCard: {
+  /* Business list — each business is its own card */
+  businessList: {
+    gap: 10,
+  },
+  businessCardItem: {
     backgroundColor: '#fff',
     borderRadius: 16,
     overflow: 'hidden',
@@ -810,10 +900,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 13,
     paddingHorizontal: 16,
-  },
-  businessRowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#f2f2f2',
   },
   businessAvatar: {
     width: 42,
@@ -857,6 +943,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#4285F4',
+  },
+
+  /* Profile completion bar */
+  completionWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 11,
+    gap: 8,
+  },
+  completionBarBg: {
+    flex: 1,
+    height: 4,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 99,
+    overflow: 'hidden',
+  },
+  completionBarFill: {
+    height: 4,
+    borderRadius: 99,
+  },
+  completionLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+    minWidth: 28,
+    textAlign: 'right',
   },
 
   /* Empty */

@@ -95,6 +95,12 @@ export default function CompleteProfileScreen() {
     }
   };
 
+  const getInitials = (firstName: string, lastName: string) => {
+    const f = firstName.trim() ? firstName.trim()[0] : '';
+    const l = lastName.trim() ? lastName.trim()[0] : '';
+    return (f + l).toUpperCase();
+  };
+
   const pickImage = async () => {
     try {
       // On web, permissions are usually granted automatically
@@ -183,13 +189,6 @@ export default function CompleteProfileScreen() {
     if (!user?.id) {
       console.log('❌ No user ID - returning early');
       Alert.alert('Error', 'User not found. Please try logging in again.');
-      return;
-    }
-
-    // Validate that profile photo is uploaded (unless one already exists)
-    if (!photoUri && !profile?.image_file_id) {
-      setPhotoError('Profile photo is required');
-      Alert.alert('Profile Photo Required', 'Please upload a profile photo to continue.');
       return;
     }
 
@@ -323,7 +322,6 @@ export default function CompleteProfileScreen() {
         }
       }
 
-      // Step 4: Update vendors table (ALWAYS run this)
       console.log('📤 Step 4: Updating vendors table');
       const updateData: any = {
         first_name: values.firstName,
@@ -341,23 +339,32 @@ export default function CompleteProfileScreen() {
         });
 
       if (vendorError) {
-        console.error('❌ vendors update error:', vendorError);
+        console.error('❌ vendors update error symptoms:', {
+          code: vendorError.code,
+          message: vendorError.message,
+          details: vendorError.details
+        });
         throw vendorError;
       }
-      console.log('✅ vendors table updated');
+      console.log('✅ vendors table updated successfully');
 
-
-
-      console.log('📤 Step 5: Refreshing profile');
+      console.log('📤 Step 5: Refreshing profile with skipCache=true');
       await refreshProfile();
+      console.log('✅ Profile refreshed');
 
 
       // Check if user already has a business
+      console.log('📤 Step 6: Checking for existing businesses');
       const { data: existingBusinesses, error: checkBusinessError } = await supabaseCore
         .from('vendor_businesses')
         .select('id')
         .eq('vendor_id', user?.id)
         .limit(1);
+
+      if (checkBusinessError) {
+        console.error('❌ Error checking for existing business:', checkBusinessError);
+        // We still keep going but log it
+      }
 
       if (existingBusinesses && existingBusinesses.length > 0) {
         console.log('✅ User already has business(es) - navigating to dashboard');
@@ -367,17 +374,10 @@ export default function CompleteProfileScreen() {
         router.replace('/business-registration');
       }
     } catch (error: any) {
-      console.error('❌ Profile submission error:', error);
-      console.error('Error details:', {
-        message: error.message,
-        details: error.details,
-        code: error.code,
-        hint: error.hint,
-        fullError: error
-      });
+      console.error('❌ Profile submission error CATCH block:', error);
       Alert.alert(
         'Error',
-        error.message || error.details || error.hint || 'Failed to save profile. Please try again.'
+        error.message || 'Failed to save profile. Please try again.'
       );
     } finally {
       console.log('🔄 Setting uploading to false');
@@ -421,7 +421,7 @@ export default function CompleteProfileScreen() {
               <>
                 <View style={styles.photoSection}>
                   <Text style={styles.label}>
-                    Profile Photo <Text style={styles.required}>*</Text>
+                    Profile Photo
                   </Text>
                   <TouchableOpacity
                     style={[
@@ -436,6 +436,12 @@ export default function CompleteProfileScreen() {
                   >
                     {photoUri ? (
                       <Image source={{ uri: photoUri }} style={styles.photo} />
+                    ) : values.firstName || values.lastName ? (
+                      <View style={[styles.photo, styles.initialsContainer]}>
+                        <Text style={styles.initialsText}>
+                          {getInitials(values.firstName, values.lastName)}
+                        </Text>
+                      </View>
                     ) : (
                       <View style={[
                         styles.photoPlaceholder,
@@ -514,7 +520,7 @@ export default function CompleteProfileScreen() {
 
                 <TouchableOpacity
                   style={[styles.button, uploading && styles.buttonDisabled]}
-                  onPress={async (e) => {
+                  onPress={() => {
                     console.log('Continue button pressed', {
                       uploading,
                       values,
@@ -523,19 +529,7 @@ export default function CompleteProfileScreen() {
                       isValid,
                       hasErrors: Object.keys(errors).length > 0
                     });
-                    e?.preventDefault?.();
-                    e?.stopPropagation?.();
-
-                    // Validate the form and show all errors
-                    try {
-                      await profileSchema.validate(values, { abortEarly: false });
-                      // If validation passes, submit
-                      formikHandleSubmit();
-                    } catch (validationErrors: any) {
-                      // Validation errors will be shown in the form fields below
-                      // The Formik state will be updated automatically
-                      formikHandleSubmit();
-                    }
+                    formikHandleSubmit();
                   }}
                   disabled={uploading}
                   activeOpacity={0.8}
@@ -663,5 +657,15 @@ const styles = StyleSheet.create({
   },
   photoPlaceholderTextError: {
     color: '#FF3B30',
+  },
+  initialsContainer: {
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  initialsText: {
+    color: '#fff',
+    fontSize: 40,
+    fontWeight: '700',
   },
 });

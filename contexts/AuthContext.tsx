@@ -59,7 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isRefreshingRef = useRef<boolean>(false);
   const isRestoringRef = useRef<boolean>(false);
 
-  const fetchProfile = async (userId: string) => {
+  const fetchProfile = async (userId: string, skipCache: boolean = false) => {
     try {
       // Don't fetch if userId is not provided or if we're logging out
       if (!userId || isLoggingOutRef.current) {
@@ -68,21 +68,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Try to load cached profile first for faster UI and offline support
-      try {
-        const cachedStr = await AsyncStorage.getItem(`cached_profile_${userId}`);
-        if (cachedStr) {
-          // Set immediately so we don't wait for network
-          setProfile(JSON.parse(cachedStr));
+      // But skip it if we are explicitly refreshing to avoid race conditions with old state
+      if (!skipCache) {
+        try {
+          const cachedStr = await AsyncStorage.getItem(`cached_profile_${userId}`);
+          if (cachedStr) {
+            // Set immediately so we don't wait for network
+            setProfile(JSON.parse(cachedStr));
+          }
+        } catch (e) {
+          console.log('[AUTH] Error loading cached profile:', e);
         }
-      } catch (e) {
-        console.log('[AUTH] Error loading cached profile:', e);
       }
 
       const { data, error } = await supabaseCore
         .from('vendors')
         .select(`
           *,
-          vendor_businesses (id)
+          vendor_businesses!vendor_id (id)
         `)
         .eq('id', userId)
         .limit(1, { foreignTable: 'vendor_businesses' })
@@ -106,8 +109,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       console.error('Error fetching profile:', error);
       setIsOffline(true);
-      // We already tried loading cache at the start. 
-      // If we failed here, we just retain the state (which might be the loaded cache).
+      // Re-throw if it's a manual refresh so the caller knows it failed
+      if (skipCache) throw error;
     }
   };
 
@@ -878,7 +881,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshProfile = async () => {
     if (user) {
-      await fetchProfile(user.id);
+      await fetchProfile(user.id, true);
     }
   };
 

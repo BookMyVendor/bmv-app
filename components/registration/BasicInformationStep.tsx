@@ -33,7 +33,6 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
   // Refs for keyboard navigation
   const businessNameRef = useRef<TextInput>(null);
   const contactPersonNameRef = useRef<TextInput>(null);
-  const contactPersonRoleRef = useRef<TextInput>(null);
   const emailRef = useRef<TextInput>(null);
   const phoneNumberRef = useRef<TextInput>(null);
   // Expose method to focus next empty mandatory field
@@ -89,27 +88,14 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
           placeholderTextColor="#999"
           returnKeyType="next"
           onFocus={onFocus}
-          onSubmitEditing={() => contactPersonRoleRef.current?.focus()}
+          onSubmitEditing={() => emailRef.current?.focus()}
         />
         {validationErrors.contactPersonName && (
           <Text style={styles.errorText}>{validationErrors.contactPersonName}</Text>
         )}
       </View>
 
-      <View style={styles.field}>
-        <Text style={styles.label}>Contact Person Role</Text>
-        <TextInput
-          ref={contactPersonRoleRef}
-          style={styles.input}
-          value={data.contactPersonRole || ''}
-          onChangeText={(text) => handleChange('contactPersonRole', text)}
-          placeholder="e.g., Owner, Manager, Director"
-          placeholderTextColor="#999"
-          returnKeyType="next"
-          onFocus={onFocus}
-          onSubmitEditing={() => emailRef.current?.focus()}
-        />
-      </View>
+
 
       <View style={styles.field}>
         <Text style={[styles.label, validationErrors.email && styles.labelError]}>Email *</Text>
@@ -177,7 +163,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    padding: 24,
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 0,
   },
   field: {
     marginBottom: 20,
