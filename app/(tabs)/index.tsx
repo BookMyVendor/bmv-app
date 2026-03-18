@@ -386,9 +386,6 @@ export default function DashboardScreen() {
             <Text style={styles.headerTitle}>Dashboard</Text>
           </View>
         </View>
-        <TouchableOpacity style={styles.notificationBtn} activeOpacity={0.7}>
-          <Bell size={20} color="#333" strokeWidth={1.8} />
-        </TouchableOpacity>
       </View>
 
       {isOffline && (
@@ -609,6 +606,9 @@ export default function DashboardScreen() {
                     {/* Profile completion bar — only shown when incomplete */}
                     {isIncomplete && (
                       <View style={styles.completionWrap}>
+                        <Text style={[styles.completionLabelText, { color: barColor }]}>
+                          Profile Completed
+                        </Text>
                         <View style={styles.completionBarBg}>
                           <View
                             style={[
@@ -952,6 +952,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 11,
     gap: 8,
+  },
+  completionLabelText: {
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   completionBarBg: {
     flex: 1,

@@ -11,16 +11,16 @@ import {
   Keyboard,
   AppState,
   ScrollView,
+  Modal,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, X, CheckCircle2 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { supabaseCore } from '../lib/supabase';
 import BasicInformationStep, { BasicInformationStepRef } from '../components/registration/BasicInformationStep';
 import ServicesExperienceStep, { ServicesExperienceStepRef } from '../components/registration/ServicesExperienceStep';
-import LocationCoverageStep, { LocationCoverageStepRef } from '../components/registration/LocationCoverageStep';
 import VerificationStep, { VerificationStepRef } from '../components/registration/VerificationStep';
 import PortfolioSocialStep from '../components/registration/PortfolioSocialStep';
 import { pickMultipleImages, uploadMultipleBusinessImages, uploadMultipleVerificationDocuments, UploadDocumentData, uploadBusinessImage, setCoverImage } from '../lib/businessApi';
@@ -77,11 +77,11 @@ export default function BusinessRegistrationScreen() {
   const router = useRouter();
   const basicInfoStepRef = useRef<BasicInformationStepRef>(null);
   const servicesStepRef = useRef<ServicesExperienceStepRef>(null);
-  const locationStepRef = useRef<LocationCoverageStepRef>(null);
   const verificationStepRef = useRef<VerificationStepRef>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const [contentHeight, setContentHeight] = useState(0);
   const [containerHeight, setContainerHeight] = useState(0);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
   const insets = useSafeAreaInsets();
 
   // Save form data to AsyncStorage whenever it changes
@@ -180,8 +180,9 @@ export default function BusinessRegistrationScreen() {
     const hasPhone = !!(businessData.phoneNumber?.trim());
     const hasCategory = !!(businessData.selectedRootCategoryId || (businessData.selectedCategoryIds && businessData.selectedCategoryIds.length > 0));
     const hasEvents = !!(businessData.selectedEventIds && businessData.selectedEventIds.length > 0);
+    const hasOperatingLocations = !!(businessData.operatingLocations && businessData.operatingLocations.length > 0);
     
-    return hasBusinessName && hasContactName && hasEmail && hasPhone && hasCategory && hasEvents;
+    return hasBusinessName && hasContactName && hasEmail && hasPhone && hasCategory && hasEvents && hasOperatingLocations;
   };
 
   const handleNextField = () => {
@@ -206,6 +207,9 @@ export default function BusinessRegistrationScreen() {
     }
     if (!businessData.selectedEventIds || businessData.selectedEventIds.length === 0) {
       errors.selectedEventIds = 'Please select at least one event type';
+    }
+    if (!businessData.operatingLocations || businessData.operatingLocations.length === 0) {
+      errors.operatingLocations = 'Please select at least one operating location';
     }
 
     if (Object.keys(errors).length > 0) {
@@ -253,6 +257,9 @@ export default function BusinessRegistrationScreen() {
     }
     if (!businessData.selectedEventIds || businessData.selectedEventIds.length === 0) {
       errors.selectedEventIds = 'Please select at least one event type';
+    }
+    if (!businessData.operatingLocations || businessData.operatingLocations.length === 0) {
+      errors.operatingLocations = 'Please select at least one operating location';
     }
 
     if (Object.keys(errors).length > 0) {
@@ -483,7 +490,7 @@ export default function BusinessRegistrationScreen() {
           locality: null,
           latitude: null,
           longitude: null,
-          operating_locations: [],
+          operating_locations: businessData.operatingLocations || [],
           service_radius_km: 0,
           contact_person_name: businessData.contactPersonName,
           contact_person_phone: stripCountryCode(businessData.phoneNumber), // Ensure no +91
@@ -658,7 +665,7 @@ export default function BusinessRegistrationScreen() {
       // Update profile in AuthContext to include the new business flag
       await refreshProfile();
 
-      router.replace('/(tabs)');
+      setShowSuccessModal(true);
     } catch (error: any) {
       console.error('Error submitting business:', error);
       alert(error.message);
@@ -783,6 +790,45 @@ export default function BusinessRegistrationScreen() {
           )}
         </View>
       </KeyboardAvoidingView>
+
+      {/* Success Modal */}
+      <Modal
+        visible={showSuccessModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => router.replace('/(tabs)')}
+      >
+        <View style={styles.successModalOverlay}>
+          <View style={styles.successModalContent}>
+            <View style={styles.successIconContainer}>
+              <CheckCircle2 size={60} color="#34C759" />
+            </View>
+            
+            <Text style={styles.successModalTitle}>Welcome to BookMyVendor!</Text>
+            
+            <Text style={styles.successModalMessage}>
+              Thanks for joining us! Your business will be visible on our website after a quick review <Text style={{ fontWeight: '700' }}>(typically within 48 hours)</Text>.
+            </Text>
+            
+            <View style={styles.successInfoBox}>
+              <Text style={styles.successInfoBoxText}>
+                To get the most out of your listing, please update your profile with photos, videos, and social links from your business settings. A detailed profile helps build trust with new customers!
+              </Text>
+            </View>
+            
+            <TouchableOpacity 
+              style={styles.successModalButton}
+              onPress={() => {
+                setShowSuccessModal(false);
+                router.replace('/(tabs)');
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.successModalButtonText}>Let's Go!</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScreenBackground>
   );
 }
@@ -932,5 +978,81 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     fontSize: 16,
     color: '#1a1a1a',
+  },
+  successModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  successModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 28,
+    padding: 32,
+    width: '100%',
+    maxWidth: 400,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.2,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  successIconContainer: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#F2FBF4',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  successModalTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#1a1a1a',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  successModalMessage: {
+    fontSize: 15,
+    color: '#444',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 20,
+  },
+  successInfoBox: {
+    backgroundColor: '#F0F7FF',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 32,
+    borderWidth: 1,
+    borderColor: '#D0E7FF',
+  },
+  successInfoBoxText: {
+    fontSize: 14,
+    color: '#0056B3',
+    lineHeight: 20,
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  successModalButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 16,
+    width: '100%',
+    alignItems: 'center',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  successModalButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
   },
 });

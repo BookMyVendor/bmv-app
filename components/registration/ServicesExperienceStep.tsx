@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef, useImperativeHandle, forwardRef } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   View,
   Text,
@@ -11,7 +12,7 @@ import {
   Pressable,
   Alert,
 } from 'react-native';
-import { Check, ChevronRight, ChevronDown, X } from 'lucide-react-native';
+import { Check, ChevronRight, ChevronDown, X, Search } from 'lucide-react-native';
 import Dropdown from '../../components/Dropdown';
 import { supabaseCore } from '../../lib/supabase';
 
@@ -79,12 +80,45 @@ const PRICING_MAPPING: Record<string, string[]> = {
 
 const DEFAULT_PRICING_UNITS = ['Per event', 'Per day', 'Per hour'];
 
+const OPERATING_CITIES = [
+  'Pan India',
+  'Mumbai (Maharashtra)',
+  'Delhi (Delhi)',
+  'Bangalore (Karnataka)',
+  'Hyderabad (Telangana)',
+  'Chennai (Tamil Nadu)',
+  'Kolkata (West Bengal)',
+  'Pune (Maharashtra)',
+  'Ahmedabad (Gujarat)',
+  'Jaipur (Rajasthan)',
+  'Surat (Gujarat)',
+  'Lucknow (Uttar Pradesh)',
+  'Kanpur (Uttar Pradesh)',
+  'Nagpur (Maharashtra)',
+  'Indore (Madhya Pradesh)',
+  'Bhopal (Madhya Pradesh)',
+  'Visakhapatnam (Andhra Pradesh)',
+  'Patna (Bihar)',
+  'Vadodara (Gujarat)',
+  'Ghaziabad (Uttar Pradesh)',
+  'Ludhiana (Punjab)',
+  'Agra (Uttar Pradesh)',
+  'Nashik (Maharashtra)',
+  'Faridabad (Haryana)',
+  'Meerut (Uttar Pradesh)',
+  'Rajkot (Gujarat)',
+  'Varanasi (Uttar Pradesh)',
+  'Goa (Goa)',
+  'Udaipur (Rajasthan)',
+];
+
 const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExperienceStepProps>(({
   data,
   onUpdate,
   validationErrors = {},
   onFocus,
 }, ref) => {
+  const insets = useSafeAreaInsets();
   const [allBusinessCategories, setAllBusinessCategories] = useState<Category[]>([]);
   const [eventCategories, setEventCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -107,6 +141,9 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   const [isCategoriesExpanded, setIsCategoriesExpanded] = useState(false);
   const [isEventsExpanded, setIsEventsExpanded] = useState(false);
 
+  const [isCityModalOpen, setIsCityModalOpen] = useState(false);
+  const [citySearchQuery, setCitySearchQuery] = useState('');
+
 
 
   // Expose method to focus next empty mandatory field
@@ -118,6 +155,8 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         setIsCategoryModalOpen(true);
       } else if (!data.selectedEventIds || data.selectedEventIds.length === 0) {
         setIsEventModalOpen(true);
+      } else if (!data.operatingLocations || data.operatingLocations.length === 0) {
+        setIsCityModalOpen(true);
       }
     },
   }));
@@ -183,6 +222,9 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       // If rental is selected, filter by business_model = 'rental'
       if (businessType === 'rental') {
         businessQuery = businessQuery.eq('business_model', 'rental');
+      } else {
+        // If service type is selected, filter by business_model != 'rental'
+        businessQuery = businessQuery.neq('business_model', 'rental');
       }
 
       const { data: businessCats, error: businessError } = await businessQuery
@@ -782,16 +824,43 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   // Get display text for event dropdown
   const getEventDropdownDisplayText = (): string => {
     if (loading) {
-      return 'Loading event types...';
+      return 'Loading Events you serve...';
     }
     if (selectedEventsWithPaths.length === 0) {
-      return 'Select event types';
+      return 'Select Events you serve';
     }
     if (selectedEventsWithPaths.length === 1) {
       return selectedEventsWithPaths[0].path;
     }
-    return `${selectedEventsWithPaths.length} sub-categories selected`;
+    return `${selectedEventsWithPaths.length} events selected`;
   };
+
+  const toggleCitySelection = (city: string) => {
+    const currentLocations = data.operatingLocations || [];
+
+    if (city === 'Pan India') {
+      if (currentLocations.includes('*')) {
+        handleChange('operatingLocations', []);
+      } else {
+        // If Pan India selected, clear all other cities and just set '*'
+        handleChange('operatingLocations', ['*']);
+      }
+      return;
+    }
+
+    // If a normal city is selected while Pan India (*) is present, remove '*'
+    let newLocations = currentLocations.filter((c: string) => c !== '*');
+
+    if (newLocations.includes(city)) {
+      handleChange('operatingLocations', newLocations.filter((c: string) => c !== city));
+    } else {
+      handleChange('operatingLocations', [...newLocations, city]);
+    }
+  };
+
+  const filteredCities = OPERATING_CITIES.filter(city =>
+    city.toLowerCase().includes(citySearchQuery.toLowerCase())
+  );
 
   // Determine applicable pricing units based on selected service category
   const pricingUnitOptions = useMemo(() => {
@@ -851,7 +920,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     });
 
     if (!hasSubEventType) {
-      Alert.alert('Validation Error', 'Please select at least one sub-category for event types');
+      Alert.alert('Validation Error', 'Please select at least one sub-category for Events you serve');
       return;
     }
     setIsEventModalOpen(false);
@@ -937,7 +1006,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
                 <View style={styles.businessTypeRadioInner} />
               )}
             </View>
-            <Text style={styles.businessTypeRadioText}>Services</Text>
+            <Text style={styles.businessTypeRadioText}>Service based</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -955,13 +1024,13 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
                 <View style={styles.businessTypeRadioInner} />
               )}
             </View>
-            <Text style={styles.businessTypeRadioText}>Rental</Text>
+            <Text style={styles.businessTypeRadioText}>Rental based</Text>
           </TouchableOpacity>
         </View>
       </View>
 
       <View style={styles.field}>
-        <Text style={[styles.label, (validationErrors.selectedRootCategoryId || validationErrors.selectedCategoryIds) && styles.labelError]}>Business Category *</Text>
+        <Text style={[styles.label, (validationErrors.selectedRootCategoryId || validationErrors.selectedCategoryIds) && styles.labelError]}>Primary Category *</Text>
         <Dropdown
           options={rootDropdownOptions}
           value={selectedRootCategoryId || ''}
@@ -974,7 +1043,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       </View>
 
       <View style={styles.field}>
-        <Text style={[styles.label, validationErrors.selectedCategoryIds && styles.labelError]}>Services Offered *</Text>
+        <Text style={[styles.label, validationErrors.selectedCategoryIds && styles.labelError]}>Specialization *</Text>
         <TouchableOpacity
           style={[
             styles.dropdownTrigger,
@@ -997,10 +1066,10 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               : loading
                 ? 'Loading services...'
                 : selectedCategoriesWithPaths.length === 0
-                  ? 'Select services offered'
+                  ? 'Select Specialization'
                   : selectedCategoriesWithPaths.length === 1
                     ? selectedCategoriesWithPaths[0].path
-                    : `${selectedCategoriesWithPaths.length} services selected`}
+                    : `${selectedCategoriesWithPaths.length} Specialization selected`}
           </Text>
           <ChevronDown size={20} color={selectedRootCategoryId ? '#666' : '#ccc'} />
         </TouchableOpacity>
@@ -1045,7 +1114,10 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         >
           <Pressable
             style={styles.modalOverlay}
-            onPress={() => setIsCategoryModalOpen(false)}
+            onPress={() => {
+              setSelectedCategoryIds([]);
+              setIsCategoryModalOpen(false);
+            }}
           >
             <Pressable
               style={styles.modalContent}
@@ -1054,11 +1126,14 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>
                   {subtreeForSelectedRoot
-                    ? `Services offered under ${subtreeForSelectedRoot.name}`
-                    : 'Select Services offered'}
+                    ? `Specialization under ${subtreeForSelectedRoot.name}`
+                    : 'Select Specialization'}
                 </Text>
                 <TouchableOpacity
-                  onPress={() => setIsCategoryModalOpen(false)}
+                  onPress={() => {
+                    setSelectedCategoryIds([]);
+                    setIsCategoryModalOpen(false);
+                  }}
                   style={styles.closeButton}
                 >
                   <X size={24} color="#666" />
@@ -1067,7 +1142,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
               <TextInput
                 style={styles.modalSearchInput}
-                placeholder="Search services offered..."
+                placeholder="Search Specialization..."
                 placeholderTextColor="#999"
                 value={searchQuery}
                 onChangeText={setSearchQuery}
@@ -1095,8 +1170,8 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
                 {filteredSubtree.length === 0 ? (
                   <Text style={styles.emptyText}>
                     {subtreeForSelectedRoot?.children?.length === 0
-                      ? 'No services offered'
-                      : 'No matching services offered'}
+                      ? 'No Specialization'
+                      : 'No matching Specialization'}
                   </Text>
                 ) : (
                   renderSubCategoryTree(filteredSubtree)
@@ -1117,7 +1192,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       </View>
 
       <View style={styles.field}>
-        <Text style={[styles.label, validationErrors.selectedEventIds && styles.labelError]}>Event Types *</Text>
+        <Text style={[styles.label, validationErrors.selectedEventIds && styles.labelError]}>Events you serve *</Text>
 
         {/* Event Dropdown Trigger */}
         <TouchableOpacity
@@ -1183,7 +1258,10 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         >
           <Pressable
             style={styles.modalOverlay}
-            onPress={() => setIsEventModalOpen(false)}
+            onPress={() => {
+              handleChange('selectedEventIds', []);
+              setIsEventModalOpen(false);
+            }}
           >
             <Pressable
               style={styles.modalContent}
@@ -1192,7 +1270,10 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Select Events</Text>
                 <TouchableOpacity
-                  onPress={() => setIsEventModalOpen(false)}
+                  onPress={() => {
+                    handleChange('selectedEventIds', []);
+                    setIsEventModalOpen(false);
+                  }}
                   style={styles.closeButton}
                 >
                   <X size={24} color="#666" />
@@ -1202,7 +1283,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               {/* Search Input */}
               <TextInput
                 style={styles.modalSearchInput}
-                placeholder="Search event types..."
+                placeholder="Search Events you serve..."
                 placeholderTextColor="#999"
                 value={eventSearchQuery}
                 onFocus={onFocus}
@@ -1248,6 +1329,131 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           </Pressable>
         </Modal>
       </View>
+
+      <View style={styles.field}>
+        <Text style={[styles.label, validationErrors.operatingLocations && styles.labelError]}>Operating Locations *</Text>
+        <TouchableOpacity
+          style={[
+            styles.dropdownTrigger,
+            validationErrors.operatingLocations && styles.dropdownTriggerError
+          ]}
+          onPress={() => setIsCityModalOpen(true)}
+          activeOpacity={0.7}
+        >
+          <Text style={[
+            styles.dropdownText,
+            (!data.operatingLocations || data.operatingLocations.length === 0) && styles.placeholder
+          ]}>
+            {data.operatingLocations && data.operatingLocations.length > 0
+              ? `${data.operatingLocations.length} locations selected`
+              : 'Select operating locations'}
+          </Text>
+          <ChevronDown size={20} color="#666" />
+        </TouchableOpacity>
+
+        {data.operatingLocations && data.operatingLocations.length > 0 && (
+          <View style={styles.selectedLocationsContainer}>
+            {data.operatingLocations.map((city: string) => (
+              <View key={city} style={styles.locationChip}>
+                <Text style={styles.locationChipText}>{city === '*' ? 'Pan India' : city}</Text>
+                <TouchableOpacity
+                  onPress={() => toggleCitySelection(city === '*' ? 'Pan India' : city)}
+                  style={styles.locationRemoveButton}
+                >
+                  <X size={14} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
+        {validationErrors.operatingLocations && (
+          <Text style={styles.errorText}>{validationErrors.operatingLocations}</Text>
+        )}
+      </View>
+
+      <Modal
+        visible={isCityModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsCityModalOpen(false)}
+      >
+        <View style={styles.bottomSheetOverlay}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setIsCityModalOpen(false)}
+          />
+          <View style={[styles.bottomSheetContent, { height: '80%' }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Operating Locations</Text>
+              <TouchableOpacity
+                onPress={() => setIsCityModalOpen(false)}
+                style={styles.closeButton}
+              >
+                <X size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.citySearchContainer}>
+              <Search size={20} color="#999" style={styles.searchIcon} />
+              <TextInput
+                style={styles.citySearchInput}
+                placeholder="Search cities..."
+                placeholderTextColor="#999"
+                value={citySearchQuery}
+                onFocus={onFocus}
+                onChangeText={setCitySearchQuery}
+              />
+            </View>
+
+            <ScrollView
+              style={styles.optionsList}
+              keyboardShouldPersistTaps="handled"
+            >
+              {filteredCities.map((city) => {
+                const isSelected = city === 'Pan India'
+                  ? data.operatingLocations?.includes('*')
+                  : data.operatingLocations?.includes(city);
+                return (
+                  <TouchableOpacity
+                    key={city}
+                    style={[
+                      styles.option,
+                      isSelected && styles.optionSelected
+                    ]}
+                    onPress={() => toggleCitySelection(city)}
+                  >
+                    <Text style={[
+                      styles.optionText,
+                      isSelected && styles.optionTextSelected
+                    ]}>
+                      {city}
+                    </Text>
+                    {isSelected && (
+                      <View style={styles.checkmark}>
+                        <Check size={14} color="#fff" />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            <View
+              style={[
+                styles.cityModalFooter,
+                { paddingBottom: insets.bottom + 40 }
+              ]}
+            >
+              <TouchableOpacity
+                style={styles.doneButton}
+                onPress={() => setIsCityModalOpen(false)}
+              >
+                <Text style={styles.doneButtonText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
 
     </View>
@@ -1659,5 +1865,125 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#1a1a1a',
     fontWeight: '500',
+  },
+  selectedLocationsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 0,
+    gap: 8,
+  },
+  locationChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  locationChipText: {
+    color: '#fff',
+    fontSize: 14,
+    marginRight: 6,
+  },
+  locationRemoveButton: {
+    padding: 2,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    margin: 20,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  modalSearchInputInside: {
+    flex: 1,
+    height: 48,
+    fontSize: 16,
+    color: '#1a1a1a',
+  },
+  optionsList: {
+    flex: 1,
+    maxHeight: 400,
+  },
+  option: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  optionSelected: {
+    backgroundColor: '#f0f7ff',
+  },
+  optionText: {
+    fontSize: 14,
+    color: '#1a1a1a',
+  },
+  optionTextSelected: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  checkmark: {
+    backgroundColor: '#007AFF',
+    borderRadius: 10,
+    padding: 2,
+  },
+  bottomSheetOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  bottomSheetContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    width: '100%',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 20,
+  },
+  citySearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f7f9',
+    marginHorizontal: 20,
+    marginVertical: 12,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#e1e5ea',
+  },
+  citySearchInput: {
+    flex: 1,
+    height: 48,
+    fontSize: 16,
+    color: '#1a1a1a',
+    marginLeft: 10,
+  },
+  cityModalFooter: {
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    backgroundColor: '#fff',
+  },
+  doneButton: {
+    backgroundColor: '#007AFF',
+    borderRadius: 12,
+    height: 56,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  doneButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
   },
 });

@@ -560,6 +560,9 @@ export default function BusinessDetailsScreen() {
       // If rental type is selected, filter by business_model = 'rental'
       if (type === 'rental') {
         businessQuery = businessQuery.eq('business_model', 'rental');
+      } else {
+        // If service type is selected, filter by business_model != 'rental'
+        businessQuery = businessQuery.neq('business_model', 'rental');
       }
 
       const { data: businessCats, error: businessError } = await businessQuery
@@ -1210,7 +1213,7 @@ export default function BusinessDetailsScreen() {
     if (selectedEventsWithPaths.length === 1) {
       return selectedEventsWithPaths[0].path;
     }
-    return `${selectedEventsWithPaths.length} sub-categories selected`;
+    return `${selectedEventsWithPaths.length} events selected`;
   };
 
   // Toggle event selection
@@ -1264,6 +1267,8 @@ export default function BusinessDetailsScreen() {
 
   const handleCategoryModalClose = () => {
     setIsCategoryModalOpen(false);
+    setSelectedCategoryIds([]);
+    setTempSelectedCategoryIds([]);
     setSearchQuery('');
   };
 
@@ -1408,9 +1413,10 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleEventModalClose = () => {
-    // Discard temp changes when X is clicked
+    // Discard temp changes and clear all selections when X is clicked
     setIsEventModalOpen(false);
-    // Reset search
+    setSelectedEventIds([]);
+    setTempSelectedEventIds([]);
     setEventSearchQuery('');
   };
 
@@ -2663,7 +2669,7 @@ export default function BusinessDetailsScreen() {
                       <View style={[styles.radioOuter, businessType === 'services' && styles.radioOuterSelected]}>
                         {businessType === 'services' && <View style={styles.radioInner} />}
                       </View>
-                      <Text style={styles.radioText}>Services</Text>
+                      <Text style={styles.radioText}>Service based</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.radioButton}
@@ -2673,13 +2679,13 @@ export default function BusinessDetailsScreen() {
                       <View style={[styles.radioOuter, businessType === 'rental' && styles.radioOuterSelected]}>
                         {businessType === 'rental' && <View style={styles.radioInner} />}
                       </View>
-                      <Text style={styles.radioText}>Rental</Text>
+                      <Text style={styles.radioText}>Rental based</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, (validationErrors.selectedCategoryIds || validationErrors.selectedRootCategoryId) && styles.editLabelError]}>Business Category *</Text>
+                  <Text style={[styles.editLabel, (validationErrors.selectedCategoryIds || validationErrors.selectedRootCategoryId) && styles.editLabelError]}>Primary Category *</Text>
                   <Dropdown
                     options={rootCategoriesForDropdown.map((n: any) => ({
                       label: n.icon ? `${n.icon} ${n.name}` : n.name,
@@ -2698,7 +2704,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.selectedCategoryIds && styles.editLabelError]}>Services Offered *</Text>
+                  <Text style={[styles.editLabel, validationErrors.selectedCategoryIds && styles.editLabelError]}>Specialization *</Text>
                   <TouchableOpacity
                     style={[
                       styles.dropdownTrigger,
@@ -2719,10 +2725,10 @@ export default function BusinessDetailsScreen() {
                       {!selectedRootCategoryId
                         ? 'Select a category first'
                         : selectedCategoriesWithPaths.length === 0
-                          ? 'Select services offered'
+                          ? 'Select Specialization'
                           : selectedCategoriesWithPaths.length === 1
                             ? selectedCategoriesWithPaths[0].path
-                            : `${selectedCategoriesWithPaths.length} services selected`}
+                            : `${selectedCategoriesWithPaths.length} Specialization selected`}
                     </Text>
                     <ChevronDown size={20} color={selectedRootCategoryId ? '#666' : '#ccc'} />
                   </TouchableOpacity>
@@ -2749,7 +2755,7 @@ export default function BusinessDetailsScreen() {
                           <TouchableOpacity
                             onPress={() => {
                               if (selectedCategoryIds.length <= 1) {
-                                Alert.alert('Validation Error', 'At least one service category must be selected.');
+                                Alert.alert('Validation Error', 'At least one Specialization must be selected.');
                                 return;
                               }
                               toggleCategorySelection(item.id);
@@ -2780,8 +2786,8 @@ export default function BusinessDetailsScreen() {
                         <View style={styles.categoryModalHeader}>
                           <Text style={styles.categoryModalTitle}>
                             {subtreeForSelectedRoot
-                              ? `Services offered under ${subtreeForSelectedRoot.name}`
-                              : 'Select Services offered'}
+                              ? `Specialization under ${subtreeForSelectedRoot.name}`
+                              : 'Select Specialization'}
                           </Text>
                           <TouchableOpacity
                             onPress={handleCategoryModalClose}
@@ -2793,7 +2799,7 @@ export default function BusinessDetailsScreen() {
 
                         <TextInput
                           style={styles.modalSearchInput}
-                          placeholder="Search services offered..."
+                          placeholder="Search Specialization..."
                           placeholderTextColor="#999"
                           value={searchQuery}
                           onChangeText={setSearchQuery}
@@ -2821,8 +2827,8 @@ export default function BusinessDetailsScreen() {
                           {filteredSubtreeChildren.length === 0 ? (
                             <Text style={styles.emptyText}>
                               {subtreeForSelectedRoot?.children?.length === 0
-                                ? 'No services offered'
-                                : 'No matching services offered'}
+                                ? 'No Specialization'
+                                : 'No matching Specialization'}
                             </Text>
                           ) : (
                             renderSubCategoryTreeForModal(filteredSubtreeChildren)
@@ -2843,7 +2849,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.selectedEventIds && styles.editLabelError]}>Event Types *</Text>
+                  <Text style={[styles.editLabel, validationErrors.selectedEventIds && styles.editLabelError]}>Events you serve *</Text>
 
                   {/* Event Dropdown Trigger */}
                   <TouchableOpacity
@@ -3279,7 +3285,7 @@ export default function BusinessDetailsScreen() {
               </View>
 
               <View style={styles.editSection}>
-                <Text style={styles.editSectionTitle}>Social Media</Text>
+                <Text style={styles.editSectionTitle}>Social Media (Optional)</Text>
 
                 <View style={styles.editField}>
                   <Text style={styles.editLabel}>Website</Text>
@@ -3350,7 +3356,7 @@ export default function BusinessDetailsScreen() {
               </View>
 
               <View style={styles.editSection}>
-                <Text style={styles.editSectionTitle}>Verification</Text>
+                <Text style={styles.editSectionTitle}>Verification (Optional)</Text>
 
                 <View style={styles.editField}>
                   <Text style={[styles.editLabel, validationErrors.business_registration_number && styles.editLabelError]}>PAN</Text>
