@@ -11,16 +11,16 @@ import {
   Keyboard,
   AppState,
   ScrollView,
+  Modal,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, X, CheckCircle2 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { supabaseCore } from '../lib/supabase';
 import BasicInformationStep, { BasicInformationStepRef } from '../components/registration/BasicInformationStep';
 import ServicesExperienceStep, { ServicesExperienceStepRef } from '../components/registration/ServicesExperienceStep';
-import LocationCoverageStep, { LocationCoverageStepRef } from '../components/registration/LocationCoverageStep';
 import VerificationStep, { VerificationStepRef } from '../components/registration/VerificationStep';
 import PortfolioSocialStep from '../components/registration/PortfolioSocialStep';
 import { pickMultipleImages, uploadMultipleBusinessImages, uploadMultipleVerificationDocuments, UploadDocumentData, uploadBusinessImage, setCoverImage } from '../lib/businessApi';
@@ -77,11 +77,11 @@ export default function BusinessRegistrationScreen() {
   const router = useRouter();
   const basicInfoStepRef = useRef<BasicInformationStepRef>(null);
   const servicesStepRef = useRef<ServicesExperienceStepRef>(null);
-  const locationStepRef = useRef<LocationCoverageStepRef>(null);
   const verificationStepRef = useRef<VerificationStepRef>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const [contentHeight, setContentHeight] = useState(0);
   const [containerHeight, setContainerHeight] = useState(0);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
   const insets = useSafeAreaInsets();
 
   // Save form data to AsyncStorage whenever it changes
@@ -147,6 +147,9 @@ export default function BusinessRegistrationScreen() {
         if (!prev.email && profile.email) {
           updated.email = profile.email;
         }
+        if (!prev.contactPersonName && (profile.first_name || profile.last_name)) {
+          updated.contactPersonName = `${profile.first_name || ''} ${profile.last_name || ''}`.trim();
+        }
         return updated;
       });
     }
@@ -167,143 +170,57 @@ export default function BusinessRegistrationScreen() {
     }
   };
 
-  const totalSteps = 5;
+  const totalSteps = 1;
 
   // Check if all mandatory fields are filled for current step
   const areMandatoryFieldsFilled = (): boolean => {
-    if (currentPage === 0) {
-      // Basic Information step - all fields must be filled AND valid
-      const hasBusinessName = !!(businessData.businessName?.trim());
-      const hasContactName = !!(businessData.contactPersonName?.trim());
-      const hasEmail = !!(businessData.email?.trim()) && validateEmail(businessData.email);
-      const hasPhone = !!(businessData.phoneNumber?.trim());
-      return hasBusinessName && hasContactName && hasEmail && hasPhone;
-    } else if (currentPage === 1) {
-      // Services & Experience step
-      const hasCategory = !!(businessData.selectedRootCategoryId || (businessData.selectedCategoryIds && businessData.selectedCategoryIds.length > 0));
-      const hasEvents = !!(businessData.selectedEventIds && businessData.selectedEventIds.length > 0);
-      const hasDescription = !!(businessData.businessDescription?.trim());
-      const hasExperience = !!(businessData.yearsOfExperience?.trim());
-      const hasBasePrice = !!(businessData.basePrice?.trim());
-      const hasPricingUnit = !!(businessData.pricingUnit?.trim());
-      return hasCategory && hasEvents && hasDescription && hasExperience && hasBasePrice && hasPricingUnit;
-    } else if (currentPage === 2) {
-      // Location & Coverage step
-      const hasAddress = !!(businessData.businessAddress?.trim());
-      const hasPincode = !!(businessData.pincode?.trim()) && businessData.pincode.length === 6;
-      const hasCity = !!(businessData.city?.trim());
-      const hasState = !!(businessData.state?.trim());
-      const hasOperatingLocations = !!(businessData.operatingLocations && businessData.operatingLocations.length > 0);
-      return hasAddress && hasPincode && hasCity && hasState && hasOperatingLocations;
-    } else if (currentPage === 3) {
-      // Verification step
-      const hasPanNumber = !!(businessData.panNumber?.trim());
-      const hasPanDoc = !!(businessData.verificationDocuments?.['pan'] && businessData.verificationDocuments['pan'].length > 0);
-      return hasPanNumber && hasPanDoc;
-    }
-    // Step 4 (Portfolio & Social) has no mandatory fields
-    return true;
+    const hasBusinessName = !!(businessData.businessName?.trim());
+    const hasContactName = !!(businessData.contactPersonName?.trim());
+    const hasEmail = !!(businessData.email?.trim()) && validateEmail(businessData.email);
+    const hasPhone = !!(businessData.phoneNumber?.trim());
+    const hasCategory = !!(businessData.selectedRootCategoryId || (businessData.selectedCategoryIds && businessData.selectedCategoryIds.length > 0));
+    const hasEvents = !!(businessData.selectedEventIds && businessData.selectedEventIds.length > 0);
+    const hasOperatingLocations = !!(businessData.operatingLocations && businessData.operatingLocations.length > 0);
+
+    return hasBusinessName && hasContactName && hasEmail && hasPhone && hasCategory && hasEvents && hasOperatingLocations;
   };
 
   const handleNextField = () => {
     const errors: Record<string, string> = {};
 
-    if (currentPage === 0) {
-      // Set validation errors for all empty mandatory fields so red borders appear
-      if (!businessData.businessName || !businessData.businessName.trim()) {
-        errors.businessName = 'Business name is required';
-      }
-      if (!businessData.contactPersonName || !businessData.contactPersonName.trim()) {
-        errors.contactPersonName = 'Contact person name is required';
-      }
-      if (!businessData.email || !businessData.email.trim()) {
-        errors.email = 'Email is required';
-      } else if (!validateEmail(businessData.email)) {
-        errors.email = 'Please enter a valid email address';
-      }
-      if (!businessData.phoneNumber || !businessData.phoneNumber.trim()) {
-        errors.phoneNumber = 'Business contact number is required';
-      }
+    if (!businessData.businessName || !businessData.businessName.trim()) {
+      errors.businessName = 'Business name is required';
+    }
+    if (!businessData.contactPersonName || !businessData.contactPersonName.trim()) {
+      errors.contactPersonName = 'Contact person name is required';
+    }
+    if (!businessData.email || !businessData.email.trim()) {
+      errors.email = 'Email is required';
+    } else if (!validateEmail(businessData.email)) {
+      errors.email = 'Please enter a valid email address';
+    }
+    if (!businessData.phoneNumber || !businessData.phoneNumber.trim()) {
+      errors.phoneNumber = 'Business contact number is required';
+    }
+    if (!businessData.selectedCategoryIds || businessData.selectedCategoryIds.length === 0) {
+      errors.selectedCategoryIds = 'Please select at least one sub-category';
+    }
+    if (!businessData.selectedEventIds || businessData.selectedEventIds.length === 0) {
+      errors.selectedEventIds = 'Please select at least one event type';
+    }
+    if (!businessData.operatingLocations || businessData.operatingLocations.length === 0) {
+      errors.operatingLocations = 'Please select at least one operating location';
+    }
 
-      // Apply validation errors to highlight empty fields with red borders
-      if (Object.keys(errors).length > 0) {
-        setValidationErrors(errors);
-      }
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+    }
 
-      // Focus the next empty mandatory field
+    // Focus first empty field
+    if (errors.businessName || errors.contactPersonName || errors.email || errors.phoneNumber) {
       basicInfoStepRef.current?.focusNextEmptyField();
-    } else if (currentPage === 1) {
-      // Set validation errors for all empty mandatory fields so red borders appear
-      if (!businessData.selectedCategoryIds || businessData.selectedCategoryIds.length === 0) {
-        errors.selectedCategoryIds = 'Please select at least one sub-category';
-      }
-      if (!businessData.selectedEventIds || businessData.selectedEventIds.length === 0) {
-        errors.selectedEventIds = 'Please select at least one event type';
-      }
-      if (!businessData.businessDescription || !businessData.businessDescription.trim()) {
-        errors.businessDescription = 'Business description is required';
-      }
-      if (!businessData.yearsOfExperience || !businessData.yearsOfExperience.trim()) {
-        errors.yearsOfExperience = 'Years of experience is required';
-      }
-      if (!businessData.basePrice || !businessData.basePrice.trim()) {
-        errors.basePrice = 'Base price is required';
-      }
-      if (!businessData.pricingUnit || !businessData.pricingUnit.trim()) {
-        errors.pricingUnit = 'Pricing unit is required';
-      }
-
-      // Apply validation errors to highlight empty fields with red borders
-      if (Object.keys(errors).length > 0) {
-        setValidationErrors(errors);
-      }
-
-      // Focus the next empty mandatory field
+    } else {
       servicesStepRef.current?.focusNextEmptyField();
-    } else if (currentPage === 2) {
-      // Set validation errors for all empty mandatory fields so red borders appear
-      if (!businessData.businessAddress || !businessData.businessAddress.trim()) {
-        errors.businessAddress = 'Business address is required';
-      }
-      if (!businessData.pincode || !businessData.pincode.trim()) {
-        errors.pincode = 'Pincode is required';
-      } else if (businessData.pincode.length !== 6) {
-        errors.pincode = 'Pincode must be 6 digits';
-      }
-      if (!businessData.city || !businessData.city.trim()) {
-        errors.city = 'Area is required';
-      }
-      if (!businessData.state || !businessData.state.trim()) {
-        errors.state = 'State is required';
-      }
-      if (!businessData.operatingLocations || businessData.operatingLocations.length === 0) {
-        errors.operatingLocations = 'At least one operating location is required';
-      }
-
-      // Apply validation errors to highlight empty fields with red borders
-      if (Object.keys(errors).length > 0) {
-        setValidationErrors(errors);
-      }
-
-      // Focus the next empty mandatory field
-      locationStepRef.current?.focusNextEmptyField();
-    } else if (currentPage === 3) {
-      // Set validation errors for all empty mandatory fields so red borders appear
-      if (!businessData.panNumber || !businessData.panNumber.trim()) {
-        errors.panNumber = 'PAN number is required';
-      }
-      const panDocuments = businessData.verificationDocuments?.['pan'];
-      if (!panDocuments || panDocuments.length === 0) {
-        errors.panDocument = 'PAN card document is required. Please upload your PAN card.';
-      }
-
-      // Apply validation errors to highlight empty fields with red borders
-      if (Object.keys(errors).length > 0) {
-        setValidationErrors(errors);
-      }
-
-      // Focus the next empty mandatory field
-      verificationStepRef.current?.focusNextEmptyField();
     }
   };
 
@@ -313,94 +230,70 @@ export default function BusinessRegistrationScreen() {
     scrollViewRef.current?.scrollTo({ y: 0, animated: false });
   }, [currentPage]);
 
-  const handleNext = () => {
-    // Dismiss keyboard before validation
-    Keyboard.dismiss();
-
-    // Validate current step before proceeding
+  const validateCurrentPage = (): boolean => {
     const errors: Record<string, string> = {};
 
-    if (currentPage === 0) {
-      // Basic Information step
-      if (!businessData.businessName || !businessData.businessName.trim()) {
-        errors.businessName = 'Business name is required';
-      }
-      if (!businessData.contactPersonName || !businessData.contactPersonName.trim()) {
-        errors.contactPersonName = 'Contact person name is required';
-      }
-      if (!businessData.email || !businessData.email.trim()) {
-        errors.email = 'Email is required';
-      } else if (!validateEmail(businessData.email)) {
-        errors.email = 'Please enter a valid email address';
-      }
-      if (!businessData.phoneNumber || !businessData.phoneNumber.trim()) {
-        errors.phoneNumber = 'Business contact number is required';
-      }
-    } else if (currentPage === 1) {
-      // Services & Experience step
-      // Must have at least one sub-category selected
-      if (!businessData.selectedCategoryIds || businessData.selectedCategoryIds.length === 0) {
-        errors.selectedCategoryIds = 'Please select at least one sub-category';
-      }
-      if (!businessData.selectedEventIds || businessData.selectedEventIds.length === 0) {
-        errors.selectedEventIds = 'Please select at least one event type';
-      }
-      if (!businessData.businessDescription || !businessData.businessDescription.trim()) {
-        errors.businessDescription = 'Business description is required';
-      }
-      if (!businessData.yearsOfExperience || !businessData.yearsOfExperience.trim()) {
-        errors.yearsOfExperience = 'Years of experience is required';
-      }
-      if (!businessData.basePrice || !businessData.basePrice.trim()) {
-        errors.basePrice = 'Base price is required';
-      }
-      if (!businessData.pricingUnit || !businessData.pricingUnit.trim()) {
-        errors.pricingUnit = 'Pricing unit is required';
-      }
-    } else if (currentPage === 2) {
-      // Location & Coverage step
-      if (!businessData.businessAddress || !businessData.businessAddress.trim()) {
-        errors.businessAddress = 'Business address is required';
-      }
-      if (!businessData.pincode || !businessData.pincode.trim()) {
-        errors.pincode = 'Pincode is required';
-      } else if (businessData.pincode.length !== 6) {
-        errors.pincode = 'Pincode must be 6 digits';
-      }
-      if (!businessData.city || !businessData.city.trim()) {
-        errors.city = 'Area is required';
-      }
-      if (!businessData.state || !businessData.state.trim()) {
-        errors.state = 'State is required';
-      }
-      if (!businessData.operatingLocations || businessData.operatingLocations.length === 0) {
-        errors.operatingLocations = 'At least one operating location is required';
-      }
-    } else if (currentPage === 3) {
-      // Verification step - validate PAN number and PAN card image
-      if (!businessData.panNumber || !businessData.panNumber.trim()) {
-        errors.panNumber = 'PAN number is required';
-      }
-
-      const panDocuments = businessData.verificationDocuments?.['pan'];
-      if (!panDocuments || panDocuments.length === 0) {
-        errors.panDocument = 'PAN card document is required. Please upload your PAN card.';
+    // Validate all fields
+    if (!businessData.businessName || !businessData.businessName.trim()) {
+      errors.businessName = 'Business name is required';
+    }
+    if (!businessData.contactPersonName || !businessData.contactPersonName.trim()) {
+      errors.contactPersonName = 'Contact person name is required';
+    }
+    if (!businessData.email || !businessData.email.trim()) {
+      errors.email = 'Email is required';
+    } else if (!validateEmail(businessData.email)) {
+      errors.email = 'Please enter a valid email address';
+    }
+    if (!businessData.phoneNumber || !businessData.phoneNumber.trim()) {
+      errors.phoneNumber = 'Business contact number is required';
+    } else {
+      const cleanedPhone = stripCountryCode(businessData.phoneNumber);
+      if (cleanedPhone.length !== 10) {
+        errors.phoneNumber = 'Phone number must be exactly 10 digits';
       }
     }
-    // Step 4 (Portfolio & Social) has no mandatory fields
+    if (!businessData.selectedRootCategoryId) {
+      errors.selectedRootCategoryId = 'Please select a primary category';
+    }
+    if (!businessData.selectedCategoryIds || businessData.selectedCategoryIds.length === 0) {
+      errors.selectedCategoryIds = 'Please select at least one specialization';
+    }
+    if (!businessData.selectedEventIds || businessData.selectedEventIds.length === 0) {
+      errors.selectedEventIds = 'Please select at least one event type';
+    }
+    if (!businessData.operatingLocations || businessData.operatingLocations.length === 0) {
+      errors.operatingLocations = 'Please select at least one operating location';
+    }
 
     if (Object.keys(errors).length > 0) {
       setValidationErrors(errors);
       Alert.alert(
         'Validation Error',
-        'Please complete all required fields:\n\n' + Object.values(errors).join('\n'),
+        'Please complete all required fields',
         [{ text: 'OK' }]
       );
-      return;
+
+      // Focus first error field for better UX
+      if (errors.businessName || errors.contactPersonName || errors.phoneNumber || errors.email) {
+        basicInfoStepRef.current?.focusNextEmptyField();
+      } else {
+        servicesStepRef.current?.focusNextEmptyField();
+      }
+
+      return false;
     }
 
-    // Clear validation errors when moving to next step
+    // Clear validation errors if validation passes
     setValidationErrors({});
+    return true;
+  };
+
+  const handleNext = () => {
+    // Dismiss keyboard before validation
+    Keyboard.dismiss();
+
+    if (!validateCurrentPage()) return;
 
     if (currentPage < totalSteps - 1) {
       setCurrentPage(currentPage + 1);
@@ -452,13 +345,13 @@ export default function BusinessRegistrationScreen() {
               text: 'Cancel',
               style: 'destructive',
               onPress: async () => {
-                  // Clear saved data and set skip flag when user cancels
-                  await Promise.all([
-                    clearSavedData(),
-                    AsyncStorage.setItem(SKIP_BUSINESS_REGISTRATION_KEY, 'true')
-                  ]);
-                  console.log('Navigating to dashboard after cancel');
-                  router.replace('/(tabs)');
+                // Clear saved data and set skip flag when user cancels
+                await Promise.all([
+                  clearSavedData(),
+                  AsyncStorage.setItem(SKIP_BUSINESS_REGISTRATION_KEY, 'true')
+                ]);
+                console.log('Navigating to dashboard after cancel');
+                router.replace('/(tabs)');
               },
             },
           ]
@@ -577,38 +470,11 @@ export default function BusinessRegistrationScreen() {
   };
 
   const handleSubmit = async () => {
-    // 0. Validate Phone Number (10 digits)
-    if (businessData.phoneNumber && businessData.phoneNumber.trim()) {
-      const cleanedPhone = stripCountryCode(businessData.phoneNumber);
-      if (cleanedPhone.length !== 10) {
-        Alert.alert('Validation Error', 'Business contact number must be exactly 10 digits.');
-        return;
-      }
-    }
+    // Dismiss keyboard before validation
+    Keyboard.dismiss();
 
-    // Validate PAN number is provided
-    if (!businessData.panNumber || !businessData.panNumber.trim()) {
-      Alert.alert('Validation Error', 'PAN is required. Please enter your PAN number.');
-      setSubmitting(false);
-      return;
-    }
-
-    // Validate PAN format
-    const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
-    if (!panRegex.test(businessData.panNumber.trim().toUpperCase())) {
-      Alert.alert('Validation Error', 'Please enter a valid PAN number (e.g., ABCDE1234F).');
-      setSubmitting(false);
-      return;
-    }
-
-
-    // Validate PAN document is uploaded
-    const panDocuments = businessData.verificationDocuments?.['pan'];
-    if (!panDocuments || panDocuments.length === 0) {
-      Alert.alert('Validation Error', 'PAN card document is required. Please upload your PAN card in the Verification step.');
-      setSubmitting(false);
-      return;
-    }
+    // Perform comprehensive validation
+    if (!validateCurrentPage()) return;
 
     setSubmitting(true);
 
@@ -633,29 +499,29 @@ export default function BusinessRegistrationScreen() {
           vendor_id: user?.id,
           business_name: businessData.businessName,
           business_email: businessData.email,
-          description: businessData.businessDescription,
-          address: businessData.businessAddress,
-          city: businessData.city,
-          state: businessData.state,
-          pincode: businessData.pincode || null,
-          locality: businessData.locality || null,
+          description: null,
+          address: null,
+          city: null,
+          state: null,
+          pincode: null,
+          locality: null,
           latitude: null,
           longitude: null,
           operating_locations: businessData.operatingLocations || [],
-          service_radius_km: businessData.serviceRadiusKm || 0,
+          service_radius_km: 0,
           contact_person_name: businessData.contactPersonName,
           contact_person_phone: stripCountryCode(businessData.phoneNumber), // Ensure no +91
-          contact_person_role: businessData.contactPersonRole || null,
-          business_registration_number: businessData.panNumber || null, // PAN stored in business_registration_number field
-          website_url: businessData.websiteUrl || null,
-          instagram_url: businessData.instagramUrl || null,
-          facebook_url: businessData.facebookUrl || null,
-          youtube_url: businessData.youtubeUrl || null,
-          cover_photo_url: null, // Will be set after uploading cover image
-          years_experience: parseYearsOfExperience(businessData.yearsOfExperience || '0'),
-          gst_number: businessData.gstNumber || null,
+          contact_person_role: null,
+          business_registration_number: null,
+          website_url: null,
+          instagram_url: null,
+          facebook_url: null,
+          youtube_url: null,
+          cover_photo_url: null,
+          years_experience: 0,
+          gst_number: null,
           status: 'pending',
-          availability: businessData.operatingHours || null, // Map operatingHours to availability column
+          availability: null,
           subscription_status: 'trial',
         })
         .select()
@@ -673,7 +539,7 @@ export default function BusinessRegistrationScreen() {
             field_name: 'businessType',
             field_value: businessData.businessType
           });
-        
+
         if (formError) {
           console.error('Error saving businessType:', formError);
         }
@@ -803,29 +669,11 @@ export default function BusinessRegistrationScreen() {
         }
       }
 
-      // Step 7: Create default package with pricing info
-      if (businessData.basePrice && businessData.pricingUnit) {
-        try {
-          // Use 'Standard Package' as default name
-          await createPackage({
-            business_id: createdBusiness.id,
-            package_name: 'Standard Package',
-            package_type: 'fixed', // Default type, can be updated later
-            base_price: parseFloat(businessData.basePrice),
-            price_unit: businessData.pricingUnit,
-            included_services: [],
-            is_active: true,
-            sort_order: 0,
-          });
-        } catch (pkgError) {
-          console.error('Error creating default package:', pkgError);
-          // Continue execution, don't block success just because package creation failed (though it shouldn't)
-        }
-      }
+
 
       // Clear saved form data before navigating
       await clearSavedData();
-      
+
       // Reset local state to ensure next registration starts fresh
       setBusinessData({ businessType: 'services' });
       setCurrentPage(0);
@@ -834,7 +682,7 @@ export default function BusinessRegistrationScreen() {
       // Update profile in AuthContext to include the new business flag
       await refreshProfile();
 
-      router.replace('/(tabs)');
+      setShowSuccessModal(true);
     } catch (error: any) {
       console.error('Error submitting business:', error);
       alert(error.message);
@@ -845,66 +693,25 @@ export default function BusinessRegistrationScreen() {
 
   const steps = [
     {
-      title: 'Basic Information',
-      subtitle: 'Tell us about your business',
+      title: 'Business Registration',
+      subtitle: 'Complete these details to get started',
       component: (
-        <BasicInformationStep
-          ref={basicInfoStepRef}
-          data={businessData}
-          onUpdate={updateBusinessData}
-          validationErrors={validationErrors}
-          onFocus={handleFieldFocus}
-        />
-      ),
-    },
-    {
-      title: 'Services & Experience',
-      subtitle: 'What services do you provide?',
-      component: (
-        <ServicesExperienceStep
-          ref={servicesStepRef}
-          data={businessData}
-          onUpdate={updateBusinessData}
-          validationErrors={validationErrors}
-          onFocus={handleFieldFocus}
-        />
-      ),
-    },
-    {
-      title: 'Location & Coverage',
-      subtitle: 'Where do you operate?',
-      component: (
-        <LocationCoverageStep
-          ref={locationStepRef}
-          data={businessData}
-          onUpdate={updateBusinessData}
-          validationErrors={validationErrors}
-          onFocus={handleFieldFocus}
-        />
-      ),
-    },
-    {
-      title: 'Verification',
-      subtitle: 'Verify your business',
-      component: (
-        <VerificationStep
-          ref={verificationStepRef}
-          data={businessData}
-          onUpdate={updateBusinessData}
-          validationErrors={validationErrors}
-          onFocus={handleFieldFocus}
-        />
-      ),
-    },
-    {
-      title: 'Portfolio & Social',
-      subtitle: 'Showcase your work',
-      component: (
-        <PortfolioSocialStep
-          data={businessData}
-          onUpdate={updateBusinessData}
-          onFocus={handleFieldFocus}
-        />
+        <View>
+          <BasicInformationStep
+            ref={basicInfoStepRef}
+            data={businessData}
+            onUpdate={updateBusinessData}
+            validationErrors={validationErrors}
+            onFocus={handleFieldFocus}
+          />
+          <ServicesExperienceStep
+            ref={servicesStepRef}
+            data={businessData}
+            onUpdate={updateBusinessData}
+            validationErrors={validationErrors}
+            onFocus={handleFieldFocus}
+          />
+        </View>
       ),
     },
   ];
@@ -1000,6 +807,45 @@ export default function BusinessRegistrationScreen() {
           )}
         </View>
       </KeyboardAvoidingView>
+
+      {/* Success Modal */}
+      <Modal
+        visible={showSuccessModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => router.replace('/(tabs)')}
+      >
+        <View style={styles.successModalOverlay}>
+          <View style={styles.successModalContent}>
+            <View style={styles.successIconContainer}>
+              <CheckCircle2 size={60} color="#34C759" />
+            </View>
+
+            <Text style={styles.successModalTitle}>Welcome to BookMyVendor!</Text>
+
+            <Text style={styles.successModalMessage}>
+              Thanks for joining us! Your business will be visible on our website after a quick review <Text style={{ fontWeight: '700' }}>(typically within 48 hours)</Text>.
+            </Text>
+
+            <View style={styles.successInfoBox}>
+              <Text style={styles.successInfoBoxText}>
+                To get the most out of your listing, please update your profile with photos, videos, and social links from your business settings. A detailed profile helps build trust with new customers!
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.successModalButton}
+              onPress={() => {
+                setShowSuccessModal(false);
+                router.replace('/(tabs)');
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.successModalButtonText}>Let's Go!</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScreenBackground>
   );
 }
@@ -1149,5 +995,81 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     fontSize: 16,
     color: '#1a1a1a',
+  },
+  successModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  successModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 28,
+    padding: 32,
+    width: '100%',
+    maxWidth: 400,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.2,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  successIconContainer: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#F2FBF4',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  successModalTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#1a1a1a',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  successModalMessage: {
+    fontSize: 15,
+    color: '#444',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 20,
+  },
+  successInfoBox: {
+    backgroundColor: '#F0F7FF',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 32,
+    borderWidth: 1,
+    borderColor: '#D0E7FF',
+  },
+  successInfoBoxText: {
+    fontSize: 14,
+    color: '#0056B3',
+    lineHeight: 20,
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  successModalButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 16,
+    width: '100%',
+    alignItems: 'center',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  successModalButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
   },
 });

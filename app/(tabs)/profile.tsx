@@ -63,6 +63,12 @@ export default function ProfileScreen() {
     return stripCountryCode(profile?.phone) || '';
   };
 
+  const getInitials = (firstName: string, lastName: string) => {
+    const f = firstName.trim() ? firstName.trim()[0] : '';
+    const l = lastName.trim() ? lastName.trim()[0] : '';
+    return (f + l).toUpperCase();
+  };
+
   const handleRequestDeletionOtp = async () => {
     const phone = formattedPhone();
     if (!phone) {
@@ -604,6 +610,12 @@ export default function ProfileScreen() {
                 >
                   {photoUri ? (
                     <Image source={{ uri: photoUri }} style={styles.photo} />
+                  ) : values.firstName || values.lastName ? (
+                    <View style={[styles.photo, styles.initialsContainer]}>
+                      <Text style={styles.initialsText}>
+                        {getInitials(values.firstName, values.lastName)}
+                      </Text>
+                    </View>
                   ) : (
                     <View style={styles.photoPlaceholder}>
                       <Camera size={32} color={Colors.text.tertiary} />
@@ -868,6 +880,16 @@ const styles = StyleSheet.create({
     width: 120,
     height: 120,
     borderRadius: 60,
+  },
+  initialsContainer: {
+    backgroundColor: Colors.primary.main,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  initialsText: {
+    color: Colors.neutral.white,
+    fontSize: 40,
+    fontWeight: '700',
   },
   photoPlaceholder: {
     width: 120,

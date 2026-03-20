@@ -262,7 +262,6 @@ export default function BusinessDetailsScreen() {
 
   // Refs for keyboard navigation in edit form
   const contactPersonNameRef = useRef<TextInput>(null);
-  const contactPersonRoleRef = useRef<TextInput>(null);
   const businessEmailRef = useRef<TextInput>(null);
   const contactPersonPhoneRef = useRef<TextInput>(null);
   const businessDescriptionRef = useRef<TextInput>(null);
@@ -358,7 +357,7 @@ export default function BusinessDetailsScreen() {
       setIsOffline(false);
       try {
         AsyncStorage.setItem(`business_details_${id}`, JSON.stringify(businessRes.data));
-      } catch (e) {}
+      } catch (e) { }
 
       const dataToEdit = businessRes.data ? { ...businessRes.data } : {};
       if (dataToEdit.contact_person_phone) {
@@ -529,10 +528,10 @@ export default function BusinessDetailsScreen() {
         setSelectedCategoryIds(businessCategoryIds);
         setSelectedEventIds(eventCategoryIds);
 
-        return { 
-          businessIds: businessCategoryIds, 
-          eventIds: eventCategoryIds, 
-          businessType: determinedBusinessType 
+        return {
+          businessIds: businessCategoryIds,
+          eventIds: eventCategoryIds,
+          businessType: determinedBusinessType
         };
       }
 
@@ -561,6 +560,9 @@ export default function BusinessDetailsScreen() {
       // If rental type is selected, filter by business_model = 'rental'
       if (type === 'rental') {
         businessQuery = businessQuery.eq('business_model', 'rental');
+      } else {
+        // If service type is selected, filter by business_model != 'rental'
+        businessQuery = businessQuery.neq('business_model', 'rental');
       }
 
       const { data: businessCats, error: businessError } = await businessQuery
@@ -1211,7 +1213,7 @@ export default function BusinessDetailsScreen() {
     if (selectedEventsWithPaths.length === 1) {
       return selectedEventsWithPaths[0].path;
     }
-    return `${selectedEventsWithPaths.length} sub-categories selected`;
+    return `${selectedEventsWithPaths.length} events selected`;
   };
 
   // Toggle event selection
@@ -1265,6 +1267,8 @@ export default function BusinessDetailsScreen() {
 
   const handleCategoryModalClose = () => {
     setIsCategoryModalOpen(false);
+    setSelectedCategoryIds([]);
+    setTempSelectedCategoryIds([]);
     setSearchQuery('');
   };
 
@@ -1282,6 +1286,59 @@ export default function BusinessDetailsScreen() {
     setSelectedCategoryIds([...tempSelectedCategoryIds]);
     setIsCategoryModalOpen(false);
     setSearchQuery('');
+  };
+
+  // Select All / Deselect All helpers for Services modal
+  const getAllSubtreeIds = (): string[] => {
+    if (!subtreeForSelectedRoot) return [];
+    const getAllIds = (nodes: any[]): string[] => {
+      let ids: string[] = [];
+      nodes.forEach((node) => {
+        ids.push(node.id);
+        if (node.children?.length > 0) ids = [...ids, ...getAllIds(node.children)];
+      });
+      return ids;
+    };
+    return getAllIds(subtreeForSelectedRoot.children || []);
+  };
+
+  const handleSelectAllServices = () => {
+    const allIds = getAllSubtreeIds();
+    const allSelected = allIds.every((id) => tempSelectedCategoryIds.includes(id));
+    if (allSelected) {
+      // Deselect all
+      setTempSelectedCategoryIds([]);
+    } else {
+      // Select all — also expand all nodes
+      setTempSelectedCategoryIds(allIds);
+      setExpandedCategoryIds((prev) => new Set([...prev, ...allIds]));
+    }
+  };
+
+  const isAllServicesSelected = (): boolean => {
+    const allIds = getAllSubtreeIds();
+    return allIds.length > 0 && allIds.every((id) => tempSelectedCategoryIds.includes(id));
+  };
+
+  // Select All / Deselect All helpers for Events modal
+  const getAllEventLeafIds = (): string[] => {
+    return allEventCategories.map((c) => c.id);
+  };
+
+  const handleSelectAllEvents = () => {
+    const allIds = getAllEventLeafIds();
+    const allSelected = allIds.every((id) => tempSelectedEventIds.includes(id));
+    if (allSelected) {
+      setTempSelectedEventIds([]);
+    } else {
+      setTempSelectedEventIds(allIds);
+      setExpandedEventCategoryIds((prev) => new Set([...prev, ...allIds]));
+    }
+  };
+
+  const isAllEventsSelected = (): boolean => {
+    const allIds = getAllEventLeafIds();
+    return allIds.length > 0 && allIds.every((id) => tempSelectedEventIds.includes(id));
   };
 
   const toggleTempCategorySelection = (categoryId: string) => {
@@ -1356,9 +1413,10 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleEventModalClose = () => {
-    // Discard temp changes when X is clicked
+    // Discard temp changes and clear all selections when X is clicked
     setIsEventModalOpen(false);
-    // Reset search
+    setSelectedEventIds([]);
+    setTempSelectedEventIds([]);
     setEventSearchQuery('');
   };
 
@@ -1923,10 +1981,8 @@ export default function BusinessDetailsScreen() {
       errors.operating_locations = 'At least one operating location is required';
     }
 
-    // 2. Validate PAN (Required and format)
-    if (!editData.business_registration_number || !editData.business_registration_number.trim()) {
-      errors.business_registration_number = 'PAN number is required';
-    } else {
+    // 2. Validate PAN (Optional but format if provided)
+    if (editData.business_registration_number && editData.business_registration_number.trim()) {
       const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
       if (!panRegex.test(editData.business_registration_number.toUpperCase())) {
         errors.business_registration_number = 'Please enter a valid PAN (e.g., ABCDE1234F)';
@@ -1935,17 +1991,13 @@ export default function BusinessDetailsScreen() {
 
     // 3. Validate GST (format if provided)
     if (editData.gst_number && editData.gst_number.trim()) {
-      const gstRegex = /^\d{2}[A-Z]{5}\d{4}[A-Z]{1}\d{1}Z\d{1}$/;
+      const gstRegex = /^[A-Z0-9]{15}$/;
       if (!gstRegex.test(editData.gst_number.toUpperCase())) {
-        errors.gst_number = 'Please enter a valid GST number';
+        errors.gst_number = 'GST number must be exactly 15 alphanumeric characters';
       }
     }
 
-    // 4. Validate PAN document is uploaded
-    const panDocs = documentsByType['pan'] || [];
-    if (panDocs.length === 0) {
-      errors.panDocument = 'PAN card document is required';
-    }
+
 
     // 5. Validate at least one service category ONLY if categories are loaded
     if (allBusinessCategories.length > 0) {
@@ -2070,7 +2122,11 @@ export default function BusinessDetailsScreen() {
         }
       }
 
-      Alert.alert('Success', 'Business details updated successfully');
+      Alert.alert(
+        'Success',
+        'Business details updated successfully',
+        [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
+      );
       await loadData(); // Reload to refresh the display
       await loadVerificationDocuments(); // Reload documents
     } catch (error: any) {
@@ -2548,24 +2604,9 @@ export default function BusinessDetailsScreen() {
                     placeholderTextColor="#999"
                     returnKeyType="next"
                     onFocus={handleFieldFocus}
-                    onSubmitEditing={() => contactPersonRoleRef.current?.focus()}
-                  />
-                  {validationErrors.contact_person_name && <Text style={styles.validationErrorText}>{validationErrors.contact_person_name}</Text>}
-                </View>
-
-                <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Contact Person Role</Text>
-                  <TextInput
-                    ref={contactPersonRoleRef}
-                    style={styles.editInput}
-                    value={editData.contact_person_role || ''}
-                    onChangeText={(text) => setEditData({ ...editData, contact_person_role: text })}
-                    placeholder="e.g., Owner, Manager, Director"
-                    placeholderTextColor="#999"
-                    returnKeyType="next"
-                    onFocus={handleFieldFocus}
                     onSubmitEditing={() => businessEmailRef.current?.focus()}
                   />
+                  {validationErrors.contact_person_name && <Text style={styles.validationErrorText}>{validationErrors.contact_person_name}</Text>}
                 </View>
 
                 <View style={styles.editField}>
@@ -2632,7 +2673,7 @@ export default function BusinessDetailsScreen() {
                       <View style={[styles.radioOuter, businessType === 'services' && styles.radioOuterSelected]}>
                         {businessType === 'services' && <View style={styles.radioInner} />}
                       </View>
-                      <Text style={styles.radioText}>Services</Text>
+                      <Text style={styles.radioText}>Service based</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.radioButton}
@@ -2642,13 +2683,13 @@ export default function BusinessDetailsScreen() {
                       <View style={[styles.radioOuter, businessType === 'rental' && styles.radioOuterSelected]}>
                         {businessType === 'rental' && <View style={styles.radioInner} />}
                       </View>
-                      <Text style={styles.radioText}>Rental</Text>
+                      <Text style={styles.radioText}>Rental based</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, (validationErrors.selectedCategoryIds || validationErrors.selectedRootCategoryId) && styles.editLabelError]}>Business Category *</Text>
+                  <Text style={[styles.editLabel, (validationErrors.selectedCategoryIds || validationErrors.selectedRootCategoryId) && styles.editLabelError]}>Primary Category *</Text>
                   <Dropdown
                     options={rootCategoriesForDropdown.map((n: any) => ({
                       label: n.icon ? `${n.icon} ${n.name}` : n.name,
@@ -2667,7 +2708,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.selectedCategoryIds && styles.editLabelError]}>Services Offered *</Text>
+                  <Text style={[styles.editLabel, validationErrors.selectedCategoryIds && styles.editLabelError]}>Specialization *</Text>
                   <TouchableOpacity
                     style={[
                       styles.dropdownTrigger,
@@ -2688,10 +2729,10 @@ export default function BusinessDetailsScreen() {
                       {!selectedRootCategoryId
                         ? 'Select a category first'
                         : selectedCategoriesWithPaths.length === 0
-                          ? 'Select services offered'
+                          ? 'Select Specialization'
                           : selectedCategoriesWithPaths.length === 1
                             ? selectedCategoriesWithPaths[0].path
-                            : `${selectedCategoriesWithPaths.length} services selected`}
+                            : `${selectedCategoriesWithPaths.length} Specialization selected`}
                     </Text>
                     <ChevronDown size={20} color={selectedRootCategoryId ? '#666' : '#ccc'} />
                   </TouchableOpacity>
@@ -2718,7 +2759,7 @@ export default function BusinessDetailsScreen() {
                           <TouchableOpacity
                             onPress={() => {
                               if (selectedCategoryIds.length <= 1) {
-                                Alert.alert('Validation Error', 'At least one service category must be selected.');
+                                Alert.alert('Validation Error', 'At least one Specialization must be selected.');
                                 return;
                               }
                               toggleCategorySelection(item.id);
@@ -2749,8 +2790,8 @@ export default function BusinessDetailsScreen() {
                         <View style={styles.categoryModalHeader}>
                           <Text style={styles.categoryModalTitle}>
                             {subtreeForSelectedRoot
-                              ? `Services offered under ${subtreeForSelectedRoot.name}`
-                              : 'Select Services offered'}
+                              ? `Specialization under ${subtreeForSelectedRoot.name}`
+                              : 'Select Specialization'}
                           </Text>
                           <TouchableOpacity
                             onPress={handleCategoryModalClose}
@@ -2762,11 +2803,25 @@ export default function BusinessDetailsScreen() {
 
                         <TextInput
                           style={styles.modalSearchInput}
-                          placeholder="Search services offered..."
+                          placeholder="Search Specialization..."
                           placeholderTextColor="#999"
                           value={searchQuery}
                           onChangeText={setSearchQuery}
                         />
+
+                        {/* Select All strip */}
+                        <TouchableOpacity
+                          style={styles.selectAllRow}
+                          onPress={handleSelectAllServices}
+                          activeOpacity={0.7}
+                        >
+                          <View style={[styles.selectAllCheck, isAllServicesSelected() && styles.selectAllCheckActive]}>
+                            {isAllServicesSelected() && <Check size={12} color="#fff" strokeWidth={3} />}
+                          </View>
+                          <Text style={[styles.selectAllText, isAllServicesSelected() && styles.selectAllTextActive]}>
+                            {isAllServicesSelected() ? 'Deselect All' : 'Select All'}
+                          </Text>
+                        </TouchableOpacity>
 
                         <ScrollView
                           style={styles.modalCategoryTree}
@@ -2776,8 +2831,8 @@ export default function BusinessDetailsScreen() {
                           {filteredSubtreeChildren.length === 0 ? (
                             <Text style={styles.emptyText}>
                               {subtreeForSelectedRoot?.children?.length === 0
-                                ? 'No services offered'
-                                : 'No matching services offered'}
+                                ? 'No Specialization'
+                                : 'No matching Specialization'}
                             </Text>
                           ) : (
                             renderSubCategoryTreeForModal(filteredSubtreeChildren)
@@ -2798,7 +2853,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.selectedEventIds && styles.editLabelError]}>Event Types *</Text>
+                  <Text style={[styles.editLabel, validationErrors.selectedEventIds && styles.editLabelError]}>Events you serve *</Text>
 
                   {/* Event Dropdown Trigger */}
                   <TouchableOpacity
@@ -2882,6 +2937,20 @@ export default function BusinessDetailsScreen() {
                           value={eventSearchQuery}
                           onChangeText={setEventSearchQuery}
                         />
+
+                        {/* Select All strip */}
+                        <TouchableOpacity
+                          style={styles.selectAllRow}
+                          onPress={handleSelectAllEvents}
+                          activeOpacity={0.7}
+                        >
+                          <View style={[styles.selectAllCheck, isAllEventsSelected() && styles.selectAllCheckActive]}>
+                            {isAllEventsSelected() && <Check size={12} color="#fff" strokeWidth={3} />}
+                          </View>
+                          <Text style={[styles.selectAllText, isAllEventsSelected() && styles.selectAllTextActive]}>
+                            {isAllEventsSelected() ? 'Deselect All' : 'Select All'}
+                          </Text>
+                        </TouchableOpacity>
 
                         {/* Event Category Tree */}
                         <ScrollView
@@ -3220,11 +3289,81 @@ export default function BusinessDetailsScreen() {
               </View>
 
               <View style={styles.editSection}>
-                <Text style={styles.editSectionTitle}>Verification</Text>
+                <Text style={styles.editSectionTitle}>Social Media (Optional)</Text>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, (validationErrors.business_registration_number || validationErrors.panDocument) && styles.editLabelError]}>PAN *</Text>
-                  <Text style={styles.editHint}>Required - Permanent Account Number</Text>
+                  <Text style={styles.editLabel}>Website</Text>
+                  <TextInput
+                    ref={websiteUrlRef}
+                    style={styles.editInput}
+                    value={editData.website_url || ''}
+                    onChangeText={(text) => setEditData({ ...editData, website_url: text })}
+                    placeholder="https://www.yourbusiness.com"
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                    keyboardType="url"
+                    returnKeyType="next"
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => instagramUrlRef.current?.focus()}
+                  />
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Instagram</Text>
+                  <TextInput
+                    ref={instagramUrlRef}
+                    style={styles.editInput}
+                    value={editData.instagram_url || ''}
+                    onChangeText={(text) => setEditData({ ...editData, instagram_url: text })}
+                    placeholder="https://instagram.com/yourbusiness"
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                    keyboardType="url"
+                    returnKeyType="next"
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => facebookUrlRef.current?.focus()}
+                  />
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Facebook</Text>
+                  <TextInput
+                    ref={facebookUrlRef}
+                    style={styles.editInput}
+                    value={editData.facebook_url || ''}
+                    onChangeText={(text) => setEditData({ ...editData, facebook_url: text })}
+                    placeholder="https://facebook.com/yourbusiness"
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                    keyboardType="url"
+                    returnKeyType="next"
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => youtubeUrlRef.current?.focus()}
+                  />
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>YouTube</Text>
+                  <TextInput
+                    ref={youtubeUrlRef}
+                    style={styles.editInput}
+                    value={editData.youtube_url || ''}
+                    onChangeText={(text) => setEditData({ ...editData, youtube_url: text })}
+                    placeholder="https://youtube.com/@yourbusiness"
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                    keyboardType="url"
+                    returnKeyType="done"
+                    onFocus={handleFieldFocus}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.editSection}>
+                <Text style={styles.editSectionTitle}>Verification (Optional)</Text>
+
+                <View style={styles.editField}>
+                  <Text style={[styles.editLabel, validationErrors.business_registration_number && styles.editLabelError]}>PAN</Text>
                   <View style={styles.inputActionRow}>
                     <TextInput
                       ref={panRef}
@@ -3239,6 +3378,7 @@ export default function BusinessDetailsScreen() {
                       autoCapitalize="characters"
                       maxLength={10}
                       returnKeyType="next"
+                      onFocus={handleFieldFocus}
                       onSubmitEditing={() => gstNumberRef.current?.focus()}
                     />
                     <TouchableOpacity
@@ -3279,22 +3419,34 @@ export default function BusinessDetailsScreen() {
                       ))}
                     </View>
                   )}
-                  {(validationErrors.business_registration_number || validationErrors.panDocument) && (
-                    <Text style={styles.validationErrorText}>{validationErrors.business_registration_number || validationErrors.panDocument}</Text>
+                  {validationErrors.business_registration_number && (
+                    <Text style={styles.validationErrorText}>{validationErrors.business_registration_number}</Text>
                   )}
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>GST Number</Text>
+                  <Text style={[styles.editLabel, validationErrors.gst_number && styles.editLabelError]}>GST Number</Text>
                   <View style={styles.inputActionRow}>
                     <TextInput
                       ref={gstNumberRef}
-                      style={[styles.editInput, styles.flexInput]}
+                      style={[styles.editInput, styles.flexInput, validationErrors.gst_number && styles.validationInputInvalid]}
                       value={editData.gst_number || ''}
-                      onChangeText={(text) => setEditData({ ...editData, gst_number: text })}
-                      placeholder="Enter GST number"
+                      onChangeText={(text) => {
+                        const filtered = text.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 15);
+                        setEditData({ ...editData, gst_number: filtered });
+                        if (validationErrors.gst_number) {
+                          setValidationErrors(prev => {
+                            const { gst_number, ...rest } = prev;
+                            return rest;
+                          });
+                        }
+                      }}
+                      placeholder="Enter 15-digit GST number"
                       placeholderTextColor="#999"
+                      autoCapitalize="characters"
+                      maxLength={15}
                       returnKeyType="next"
+                      onFocus={handleFieldFocus}
                       onSubmitEditing={() => websiteUrlRef.current?.focus()}
                     />
                     <TouchableOpacity
@@ -3335,29 +3487,28 @@ export default function BusinessDetailsScreen() {
                       ))}
                     </View>
                   )}
+                  {validationErrors.gst_number && (
+                    <Text style={styles.validationErrorText}>{validationErrors.gst_number}</Text>
+                  )}
                 </View>
 
                 {/* Verification Documents Section */}
                 <View style={styles.editField}>
                   <Text style={styles.editLabel}>Verification Documents</Text>
 
-                  {/* Document Types - PAN Card first and mandatory */}
                   {[
-                    { code: 'aadhaar', name: 'Aadhaar Card', mandatory: false },
-                    { code: 'bank_statement', name: 'Bank Statement', mandatory: false },
-                    { code: 'general', name: 'General Document', mandatory: false },
-                    { code: 'business_license', name: 'Business License', mandatory: false },
+                    { code: 'business_license', name: 'Business License', hint: 'e.g., GST, FSSAI, or Shop Act license' },
                   ].map((docType) => {
                     const docs = documentsByType[docType.code] || [];
                     const isUploading = uploadingDocument === docType.code;
 
                     return (
-                      <View key={docType.code} style={[styles.documentTypeSection, docType.mandatory && styles.mandatoryDocumentSection]}>
+                      <View key={docType.code} style={styles.documentTypeSection}>
                         <View style={styles.documentTypeHeader}>
                           <View style={styles.documentTypeLabelContainer}>
-                            <Text style={styles.documentTypeName}>{docType.name} {docType.mandatory ? '*' : ''}</Text>
-                            {docType.mandatory && (
-                              <Text style={styles.mandatoryDocumentHint}>Required</Text>
+                            <Text style={styles.documentTypeName}>{docType.name}</Text>
+                            {docType.hint && (
+                              <Text style={styles.mandatoryDocumentHint}>{docType.hint}</Text>
                             )}
                           </View>
                           <TouchableOpacity
@@ -3409,73 +3560,6 @@ export default function BusinessDetailsScreen() {
                       </View>
                     );
                   })}
-                </View>
-              </View>
-
-              <View style={styles.editSection}>
-                <Text style={styles.editSectionTitle}>Social Media</Text>
-
-                <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Website</Text>
-                  <TextInput
-                    ref={websiteUrlRef}
-                    style={styles.editInput}
-                    value={editData.website_url || ''}
-                    onChangeText={(text) => setEditData({ ...editData, website_url: text })}
-                    placeholder="https://www.yourbusiness.com"
-                    placeholderTextColor="#999"
-                    autoCapitalize="none"
-                    keyboardType="url"
-                    returnKeyType="next"
-                    onSubmitEditing={() => instagramUrlRef.current?.focus()}
-                  />
-                </View>
-
-                <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Instagram</Text>
-                  <TextInput
-                    ref={instagramUrlRef}
-                    style={styles.editInput}
-                    value={editData.instagram_url || ''}
-                    onChangeText={(text) => setEditData({ ...editData, instagram_url: text })}
-                    placeholder="https://instagram.com/yourbusiness"
-                    placeholderTextColor="#999"
-                    autoCapitalize="none"
-                    keyboardType="url"
-                    returnKeyType="next"
-                    onSubmitEditing={() => facebookUrlRef.current?.focus()}
-                  />
-                </View>
-
-                <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Facebook</Text>
-                  <TextInput
-                    ref={facebookUrlRef}
-                    style={styles.editInput}
-                    value={editData.facebook_url || ''}
-                    onChangeText={(text) => setEditData({ ...editData, facebook_url: text })}
-                    placeholder="https://facebook.com/yourbusiness"
-                    placeholderTextColor="#999"
-                    autoCapitalize="none"
-                    keyboardType="url"
-                    returnKeyType="next"
-                    onSubmitEditing={() => youtubeUrlRef.current?.focus()}
-                  />
-                </View>
-
-                <View style={styles.editField}>
-                  <Text style={styles.editLabel}>YouTube</Text>
-                  <TextInput
-                    ref={youtubeUrlRef}
-                    style={styles.editInput}
-                    value={editData.youtube_url || ''}
-                    onChangeText={(text) => setEditData({ ...editData, youtube_url: text })}
-                    placeholder="https://youtube.com/@yourbusiness"
-                    placeholderTextColor="#999"
-                    autoCapitalize="none"
-                    keyboardType="url"
-                    returnKeyType="done"
-                  />
                 </View>
               </View>
 
@@ -4484,6 +4568,38 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  selectAllRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    backgroundColor: '#fafafa',
+  },
+  selectAllCheck: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#ccc',
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  selectAllCheckActive: {
+    backgroundColor: '#6aa3ce',
+    borderColor: '#6aa3ce',
+  },
+  selectAllText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
+  },
+  selectAllTextActive: {
+    color: '#6aa3ce',
   },
   categoryModalFooter: {
     padding: 16,

@@ -451,8 +451,6 @@ const styles = StyleSheet.create({
   },
   inputError: {
     borderColor: '#FF3B30',
-    backgroundColor: '#fff5f5',
-    borderWidth: 2,
   },
   labelError: {
     color: '#FF3B30',
@@ -461,7 +459,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#FF3B30',
     marginTop: 4,
-    fontWeight: '500',
   },
   uploadButton: {
     flexDirection: 'row',
@@ -481,9 +478,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   uploadButtonError: {
-    backgroundColor: '#fff5f5',
     borderColor: '#FF3B30',
-    borderWidth: 2,
     borderStyle: 'solid',
   },
   uploadButtonTextError: {

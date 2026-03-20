@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef, useImperativeHandle, forwardRef } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   View,
   Text,
@@ -11,7 +12,7 @@ import {
   Pressable,
   Alert,
 } from 'react-native';
-import { Check, ChevronRight, ChevronDown, X } from 'lucide-react-native';
+import { Check, ChevronRight, ChevronDown, X, Search } from 'lucide-react-native';
 import Dropdown from '../../components/Dropdown';
 import { supabaseCore } from '../../lib/supabase';
 
@@ -79,12 +80,45 @@ const PRICING_MAPPING: Record<string, string[]> = {
 
 const DEFAULT_PRICING_UNITS = ['Per event', 'Per day', 'Per hour'];
 
+const OPERATING_CITIES = [
+  'Pan India',
+  'Mumbai (Maharashtra)',
+  'Delhi (Delhi)',
+  'Bangalore (Karnataka)',
+  'Hyderabad (Telangana)',
+  'Chennai (Tamil Nadu)',
+  'Kolkata (West Bengal)',
+  'Pune (Maharashtra)',
+  'Ahmedabad (Gujarat)',
+  'Jaipur (Rajasthan)',
+  'Surat (Gujarat)',
+  'Lucknow (Uttar Pradesh)',
+  'Kanpur (Uttar Pradesh)',
+  'Nagpur (Maharashtra)',
+  'Indore (Madhya Pradesh)',
+  'Bhopal (Madhya Pradesh)',
+  'Visakhapatnam (Andhra Pradesh)',
+  'Patna (Bihar)',
+  'Vadodara (Gujarat)',
+  'Ghaziabad (Uttar Pradesh)',
+  'Ludhiana (Punjab)',
+  'Agra (Uttar Pradesh)',
+  'Nashik (Maharashtra)',
+  'Faridabad (Haryana)',
+  'Meerut (Uttar Pradesh)',
+  'Rajkot (Gujarat)',
+  'Varanasi (Uttar Pradesh)',
+  'Goa (Goa)',
+  'Udaipur (Rajasthan)',
+];
+
 const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExperienceStepProps>(({
   data,
   onUpdate,
   validationErrors = {},
   onFocus,
 }, ref) => {
+  const insets = useSafeAreaInsets();
   const [allBusinessCategories, setAllBusinessCategories] = useState<Category[]>([]);
   const [eventCategories, setEventCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -107,9 +141,10 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   const [isCategoriesExpanded, setIsCategoriesExpanded] = useState(false);
   const [isEventsExpanded, setIsEventsExpanded] = useState(false);
 
-  // Refs for keyboard navigation
-  const businessDescriptionRef = useRef<TextInput>(null);
-  const basePriceRef = useRef<TextInput>(null);
+  const [isCityModalOpen, setIsCityModalOpen] = useState(false);
+  const [citySearchQuery, setCitySearchQuery] = useState('');
+
+
 
   // Expose method to focus next empty mandatory field
   useImperativeHandle(ref, () => ({
@@ -120,14 +155,8 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         setIsCategoryModalOpen(true);
       } else if (!data.selectedEventIds || data.selectedEventIds.length === 0) {
         setIsEventModalOpen(true);
-      } else if (!data.businessDescription || !data.businessDescription.trim()) {
-        businessDescriptionRef.current?.focus();
-      } else if (!data.yearsOfExperience || !data.yearsOfExperience.trim()) {
-        setIsExperienceDropdownOpen(true);
-      } else if (!data.basePrice || !data.basePrice.trim()) {
-        basePriceRef.current?.focus();
-      } else if (!data.pricingUnit || !data.pricingUnit.trim()) {
-        setIsPricingUnitDropdownOpen(true);
+      } else if (!data.operatingLocations || data.operatingLocations.length === 0) {
+        setIsCityModalOpen(true);
       }
     },
   }));
@@ -193,6 +222,9 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       // If rental is selected, filter by business_model = 'rental'
       if (businessType === 'rental') {
         businessQuery = businessQuery.eq('business_model', 'rental');
+      } else {
+        // If service type is selected, filter by business_model != 'rental'
+        businessQuery = businessQuery.neq('business_model', 'rental');
       }
 
       const { data: businessCats, error: businessError } = await businessQuery
@@ -791,14 +823,44 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
   // Get display text for event dropdown
   const getEventDropdownDisplayText = (): string => {
+    if (loading) {
+      return 'Loading Events you serve...';
+    }
     if (selectedEventsWithPaths.length === 0) {
-      return 'Select event types';
+      return 'Select Events you serve';
     }
     if (selectedEventsWithPaths.length === 1) {
       return selectedEventsWithPaths[0].path;
     }
-    return `${selectedEventsWithPaths.length} sub-categories selected`;
+    return `${selectedEventsWithPaths.length} events selected`;
   };
+
+  const toggleCitySelection = (city: string) => {
+    const currentLocations = data.operatingLocations || [];
+
+    if (city === 'Pan India') {
+      if (currentLocations.includes('*')) {
+        handleChange('operatingLocations', []);
+      } else {
+        // If Pan India selected, clear all other cities and just set '*'
+        handleChange('operatingLocations', ['*']);
+      }
+      return;
+    }
+
+    // If a normal city is selected while Pan India (*) is present, remove '*'
+    let newLocations = currentLocations.filter((c: string) => c !== '*');
+
+    if (newLocations.includes(city)) {
+      handleChange('operatingLocations', newLocations.filter((c: string) => c !== city));
+    } else {
+      handleChange('operatingLocations', [...newLocations, city]);
+    }
+  };
+
+  const filteredCities = OPERATING_CITIES.filter(city =>
+    city.toLowerCase().includes(citySearchQuery.toLowerCase())
+  );
 
   // Determine applicable pricing units based on selected service category
   const pricingUnitOptions = useMemo(() => {
@@ -836,14 +898,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
 
 
-  if (loading) {
-    return (
-      <View style={[styles.container, styles.centerContent]}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Loading categories...</Text>
-      </View>
-    );
-  }
+  // Loading indicator overlay removed to prevent UI jumping. Components will display inline loading states.
 
   const handleCategoryDone = () => {
     const hasSubCategory = selectedCategoryIds.some(id => {
@@ -865,10 +920,65 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     });
 
     if (!hasSubEventType) {
-      Alert.alert('Validation Error', 'Please select at least one sub-category for event types');
+      Alert.alert('Validation Error', 'Please select at least one sub-category for Events you serve');
       return;
     }
     setIsEventModalOpen(false);
+  };
+
+  // Select All / Deselect All helpers for Services modal
+  const getAllSubtreeIds = (): string[] => {
+    if (!subtreeForSelectedRoot) return [];
+    const getAllIds = (nodes: any[]): string[] => {
+      let ids: string[] = [];
+      nodes.forEach((node) => {
+        ids.push(node.id);
+        if (node.children?.length > 0) ids = [...ids, ...getAllIds(node.children)];
+      });
+      return ids;
+    };
+    return getAllIds(subtreeForSelectedRoot.children || []);
+  };
+
+  const handleSelectAllServices = () => {
+    const allIds = getAllSubtreeIds();
+    const allSelected = allIds.every((id) => selectedCategoryIds.includes(id));
+    if (allSelected) {
+      setSelectedCategoryIds([]);
+    } else {
+      setSelectedCategoryIds(allIds);
+      // Auto-expand all selected categories
+      setExpandedCategoryIds((prev) => new Set([...prev, ...allIds]));
+    }
+  };
+
+  const isAllServicesSelected = (): boolean => {
+    const allIds = getAllSubtreeIds();
+    return allIds.length > 0 && allIds.every((id) => selectedCategoryIds.includes(id));
+  };
+
+  // Select All / Deselect All helpers for Events modal
+  const getAllEventIds = (): string[] => {
+    return eventCategories.map((c) => c.id);
+  };
+
+  const handleSelectAllEvents = () => {
+    const allIds = getAllEventIds();
+    const currentEventIds = data.selectedEventIds || [];
+    const allSelected = allIds.every((id) => currentEventIds.includes(id));
+    if (allSelected) {
+      handleChange('selectedEventIds', []);
+    } else {
+      handleChange('selectedEventIds', allIds);
+      // Auto-expand all event categories
+      setExpandedEventIds((prev) => new Set([...prev, ...allIds]));
+    }
+  };
+
+  const isAllEventsSelected = (): boolean => {
+    const allIds = getAllEventIds();
+    const currentEventIds = data.selectedEventIds || [];
+    return allIds.length > 0 && allIds.every((id) => currentEventIds.includes(id));
   };
 
   const rootDropdownOptions = rootCategories.map((c) => ({
@@ -896,7 +1006,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
                 <View style={styles.businessTypeRadioInner} />
               )}
             </View>
-            <Text style={styles.businessTypeRadioText}>Services</Text>
+            <Text style={styles.businessTypeRadioText}>Service based</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -914,17 +1024,17 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
                 <View style={styles.businessTypeRadioInner} />
               )}
             </View>
-            <Text style={styles.businessTypeRadioText}>Rental</Text>
+            <Text style={styles.businessTypeRadioText}>Rental based</Text>
           </TouchableOpacity>
         </View>
       </View>
 
       <View style={styles.field}>
-        <Text style={[styles.label, (validationErrors.selectedRootCategoryId || validationErrors.selectedCategoryIds) && styles.labelError]}>Business Category *</Text>
+        <Text style={[styles.label, (validationErrors.selectedRootCategoryId || validationErrors.selectedCategoryIds) && styles.labelError]}>Primary Category *</Text>
         <Dropdown
           options={rootDropdownOptions}
           value={selectedRootCategoryId || ''}
-          placeholder="Select a category"
+          placeholder={loading ? 'Loading categories...' : 'Select a category'}
           onChange={(value: string) => handleRootSelection(value)}
           open={isRootDropdownOpen}
           onOpenChange={setIsRootDropdownOpen}
@@ -933,7 +1043,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       </View>
 
       <View style={styles.field}>
-        <Text style={[styles.label, validationErrors.selectedCategoryIds && styles.labelError]}>Services Offered *</Text>
+        <Text style={[styles.label, validationErrors.selectedCategoryIds && styles.labelError]}>Specialization *</Text>
         <TouchableOpacity
           style={[
             styles.dropdownTrigger,
@@ -953,11 +1063,13 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           >
             {!selectedRootCategoryId
               ? 'Select a category first'
-              : selectedCategoriesWithPaths.length === 0
-                ? 'Select services offered'
-                : selectedCategoriesWithPaths.length === 1
-                  ? selectedCategoriesWithPaths[0].path
-                  : `${selectedCategoriesWithPaths.length} services selected`}
+              : loading
+                ? 'Loading services...'
+                : selectedCategoriesWithPaths.length === 0
+                  ? 'Select Specialization'
+                  : selectedCategoriesWithPaths.length === 1
+                    ? selectedCategoriesWithPaths[0].path
+                    : `${selectedCategoriesWithPaths.length} Specialization selected`}
           </Text>
           <ChevronDown size={20} color={selectedRootCategoryId ? '#666' : '#ccc'} />
         </TouchableOpacity>
@@ -992,6 +1104,9 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
             ))}
           </View>
         )}
+        {validationErrors.selectedCategoryIds && (
+          <Text style={styles.errorText}>{validationErrors.selectedCategoryIds}</Text>
+        )}
 
         {/* Sub-categories modal (tree for selected root only) */}
         <Modal
@@ -1002,7 +1117,10 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         >
           <Pressable
             style={styles.modalOverlay}
-            onPress={() => setIsCategoryModalOpen(false)}
+            onPress={() => {
+              setSelectedCategoryIds([]);
+              setIsCategoryModalOpen(false);
+            }}
           >
             <Pressable
               style={styles.modalContent}
@@ -1011,11 +1129,14 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>
                   {subtreeForSelectedRoot
-                    ? `Services offered under ${subtreeForSelectedRoot.name}`
-                    : 'Select Services offered'}
+                    ? `Specialization under ${subtreeForSelectedRoot.name}`
+                    : 'Select Specialization'}
                 </Text>
                 <TouchableOpacity
-                  onPress={() => setIsCategoryModalOpen(false)}
+                  onPress={() => {
+                    setSelectedCategoryIds([]);
+                    setIsCategoryModalOpen(false);
+                  }}
                   style={styles.closeButton}
                 >
                   <X size={24} color="#666" />
@@ -1024,11 +1145,25 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
               <TextInput
                 style={styles.modalSearchInput}
-                placeholder="Search services offered..."
+                placeholder="Search Specialization..."
                 placeholderTextColor="#999"
                 value={searchQuery}
                 onChangeText={setSearchQuery}
               />
+
+              {/* Select All strip */}
+              <TouchableOpacity
+                style={styles.selectAllRow}
+                onPress={handleSelectAllServices}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.selectAllCheck, isAllServicesSelected() && styles.selectAllCheckActive]}>
+                  {isAllServicesSelected() && <Check size={12} color="#fff" strokeWidth={3} />}
+                </View>
+                <Text style={[styles.selectAllText, isAllServicesSelected() && styles.selectAllTextActive]}>
+                  {isAllServicesSelected() ? 'Deselect All' : 'Select All'}
+                </Text>
+              </TouchableOpacity>
 
               <ScrollView
                 style={styles.modalCategoryTree}
@@ -1038,8 +1173,8 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
                 {filteredSubtree.length === 0 ? (
                   <Text style={styles.emptyText}>
                     {subtreeForSelectedRoot?.children?.length === 0
-                      ? 'No services offered'
-                      : 'No matching services offered'}
+                      ? 'No Specialization'
+                      : 'No matching Specialization'}
                   </Text>
                 ) : (
                   renderSubCategoryTree(filteredSubtree)
@@ -1060,7 +1195,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       </View>
 
       <View style={styles.field}>
-        <Text style={[styles.label, validationErrors.selectedEventIds && styles.labelError]}>Event Types *</Text>
+        <Text style={[styles.label, validationErrors.selectedEventIds && styles.labelError]}>Events you serve *</Text>
 
         {/* Event Dropdown Trigger */}
         <TouchableOpacity
@@ -1126,7 +1261,10 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         >
           <Pressable
             style={styles.modalOverlay}
-            onPress={() => setIsEventModalOpen(false)}
+            onPress={() => {
+              handleChange('selectedEventIds', []);
+              setIsEventModalOpen(false);
+            }}
           >
             <Pressable
               style={styles.modalContent}
@@ -1135,7 +1273,10 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Select Events</Text>
                 <TouchableOpacity
-                  onPress={() => setIsEventModalOpen(false)}
+                  onPress={() => {
+                    handleChange('selectedEventIds', []);
+                    setIsEventModalOpen(false);
+                  }}
                   style={styles.closeButton}
                 >
                   <X size={24} color="#666" />
@@ -1145,12 +1286,26 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               {/* Search Input */}
               <TextInput
                 style={styles.modalSearchInput}
-                placeholder="Search event types..."
+                placeholder="Search Events you serve..."
                 placeholderTextColor="#999"
                 value={eventSearchQuery}
                 onFocus={onFocus}
                 onChangeText={setEventSearchQuery}
               />
+
+              {/* Select All strip */}
+              <TouchableOpacity
+                style={styles.selectAllRow}
+                onPress={handleSelectAllEvents}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.selectAllCheck, isAllEventsSelected() && styles.selectAllCheckActive]}>
+                  {isAllEventsSelected() && <Check size={12} color="#fff" strokeWidth={3} />}
+                </View>
+                <Text style={[styles.selectAllText, isAllEventsSelected() && styles.selectAllTextActive]}>
+                  {isAllEventsSelected() ? 'Deselect All' : 'Select All'}
+                </Text>
+              </TouchableOpacity>
 
               {/* Event Category Tree */}
               <ScrollView
@@ -1179,90 +1334,131 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       </View>
 
       <View style={styles.field}>
-        <Text style={[styles.label, validationErrors.businessDescription && styles.labelError]}>Business Description *</Text>
-        <TextInput
-          ref={businessDescriptionRef}
+        <Text style={[styles.label, validationErrors.operatingLocations && styles.labelError]}>Operating Locations *</Text>
+        <TouchableOpacity
           style={[
-            styles.input,
-            styles.textArea,
-            validationErrors.businessDescription && styles.inputError
+            styles.dropdownTrigger,
+            validationErrors.operatingLocations && styles.dropdownTriggerError
           ]}
-          value={data.businessDescription || ''}
-          onChangeText={(text) => handleChange('businessDescription', text)}
-          placeholder="Describe your services and what makes your business unique"
-          placeholderTextColor="#999"
-          multiline
-          numberOfLines={4}
-          textAlignVertical="top"
-          returnKeyType="done"
-          onFocus={onFocus}
-          blurOnSubmit={true}
-        />
-        {validationErrors.businessDescription && (
-          <Text style={styles.errorText}>{validationErrors.businessDescription}</Text>
+          onPress={() => setIsCityModalOpen(true)}
+          activeOpacity={0.7}
+        >
+          <Text style={[
+            styles.dropdownText,
+            (!data.operatingLocations || data.operatingLocations.length === 0) && styles.placeholder
+          ]}>
+            {data.operatingLocations && data.operatingLocations.length > 0
+              ? `${data.operatingLocations.length} locations selected`
+              : 'Select operating locations'}
+          </Text>
+          <ChevronDown size={20} color="#666" />
+        </TouchableOpacity>
+
+        {data.operatingLocations && data.operatingLocations.length > 0 && (
+          <View style={styles.selectedLocationsContainer}>
+            {data.operatingLocations.map((city: string) => (
+              <View key={city} style={styles.locationChip}>
+                <Text style={styles.locationChipText}>{city === '*' ? 'Pan India' : city}</Text>
+                <TouchableOpacity
+                  onPress={() => toggleCitySelection(city === '*' ? 'Pan India' : city)}
+                  style={styles.locationRemoveButton}
+                >
+                  <X size={14} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
+        {validationErrors.operatingLocations && (
+          <Text style={styles.errorText}>{validationErrors.operatingLocations}</Text>
         )}
       </View>
 
-      <View style={styles.field}>
-        <Text style={[styles.label, validationErrors.yearsOfExperience && styles.labelError]}>Years of Experience *</Text>
-        <Dropdown
-          options={EXPERIENCE_OPTIONS.map((exp) => ({
-            label: exp,
-            value: exp,
-          }))}
-          value={data.yearsOfExperience || ''}
-          placeholder="Select experience"
-          onChange={(value: string) => handleChange('yearsOfExperience', value)}
-          open={isExperienceDropdownOpen}
-          onOpenChange={setIsExperienceDropdownOpen}
-          error={validationErrors.yearsOfExperience}
-        />
-      </View>
+      <Modal
+        visible={isCityModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsCityModalOpen(false)}
+      >
+        <View style={styles.bottomSheetOverlay}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setIsCityModalOpen(false)}
+          />
+          <View style={[styles.bottomSheetContent, { height: '80%' }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Operating Locations</Text>
+              <TouchableOpacity
+                onPress={() => setIsCityModalOpen(false)}
+                style={styles.closeButton}
+              >
+                <X size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
 
-      <View style={styles.field}>
-        <Text style={[styles.label, validationErrors.basePrice && styles.labelError]}>Base Price (₹) *</Text>
-        <TextInput
-          ref={basePriceRef}
-          style={[
-            styles.input,
-            validationErrors.basePrice && styles.inputError
-          ]}
-          value={data.basePrice || ''}
-          onChangeText={(text) => {
-            // Only allow numeric input
-            const cleanText = text.replace(/[^0-9]/g, '');
-            handleChange('basePrice', cleanText);
-          }}
-          placeholder="Enter starting price (e.g. 5000)"
-          placeholderTextColor="#999"
-          keyboardType="numeric"
-          onFocus={onFocus}
-          returnKeyType="next"
-        />
-        {validationErrors.basePrice && (
-          <Text style={styles.errorText}>{validationErrors.basePrice}</Text>
-        )}
-      </View>
+            <View style={styles.citySearchContainer}>
+              <Search size={20} color="#999" style={styles.searchIcon} />
+              <TextInput
+                style={styles.citySearchInput}
+                placeholder="Search cities..."
+                placeholderTextColor="#999"
+                value={citySearchQuery}
+                onFocus={onFocus}
+                onChangeText={setCitySearchQuery}
+              />
+            </View>
 
-      <View style={styles.field}>
-        <Text style={[styles.label, validationErrors.pricingUnit && styles.labelError]}>Pricing Unit *</Text>
-        <Dropdown
-          options={pricingUnitOptions.map((unit) => ({
-            label: unit,
-            value: unit,
-          }))}
-          value={data.pricingUnit || ''}
-          placeholder="Select pricing unit"
-          onChange={(value: string) => handleChange('pricingUnit', value)}
-          open={isPricingUnitDropdownOpen}
-          onOpenChange={setIsPricingUnitDropdownOpen}
-          disabled={!data.selectedCategoryIds || data.selectedCategoryIds.length === 0}
-          error={validationErrors.pricingUnit}
-        />
-        {(!data.selectedCategoryIds || data.selectedCategoryIds.length === 0) && (
-          <Text style={styles.helperText}>Select a service category first to see options</Text>
-        )}
-      </View>
+            <ScrollView
+              style={styles.optionsList}
+              keyboardShouldPersistTaps="handled"
+            >
+              {filteredCities.map((city) => {
+                const isSelected = city === 'Pan India'
+                  ? data.operatingLocations?.includes('*')
+                  : data.operatingLocations?.includes(city);
+                return (
+                  <TouchableOpacity
+                    key={city}
+                    style={[
+                      styles.option,
+                      isSelected && styles.optionSelected
+                    ]}
+                    onPress={() => toggleCitySelection(city)}
+                  >
+                    <Text style={[
+                      styles.optionText,
+                      isSelected && styles.optionTextSelected
+                    ]}>
+                      {city}
+                    </Text>
+                    {isSelected && (
+                      <View style={styles.checkmark}>
+                        <Check size={14} color="#fff" />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            <View
+              style={[
+                styles.cityModalFooter,
+                { paddingBottom: insets.bottom + 40 }
+              ]}
+            >
+              <TouchableOpacity
+                style={styles.doneButton}
+                onPress={() => setIsCityModalOpen(false)}
+              >
+                <Text style={styles.doneButtonText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+
     </View>
   );
 });
@@ -1276,7 +1472,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    padding: 24,
+    paddingHorizontal: 24,
+    paddingTop: 0,
+    paddingBottom: 24,
   },
   centerContent: {
     justifyContent: 'center',
@@ -1337,7 +1535,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    marginBottom: 16,
   },
   dropdownText: {
     fontSize: 16,
@@ -1349,8 +1546,6 @@ const styles = StyleSheet.create({
   },
   dropdownTriggerError: {
     borderColor: '#FF3B30',
-    backgroundColor: '#fff5f5',
-    borderWidth: 2,
   },
   dropdownTriggerDisabled: {
     backgroundColor: '#f0f0f0',
@@ -1362,14 +1557,11 @@ const styles = StyleSheet.create({
   },
   inputError: {
     borderColor: '#FF3B30',
-    backgroundColor: '#fff5f5',
-    borderWidth: 2,
   },
   errorText: {
     fontSize: 12,
     color: '#FF3B30',
     marginTop: 4,
-    fontWeight: '500',
   },
   helperText: {
     fontSize: 12,
@@ -1389,6 +1581,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#007AFF',
+  },
+  uploadButtonError: {
+    borderColor: '#FF3B30',
+    borderStyle: 'solid',
   },
   selectedLabel: {
     fontSize: 14,
@@ -1498,6 +1694,38 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  selectAllRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    backgroundColor: '#fafafa',
+  },
+  selectAllCheck: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#ccc',
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  selectAllCheckActive: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  selectAllText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
+  },
+  selectAllTextActive: {
+    color: '#007AFF',
   },
   categoryTreeContainer: {
     backgroundColor: '#f8f8f8',
@@ -1638,5 +1866,125 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#1a1a1a',
     fontWeight: '500',
+  },
+  selectedLocationsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 0,
+    gap: 8,
+  },
+  locationChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  locationChipText: {
+    color: '#fff',
+    fontSize: 14,
+    marginRight: 6,
+  },
+  locationRemoveButton: {
+    padding: 2,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    margin: 20,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  modalSearchInputInside: {
+    flex: 1,
+    height: 48,
+    fontSize: 16,
+    color: '#1a1a1a',
+  },
+  optionsList: {
+    flex: 1,
+    maxHeight: 400,
+  },
+  option: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  optionSelected: {
+    backgroundColor: '#f0f7ff',
+  },
+  optionText: {
+    fontSize: 14,
+    color: '#1a1a1a',
+  },
+  optionTextSelected: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  checkmark: {
+    backgroundColor: '#007AFF',
+    borderRadius: 10,
+    padding: 2,
+  },
+  bottomSheetOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  bottomSheetContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    width: '100%',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 20,
+  },
+  citySearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f7f9',
+    marginHorizontal: 20,
+    marginVertical: 12,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#e1e5ea',
+  },
+  citySearchInput: {
+    flex: 1,
+    height: 48,
+    fontSize: 16,
+    color: '#1a1a1a',
+    marginLeft: 10,
+  },
+  cityModalFooter: {
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    backgroundColor: '#fff',
+  },
+  doneButton: {
+    backgroundColor: '#007AFF',
+    borderRadius: 12,
+    height: 56,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  doneButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
   },
 });

@@ -33,7 +33,6 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
   // Refs for keyboard navigation
   const businessNameRef = useRef<TextInput>(null);
   const contactPersonNameRef = useRef<TextInput>(null);
-  const contactPersonRoleRef = useRef<TextInput>(null);
   const emailRef = useRef<TextInput>(null);
   const phoneNumberRef = useRef<TextInput>(null);
   // Expose method to focus next empty mandatory field
@@ -43,10 +42,10 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
         businessNameRef.current?.focus();
       } else if (!data.contactPersonName || !data.contactPersonName.trim()) {
         contactPersonNameRef.current?.focus();
-      } else if (!data.email || !data.email.trim()) {
-        emailRef.current?.focus();
       } else if (!data.phoneNumber || !data.phoneNumber.trim()) {
         phoneNumberRef.current?.focus();
+      } else if (!data.email || !data.email.trim()) {
+        emailRef.current?.focus();
       }
     },
   }));
@@ -89,26 +88,45 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
           placeholderTextColor="#999"
           returnKeyType="next"
           onFocus={onFocus}
-          onSubmitEditing={() => contactPersonRoleRef.current?.focus()}
+          onSubmitEditing={() => phoneNumberRef.current?.focus()}
         />
         {validationErrors.contactPersonName && (
           <Text style={styles.errorText}>{validationErrors.contactPersonName}</Text>
         )}
       </View>
 
+
+
       <View style={styles.field}>
-        <Text style={styles.label}>Contact Person Role</Text>
+        <Text style={[styles.label, validationErrors.phoneNumber && styles.labelError]}>Business Contact Number *</Text>
         <TextInput
-          ref={contactPersonRoleRef}
-          style={styles.input}
-          value={data.contactPersonRole || ''}
-          onChangeText={(text) => handleChange('contactPersonRole', text)}
-          placeholder="e.g., Owner, Manager, Director"
+          ref={phoneNumberRef}
+          style={[
+            styles.input,
+            validationErrors.phoneNumber && styles.inputError
+          ]}
+          value={stripCountryCode(data.phoneNumber) || ''}
+          placeholder="Enter 10-digit mobile number"
           placeholderTextColor="#999"
+          keyboardType="number-pad"
+          maxLength={10}
           returnKeyType="next"
+          onChangeText={(text) => {
+            // remove non-numeric characters
+            const numericText = text.replace(/[^0-9]/g, '');
+
+            // allow only 10 digits
+            if (numericText.length <= 10) {
+              handleChange('phoneNumber', numericText);
+            }
+          }}
           onFocus={onFocus}
           onSubmitEditing={() => emailRef.current?.focus()}
         />
+
+        {validationErrors.phoneNumber && (
+          <Text style={styles.errorText}>{validationErrors.phoneNumber}</Text>
+        )}
       </View>
 
       <View style={styles.field}>
@@ -125,43 +143,11 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
           placeholderTextColor="#999"
           keyboardType="email-address"
           autoCapitalize="none"
-          returnKeyType="next"
+          returnKeyType="done"
           onFocus={onFocus}
-          onSubmitEditing={() => phoneNumberRef.current?.focus()}
         />
         {validationErrors.email && (
           <Text style={styles.errorText}>{validationErrors.email}</Text>
-        )}
-      </View>
-
-      <View style={styles.field}>
-        <Text style={[styles.label, validationErrors.phoneNumber && styles.labelError]}>Business Contact Number *</Text>
-        <TextInput
-          ref={phoneNumberRef}
-          style={[
-            styles.input,
-            validationErrors.phoneNumber && styles.inputError
-          ]}
-          value={stripCountryCode(data.phoneNumber) || ''}
-          placeholder="Enter 10-digit mobile number"
-          placeholderTextColor="#999"
-          keyboardType="number-pad"
-          maxLength={10}
-          returnKeyType="done"
-          onChangeText={(text) => {
-            // remove non-numeric characters
-            const numericText = text.replace(/[^0-9]/g, '');
-
-            // allow only 10 digits
-            if (numericText.length <= 10) {
-              handleChange('phoneNumber', numericText);
-            }
-          }}
-          onFocus={onFocus}
-        />
-
-        {validationErrors.phoneNumber && (
-          <Text style={styles.errorText}>{validationErrors.phoneNumber}</Text>
         )}
       </View>
     </View>
@@ -177,7 +163,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    padding: 24,
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 0,
   },
   field: {
     marginBottom: 20,
@@ -200,8 +188,6 @@ const styles = StyleSheet.create({
   },
   inputError: {
     borderColor: '#FF3B30',
-    backgroundColor: '#fff5f5',
-    borderWidth: 2,
   },
   labelError: {
     color: '#FF3B30',
@@ -210,6 +196,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#FF3B30',
     marginTop: 4,
-    fontWeight: '500',
   },
 });
