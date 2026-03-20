@@ -1991,9 +1991,9 @@ export default function BusinessDetailsScreen() {
 
     // 3. Validate GST (format if provided)
     if (editData.gst_number && editData.gst_number.trim()) {
-      const gstRegex = /^\d{2}[A-Z]{5}\d{4}[A-Z]{1}\d{1}Z\d{1}$/;
+      const gstRegex = /^[A-Z0-9]{15}$/;
       if (!gstRegex.test(editData.gst_number.toUpperCase())) {
-        errors.gst_number = 'Please enter a valid GST number';
+        errors.gst_number = 'GST number must be exactly 15 alphanumeric characters';
       }
     }
 
@@ -2122,7 +2122,11 @@ export default function BusinessDetailsScreen() {
         }
       }
 
-      Alert.alert('Success', 'Business details updated successfully');
+      Alert.alert(
+        'Success',
+        'Business details updated successfully',
+        [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
+      );
       await loadData(); // Reload to refresh the display
       await loadVerificationDocuments(); // Reload documents
     } catch (error: any) {
@@ -3421,15 +3425,26 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>GST Number</Text>
+                  <Text style={[styles.editLabel, validationErrors.gst_number && styles.editLabelError]}>GST Number</Text>
                   <View style={styles.inputActionRow}>
                     <TextInput
                       ref={gstNumberRef}
-                      style={[styles.editInput, styles.flexInput]}
+                      style={[styles.editInput, styles.flexInput, validationErrors.gst_number && styles.validationInputInvalid]}
                       value={editData.gst_number || ''}
-                      onChangeText={(text) => setEditData({ ...editData, gst_number: text })}
-                      placeholder="Enter GST number"
+                      onChangeText={(text) => {
+                        const filtered = text.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 15);
+                        setEditData({ ...editData, gst_number: filtered });
+                        if (validationErrors.gst_number) {
+                          setValidationErrors(prev => {
+                            const { gst_number, ...rest } = prev;
+                            return rest;
+                          });
+                        }
+                      }}
+                      placeholder="Enter 15-digit GST number"
                       placeholderTextColor="#999"
+                      autoCapitalize="characters"
+                      maxLength={15}
                       returnKeyType="next"
                       onFocus={handleFieldFocus}
                       onSubmitEditing={() => websiteUrlRef.current?.focus()}
@@ -3471,6 +3486,9 @@ export default function BusinessDetailsScreen() {
                         </View>
                       ))}
                     </View>
+                  )}
+                  {validationErrors.gst_number && (
+                    <Text style={styles.validationErrorText}>{validationErrors.gst_number}</Text>
                   )}
                 </View>
 

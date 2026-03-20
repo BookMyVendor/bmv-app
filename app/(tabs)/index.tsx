@@ -16,7 +16,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TrendingUp, Calendar, Eye, X, ChevronRight, Bell, WifiOff } from 'lucide-react-native';
 import { useAuth } from '../../contexts/AuthContext';
-import { supabaseCore, supabaseCrm } from '../../lib/supabase';
+import { supabaseCore, supabaseCrm, supabaseCms } from '../../lib/supabase';
 import { checkNotificationPermission, requestNotificationPermission } from '../../lib/pushNotifications';
 import { STATUS_OPTIONS, LeadStatus } from '../../types/leads';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
@@ -43,6 +43,7 @@ interface Business {
   vendor_business_category_mappings?: {
     categories?: {
       category_type: string;
+      parent_category_id: string | null;
     }
   }[] | null;
   vendor_business_pricing_packages?: {
@@ -56,7 +57,11 @@ interface Business {
   facebook_url?: string | null;
   youtube_url?: string | null;
   gst_number?: string | null;
-  pan_number?: string | null;
+  pan_number?: string | null; // Keep for fallback
+  business_registration_number?: string | null; // Actual PAN column
+  locality?: string | null;
+  image_count?: number;
+  document_count?: number;
 }
 
 interface LeadStats {
@@ -67,9 +72,8 @@ interface LeadStats {
 }
 
 // Returns a 0-100 integer representing how complete the business profile is
-// Returns a 0-100 integer representing how complete the business profile is based ONLY on mandatory fields (*)
 function calculateProfileCompletion(business: Business): number {
-  const checks = [
+  const coreChecks = [
     // 1-4. Basic Info
     !!(business.business_name?.trim()),
     !!(business.contact_person_name?.trim()),
@@ -82,15 +86,47 @@ function calculateProfileCompletion(business: Business): number {
     !!(business.address?.trim()),
     !!(business.pincode?.trim()),
     !!(business.operating_locations && business.operating_locations.length > 0),
-    // 10. Pricing (Package exists)
-    !!(business.vendor_business_pricing_packages && business.vendor_business_pricing_packages.length > 0),
-    // 11. Services Offered Mapped
-    !!(business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'business')),
-    // 12. Event Types Mapped
+    // 10. Pricing (Base Price & Unit filled)
+    !!(business.vendor_business_pricing_packages?.[0]?.base_price && business.vendor_business_pricing_packages?.[0]?.price_unit),
+    // 11. Primary Category Mapped
+    !!(business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'business' && m.categories?.parent_category_id === null)),
+    // 12. Specialization Mapped
+    !!(business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'business' && m.categories?.parent_category_id !== null)),
+    // 13. Event Types Mapped
     !!(business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'event')),
+    // 14. Cover Photo
+    !!(business.cover_photo_url?.trim()),
+    // 15. Gallery/Images
+    !!(business.image_count && business.image_count > 0),
+    // 16-18. Detailed Location
+    !!(business.city?.trim()),
+    !!(business.locality?.trim()),
+    !!(business.state?.trim()),
   ];
-  const filled = checks.filter(Boolean).length;
-  return Math.round((filled / checks.length) * 100);
+
+  const optionalChecks = [
+    // 19-22. Social Media
+    !!(business.website_url?.trim()),
+    !!(business.instagram_url?.trim()),
+    !!(business.facebook_url?.trim()),
+    !!(business.youtube_url?.trim()),
+    // 23-24. Tax Info
+    !!(business.business_registration_number?.trim() || business.pan_number?.trim()),
+    !!(business.gst_number?.trim()),
+    // 25. Verification Documents
+    !!(business.document_count && business.document_count > 0),
+  ];
+
+  const coreFilled = coreChecks.filter(Boolean).length;
+  const optionalFilled = optionalChecks.filter(Boolean).length;
+  
+  // Weighting: Core fields account for 90%, Optional fields account for 10%
+  // 18 core fields * 5% = 90%
+  // 7 optional fields * ~1.43% = 10%
+  const coreScore = (coreFilled / coreChecks.length) * 90;
+  const optionalScore = (optionalFilled / optionalChecks.length) * 10;
+  
+  return Math.round(coreScore + optionalScore);
 }
 
 function getGreeting(userName?: string) {
@@ -125,6 +161,7 @@ export default function DashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [showFilterScrollIndicator, setShowFilterScrollIndicator] = useState(false);
   const [businessLeadCounts, setBusinessLeadCounts] = useState<Record<string, number>>({});
+  const [businessMetadata, setBusinessMetadata] = useState<Record<string, { images: number; docs: number }>>({});
   const [isOffline, setIsOffline] = useState(false);
   const filterScrollViewRef = useRef<ScrollView>(null);
   const { user } = useAuth();
@@ -242,7 +279,9 @@ export default function DashboardScreen() {
       setIsOffline(false);
 
       if (formattedBusinesses.length > 0) {
-        fetchBusinessLeadCounts(formattedBusinesses.map((b: Business) => b.id));
+        const businessIds = formattedBusinesses.map((b: Business) => b.id);
+        fetchBusinessLeadCounts(businessIds);
+        fetchBusinessMetadata(businessIds);
       }
     } catch (error) {
       console.error('Error fetching businesses:', error);
@@ -276,6 +315,54 @@ export default function DashboardScreen() {
       setIsOffline(false);
     } catch (error) {
       console.error('Error fetching business lead counts:', error);
+      setIsOffline(true);
+    }
+  };
+
+  const fetchBusinessMetadata = async (businessIds: string[]) => {
+    try {
+      const metadata: Record<string, { images: number; docs: number }> = {};
+      
+      await Promise.all(
+        businessIds.map(async (id) => {
+          // Fetch image count
+          const { count: imageCount } = await supabaseCms
+            .from('vendor_business_media')
+            .select('*', { count: 'exact', head: true })
+            .eq('business_id', id);
+            
+          // Fetch document count
+          const { count: docCount } = await supabaseCms
+            .from('vendor_verification_documents')
+            .select('*', { count: 'exact', head: true })
+            .eq('business_id', id);
+            
+          metadata[id] = { 
+            images: imageCount || 0, 
+            docs: docCount || 0 
+          };
+        })
+      );
+      
+      setBusinessMetadata(metadata);
+      
+      // Also update the businesses state to include the counts for calculation
+      setBusinesses(prev => {
+        const updated = prev.map(b => ({
+          ...b,
+          image_count: metadata[b.id]?.images || 0,
+          document_count: metadata[b.id]?.docs || 0
+        }));
+        // Update cache so next load looks consistent
+        if (user?.id) {
+          AsyncStorage.setItem(`dashboard_businesses_${user.id}`, JSON.stringify(updated)).catch(() => { });
+        }
+        return updated;
+      });
+      
+      setIsOffline(false);
+    } catch (error) {
+      console.error('Error fetching business metadata:', error);
       setIsOffline(true);
     }
   };

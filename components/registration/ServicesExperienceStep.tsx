@@ -1104,6 +1104,9 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
             ))}
           </View>
         )}
+        {validationErrors.selectedCategoryIds && (
+          <Text style={styles.errorText}>{validationErrors.selectedCategoryIds}</Text>
+        )}
 
         {/* Sub-categories modal (tree for selected root only) */}
         <Modal
@@ -1532,7 +1535,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    marginBottom: 16,
   },
   dropdownText: {
     fontSize: 16,
@@ -1544,8 +1546,6 @@ const styles = StyleSheet.create({
   },
   dropdownTriggerError: {
     borderColor: '#FF3B30',
-    backgroundColor: '#fff5f5',
-    borderWidth: 2,
   },
   dropdownTriggerDisabled: {
     backgroundColor: '#f0f0f0',
@@ -1557,14 +1557,11 @@ const styles = StyleSheet.create({
   },
   inputError: {
     borderColor: '#FF3B30',
-    backgroundColor: '#fff5f5',
-    borderWidth: 2,
   },
   errorText: {
     fontSize: 12,
     color: '#FF3B30',
     marginTop: 4,
-    fontWeight: '500',
   },
   helperText: {
     fontSize: 12,
@@ -1584,6 +1581,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#007AFF',
+  },
+  uploadButtonError: {
+    borderColor: '#FF3B30',
+    borderStyle: 'solid',
   },
   selectedLabel: {
     fontSize: 14,

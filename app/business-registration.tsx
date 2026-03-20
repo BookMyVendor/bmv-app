@@ -181,7 +181,7 @@ export default function BusinessRegistrationScreen() {
     const hasCategory = !!(businessData.selectedRootCategoryId || (businessData.selectedCategoryIds && businessData.selectedCategoryIds.length > 0));
     const hasEvents = !!(businessData.selectedEventIds && businessData.selectedEventIds.length > 0);
     const hasOperatingLocations = !!(businessData.operatingLocations && businessData.operatingLocations.length > 0);
-    
+
     return hasBusinessName && hasContactName && hasEmail && hasPhone && hasCategory && hasEvents && hasOperatingLocations;
   };
 
@@ -230,11 +230,7 @@ export default function BusinessRegistrationScreen() {
     scrollViewRef.current?.scrollTo({ y: 0, animated: false });
   }, [currentPage]);
 
-  const handleNext = () => {
-    // Dismiss keyboard before validation
-    Keyboard.dismiss();
-
-    // Validate current step before proceeding
+  const validateCurrentPage = (): boolean => {
     const errors: Record<string, string> = {};
 
     // Validate all fields
@@ -251,9 +247,17 @@ export default function BusinessRegistrationScreen() {
     }
     if (!businessData.phoneNumber || !businessData.phoneNumber.trim()) {
       errors.phoneNumber = 'Business contact number is required';
+    } else {
+      const cleanedPhone = stripCountryCode(businessData.phoneNumber);
+      if (cleanedPhone.length !== 10) {
+        errors.phoneNumber = 'Phone number must be exactly 10 digits';
+      }
+    }
+    if (!businessData.selectedRootCategoryId) {
+      errors.selectedRootCategoryId = 'Please select a primary category';
     }
     if (!businessData.selectedCategoryIds || businessData.selectedCategoryIds.length === 0) {
-      errors.selectedCategoryIds = 'Please select at least one sub-category';
+      errors.selectedCategoryIds = 'Please select at least one specialization';
     }
     if (!businessData.selectedEventIds || businessData.selectedEventIds.length === 0) {
       errors.selectedEventIds = 'Please select at least one event type';
@@ -266,14 +270,30 @@ export default function BusinessRegistrationScreen() {
       setValidationErrors(errors);
       Alert.alert(
         'Validation Error',
-        'Please complete all required fields:\n\n' + Object.values(errors).join('\n'),
+        'Please complete all required fields',
         [{ text: 'OK' }]
       );
-      return;
+
+      // Focus first error field for better UX
+      if (errors.businessName || errors.contactPersonName || errors.phoneNumber || errors.email) {
+        basicInfoStepRef.current?.focusNextEmptyField();
+      } else {
+        servicesStepRef.current?.focusNextEmptyField();
+      }
+
+      return false;
     }
 
-    // Clear validation errors when moving to next step
+    // Clear validation errors if validation passes
     setValidationErrors({});
+    return true;
+  };
+
+  const handleNext = () => {
+    // Dismiss keyboard before validation
+    Keyboard.dismiss();
+
+    if (!validateCurrentPage()) return;
 
     if (currentPage < totalSteps - 1) {
       setCurrentPage(currentPage + 1);
@@ -325,13 +345,13 @@ export default function BusinessRegistrationScreen() {
               text: 'Cancel',
               style: 'destructive',
               onPress: async () => {
-                  // Clear saved data and set skip flag when user cancels
-                  await Promise.all([
-                    clearSavedData(),
-                    AsyncStorage.setItem(SKIP_BUSINESS_REGISTRATION_KEY, 'true')
-                  ]);
-                  console.log('Navigating to dashboard after cancel');
-                  router.replace('/(tabs)');
+                // Clear saved data and set skip flag when user cancels
+                await Promise.all([
+                  clearSavedData(),
+                  AsyncStorage.setItem(SKIP_BUSINESS_REGISTRATION_KEY, 'true')
+                ]);
+                console.log('Navigating to dashboard after cancel');
+                router.replace('/(tabs)');
               },
             },
           ]
@@ -450,14 +470,11 @@ export default function BusinessRegistrationScreen() {
   };
 
   const handleSubmit = async () => {
-    // 0. Validate Phone Number (10 digits)
-    if (businessData.phoneNumber && businessData.phoneNumber.trim()) {
-      const cleanedPhone = stripCountryCode(businessData.phoneNumber);
-      if (cleanedPhone.length !== 10) {
-        Alert.alert('Validation Error', 'Business contact number must be exactly 10 digits.');
-        return;
-      }
-    }
+    // Dismiss keyboard before validation
+    Keyboard.dismiss();
+
+    // Perform comprehensive validation
+    if (!validateCurrentPage()) return;
 
     setSubmitting(true);
 
@@ -522,7 +539,7 @@ export default function BusinessRegistrationScreen() {
             field_name: 'businessType',
             field_value: businessData.businessType
           });
-        
+
         if (formError) {
           console.error('Error saving businessType:', formError);
         }
@@ -656,7 +673,7 @@ export default function BusinessRegistrationScreen() {
 
       // Clear saved form data before navigating
       await clearSavedData();
-      
+
       // Reset local state to ensure next registration starts fresh
       setBusinessData({ businessType: 'services' });
       setCurrentPage(0);
@@ -803,20 +820,20 @@ export default function BusinessRegistrationScreen() {
             <View style={styles.successIconContainer}>
               <CheckCircle2 size={60} color="#34C759" />
             </View>
-            
+
             <Text style={styles.successModalTitle}>Welcome to BookMyVendor!</Text>
-            
+
             <Text style={styles.successModalMessage}>
               Thanks for joining us! Your business will be visible on our website after a quick review <Text style={{ fontWeight: '700' }}>(typically within 48 hours)</Text>.
             </Text>
-            
+
             <View style={styles.successInfoBox}>
               <Text style={styles.successInfoBoxText}>
                 To get the most out of your listing, please update your profile with photos, videos, and social links from your business settings. A detailed profile helps build trust with new customers!
               </Text>
             </View>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.successModalButton}
               onPress={() => {
                 setShowSuccessModal(false);
