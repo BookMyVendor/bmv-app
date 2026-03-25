@@ -12,7 +12,9 @@ import {
   Pressable,
   Alert,
 } from 'react-native';
-import { Check, ChevronRight, ChevronDown, X, Search } from 'lucide-react-native';
+import { Check, ChevronRight, ChevronDown, X, Search, Plus, Star } from 'lucide-react-native';
+import { Image as RNImage } from 'react-native';
+import { pickImage } from '../../lib/businessApi';
 import Dropdown from '../../components/Dropdown';
 import { supabaseCore } from '../../lib/supabase';
 
@@ -119,6 +121,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   onFocus,
 }, ref) => {
   const insets = useSafeAreaInsets();
+  const [uploading, setUploading] = useState(false);
   const [allBusinessCategories, setAllBusinessCategories] = useState<Category[]>([]);
   const [eventCategories, setEventCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -140,6 +143,19 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   const [isPricingUnitDropdownOpen, setIsPricingUnitDropdownOpen] = useState(false);
   const [isCategoriesExpanded, setIsCategoriesExpanded] = useState(false);
   const [isEventsExpanded, setIsEventsExpanded] = useState(false);
+
+  const [coverPhotoUri, setCoverPhotoUri] = useState<string | undefined>(data.coverPhotoUri);
+
+  // Sync cover photo with parent
+  useEffect(() => {
+    if (data.coverPhotoUri !== coverPhotoUri) {
+      onUpdate({ 
+        coverPhotoUri: coverPhotoUri,
+        portfolioImages: coverPhotoUri ? [coverPhotoUri] : []
+      });
+    }
+  }, [coverPhotoUri]);
+
 
   const [isCityModalOpen, setIsCityModalOpen] = useState(false);
   const [citySearchQuery, setCitySearchQuery] = useState('');
@@ -176,6 +192,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       onUpdate({
         selectedRootCategoryId: null,
         selectedCategoryIds: [],
+        selectedEventIds: [],
       });
     }
   }, [data.businessType]);
@@ -895,6 +912,22 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
     return DEFAULT_PRICING_UNITS;
   }, [selectedCategoriesWithPaths, allBusinessCategories, selectedRootCategoryId]);
+  
+  const handlePickCoverPhoto = async () => {
+    const { uri, error } = await pickImage();
+    if (error) {
+      Alert.alert('Error', error.message);
+      return;
+    }
+
+    if (uri) {
+      setCoverPhotoUri(uri);
+    }
+  };
+
+  const handleRemoveCoverPhoto = () => {
+    setCoverPhotoUri(undefined);
+  };
 
 
 
@@ -1030,7 +1063,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       </View>
 
       <View style={styles.field}>
-        <Text style={[styles.label, (validationErrors.selectedRootCategoryId || validationErrors.selectedCategoryIds) && styles.labelError]}>Primary Category *</Text>
+        <Text style={styles.label}>Primary Category *</Text>
         <Dropdown
           options={rootDropdownOptions}
           value={selectedRootCategoryId || ''}
@@ -1043,7 +1076,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       </View>
 
       <View style={styles.field}>
-        <Text style={[styles.label, validationErrors.selectedCategoryIds && styles.labelError]}>Specialization *</Text>
+        <Text style={styles.label}>Specialization *</Text>
         <TouchableOpacity
           style={[
             styles.dropdownTrigger,
@@ -1074,6 +1107,10 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           <ChevronDown size={20} color={selectedRootCategoryId ? '#666' : '#ccc'} />
         </TouchableOpacity>
 
+        {validationErrors.selectedCategoryIds && (
+          <Text style={styles.errorText}>{validationErrors.selectedCategoryIds}</Text>
+        )}
+
         {/* Selected Services Offered*/}
         {selectedCategoriesWithPaths.length > 0 && (
           <View style={styles.selectedContainer}>
@@ -1103,9 +1140,6 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               </View>
             ))}
           </View>
-        )}
-        {validationErrors.selectedCategoryIds && (
-          <Text style={styles.errorText}>{validationErrors.selectedCategoryIds}</Text>
         )}
 
         {/* Sub-categories modal (tree for selected root only) */}
@@ -1195,14 +1229,11 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       </View>
 
       <View style={styles.field}>
-        <Text style={[styles.label, validationErrors.selectedEventIds && styles.labelError]}>Events you serve *</Text>
+        <Text style={styles.label}>Events you serve</Text>
 
         {/* Event Dropdown Trigger */}
         <TouchableOpacity
-          style={[
-            styles.dropdownTrigger,
-            validationErrors.selectedEventIds && styles.dropdownTriggerError
-          ]}
+          style={styles.dropdownTrigger}
           onPress={() => setIsEventModalOpen(true)}
           activeOpacity={0.7}
         >
@@ -1334,7 +1365,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       </View>
 
       <View style={styles.field}>
-        <Text style={[styles.label, validationErrors.operatingLocations && styles.labelError]}>Operating Locations *</Text>
+        <Text style={styles.label}>Operating Locations *</Text>
         <TouchableOpacity
           style={[
             styles.dropdownTrigger,
@@ -1354,6 +1385,10 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           <ChevronDown size={20} color="#666" />
         </TouchableOpacity>
 
+        {validationErrors.operatingLocations && (
+          <Text style={styles.errorText}>{validationErrors.operatingLocations}</Text>
+        )}
+
         {data.operatingLocations && data.operatingLocations.length > 0 && (
           <View style={styles.selectedLocationsContainer}>
             {data.operatingLocations.map((city: string) => (
@@ -1368,9 +1403,6 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               </View>
             ))}
           </View>
-        )}
-        {validationErrors.operatingLocations && (
-          <Text style={styles.errorText}>{validationErrors.operatingLocations}</Text>
         )}
       </View>
 
@@ -1444,7 +1476,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
             <View
               style={[
                 styles.cityModalFooter,
-                { paddingBottom: insets.bottom + 40 }
+                { paddingBottom: Math.max(insets.bottom, 20) }
               ]}
             >
               <TouchableOpacity
@@ -1457,6 +1489,52 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           </View>
         </View>
       </Modal>
+
+      <View style={styles.field}>
+        <Text style={styles.label}>Business Cover Image</Text>
+        <Text style={styles.uploadHintTop}>
+          First impression matters! Choose your best work.
+        </Text>
+
+        {coverPhotoUri ? (
+          <View style={styles.imageGrid}>
+            <View style={styles.imageContainer}>
+              <RNImage source={{ uri: coverPhotoUri }} style={styles.thumbnailImage} />
+              <View style={styles.coverBadge}>
+                <Star size={10} color="#fff" fill="#fff" />
+                <Text style={styles.coverBadgeText}>COVER</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.portfolioRemoveButton}
+                onPress={handleRemoveCoverPhoto}
+              >
+                <X size={16} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[
+              styles.uploadButton,
+              uploading && styles.uploadButtonDisabled,
+            ]}
+            onPress={handlePickCoverPhoto}
+            disabled={uploading}
+          >
+            {uploading ? (
+              <>
+                <ActivityIndicator size="small" color="#fff" />
+                <Text style={styles.uploadButtonText}>Uploading...</Text>
+              </>
+            ) : (
+              <>
+                <Plus size={20} color="#fff" />
+                <Text style={styles.uploadButtonText}>Add Cover Image</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
+      </View>
 
 
     </View>
@@ -1575,6 +1653,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   selectedContainer: {
+    marginTop: 12,
     marginBottom: 16,
     padding: 12,
     backgroundColor: '#f0f7ff',
@@ -1870,7 +1949,7 @@ const styles = StyleSheet.create({
   selectedLocationsContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginTop: 0,
+    marginTop: 12,
     gap: 8,
   },
   locationChip: {
@@ -1908,7 +1987,6 @@ const styles = StyleSheet.create({
   },
   optionsList: {
     flex: 1,
-    maxHeight: 400,
   },
   option: {
     flexDirection: 'row',
@@ -1986,5 +2064,81 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '600',
+  },
+  imageCount: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 8,
+  },
+  uploadHintTop: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 12,
+    lineHeight: 16,
+  },
+  imageGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginBottom: 12,
+  },
+  imageContainer: {
+    position: 'relative',
+    width: 100,
+    height: 100,
+  },
+  thumbnailImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+    backgroundColor: '#f0f0f0',
+  },
+  portfolioRemoveButton: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: '#ff4444',
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  coverBadge: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    backgroundColor: '#34C759',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    zIndex: 5,
+  },
+  coverBadgeText: {
+    color: '#fff',
+    fontSize: 8,
+    fontWeight: '800',
+  },
+  uploadButton: {
+    backgroundColor: '#0066cc',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  uploadButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  uploadButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
 });

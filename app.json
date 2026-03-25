@@ -3,7 +3,7 @@
     "name": "BMV",
     "slug": "BookMyVendors",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/bmv_internal_logo.png",
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
@@ -23,9 +23,6 @@
         "monochromeImage": "./assets/images/bmv_internal_logo.png"
       },
       "icon": "./assets/images/bmv_internal_logo.png",
-      "navigationBar": {
-        "backgroundColor": "#ffffff"
-      },
       "package": "com.bnt.bookmyvendors"
     },
     "web": {

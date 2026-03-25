@@ -17,6 +17,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import PagerView from 'react-native-pager-view';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -41,8 +42,10 @@ import {
   MoreVertical,
   Search,
   WifiOff,
+  Video,
 } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
+import { Video as ExpoVideo, ResizeMode } from 'expo-av';
 import { supabaseCore } from '../lib/supabase';
 import {
   getBusinessDetails,
@@ -58,6 +61,8 @@ import {
   pickImage,
   pickMultipleImages,
   uploadMultipleBusinessImages,
+  uploadBusinessVideo,
+  pickVideo,
   setCoverImage,
   getBusinessVerificationDocuments,
   uploadVerificationDocument,
@@ -192,7 +197,8 @@ export default function BusinessDetailsScreen() {
 
   const [showOfferModal, setShowOfferModal] = useState(false);
   const [showImagePreview, setShowImagePreview] = useState(false);
-  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [previewInitialIndex, setPreviewInitialIndex] = useState(0);
+  const [currentPreviewIndex, setCurrentPreviewIndex] = useState(0);
   const [editingOffer, setEditingOffer] = useState<Offer | null>(null);
 
   const [offerTitle, setOfferTitle] = useState('');
@@ -603,6 +609,8 @@ export default function BusinessDetailsScreen() {
     setSelectedRootCategoryId(null);
     setSelectedCategoryIds([]);
     setExpandedCategoryIds(new Set());
+    setSelectedEventIds([]);
+    setTempSelectedEventIds([]);
     // Re-fetch categories with new filter
     loadCategories(type);
   };
@@ -1777,8 +1785,9 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleUploadImage = async () => {
-    if (images.length >= 20) {
-      Alert.alert('Limit Reached', 'Maximum 20 images allowed per business');
+    const imagesOnly = images.filter(img => img.image_type !== 'video');
+    if (imagesOnly.length >= 10) {
+      Alert.alert('Limit Reached', 'Maximum 10 images allowed per business');
       return;
     }
 
@@ -1799,7 +1808,7 @@ export default function BusinessDetailsScreen() {
         }
         console.log('Upload successful, data:', data);
 
-        // Reload images to get the persisted data
+        // Reload data to refresh calculations
         await loadData();
 
         Alert.alert('Success', 'Image uploaded successfully');
@@ -1812,10 +1821,48 @@ export default function BusinessDetailsScreen() {
     }
   };
 
+  const handleUploadVideo = async () => {
+    const videosOnly = images.filter(img => img.image_type === 'video');
+    if (videosOnly.length >= 5) {
+      Alert.alert('Limit Reached', 'Maximum 5 videos allowed per business');
+      return;
+    }
+
+    const { uri, error } = await pickVideo();
+    if (error) {
+      Alert.alert('Error', error.message);
+      return;
+    }
+
+    if (uri) {
+      try {
+        setUploading(true);
+        console.log('Starting video upload, URI:', uri);
+        const { data, error: uploadError } = await uploadBusinessVideo(id, uri);
+        if (uploadError) {
+          console.error('Upload error:', uploadError);
+          throw uploadError;
+        }
+        console.log('Upload successful, data:', data);
+
+        // Reload data
+        await loadData();
+
+        Alert.alert('Success', 'Video uploaded successfully');
+      } catch (error: any) {
+        console.error('Upload failed:', error);
+        Alert.alert('Error', error.message || 'Failed to upload video');
+      } finally {
+        setUploading(false);
+      }
+    }
+  };
+
   const handleUploadMultipleImages = async () => {
-    const availableSlots = 20 - images.length;
-    if (availableSlots === 0) {
-      Alert.alert('Limit Reached', 'Maximum 20 images allowed per business');
+    const imagesOnly = images.filter(img => img.image_type !== 'video');
+    const availableSlots = 10 - imagesOnly.length;
+    if (availableSlots <= 0) {
+      Alert.alert('Limit Reached', 'Maximum 10 images allowed per business');
       return;
     }
 
@@ -1832,7 +1879,7 @@ export default function BusinessDetailsScreen() {
     if (uris.length > availableSlots) {
       Alert.alert(
         'Too Many Images',
-        `You can only upload ${availableSlots} more image(s). Currently at ${images.length}/20.`
+        `You can only upload ${availableSlots} more image(s). Currently at ${imagesOnly.length}/10.`
       );
       return;
     }
@@ -1873,9 +1920,10 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleDeleteImage = (image: PortfolioImage) => {
+    const isVideo = image.image_type === 'video';
     Alert.alert(
-      'Delete Image',
-      'Are you sure you want to delete this image?',
+      `Delete ${isVideo ? 'Video' : 'Image'}`,
+      `Are you sure you want to delete this ${isVideo ? 'video' : 'image'}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -1886,9 +1934,9 @@ export default function BusinessDetailsScreen() {
               const { error } = await deleteBusinessImage(image.id);
               if (error) throw error;
               await loadData(); // Reload to get updated list
-              Alert.alert('Success', 'Image deleted successfully');
+              Alert.alert('Success', `${isVideo ? 'Video' : 'Image'} deleted successfully`);
             } catch (error: any) {
-              Alert.alert('Error', error.message || 'Failed to delete image');
+              Alert.alert('Error', error.message || `Failed to delete ${isVideo ? 'video' : 'image'}`);
             }
           },
         },
@@ -1897,6 +1945,10 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleSetCoverImage = async (image: PortfolioImage) => {
+    if (image.image_type === 'video') {
+      Alert.alert('Error', 'Videos cannot be set as cover image.');
+      return;
+    }
     try {
       const { error } = await setCoverImage(id, image.id);
       if (error) throw error;
@@ -2010,16 +2062,6 @@ export default function BusinessDetailsScreen() {
       }
     }
 
-    // 6. Validate at least one event type ONLY if categories are loaded
-    if (allEventCategories.length > 0) {
-      const hasSubEventType = selectedEventIds.some(id => {
-        const cat = allEventCategories.find(c => c.id === id);
-        return cat && cat.parent_category_id !== null;
-      });
-      if (!hasSubEventType) {
-        errors.selectedEventIds = 'At least one event type must be selected';
-      }
-    }
 
     // If there are any validation errors, set them to highlight fields
     if (Object.keys(errors).length > 0) {
@@ -2198,9 +2240,10 @@ export default function BusinessDetailsScreen() {
     </View>
   );
 
-  const renderImageItem = ({ item }: { item: PortfolioImage }) => {
+  const renderImageItem = ({ item, index }: { item: PortfolioImage; index: number }) => {
     const imageSource = item.image_base64 || item.image_url;
     const isCover = item.image_type === 'cover';
+    const isVideo = item.image_type === 'video';
     const isMenuOpen = activeMenuImageId === item.id;
 
     return (
@@ -2212,12 +2255,30 @@ export default function BusinessDetailsScreen() {
             if (activeMenuImageId) {
               setActiveMenuImageId(null);
             } else {
-              setPreviewImageUrl(imageSource);
+              setPreviewInitialIndex(index);
+              setCurrentPreviewIndex(index);
               setShowImagePreview(true);
             }
           }}
         >
-          <Image source={{ uri: imageSource || undefined }} style={styles.galleryImage} resizeMode="cover" />
+          {isVideo ? (
+            <View style={styles.galleryImage}>
+              <ExpoVideo 
+                source={{ uri: imageSource ?? '' }}
+                style={styles.galleryImage}
+                resizeMode={ResizeMode.COVER}
+                shouldPlay={false}
+                useNativeControls={false}
+                isMuted={true}
+              />
+              <View style={styles.videoBadge}>
+                <Video size={16} color="#fff" />
+              </View>
+            </View>
+          ) : (
+            <Image source={{ uri: imageSource ?? '' }} style={styles.galleryImage} resizeMode="cover" />
+          )}
+          
           {isCover && (
             <View style={styles.coverBadge}>
               <Text style={styles.coverBadgeText}>Cover</Text>
@@ -2401,36 +2462,58 @@ export default function BusinessDetailsScreen() {
               <View style={styles.sectionHeader}>
                 <View>
                   <Text style={styles.sectionTitle}>Business Gallery</Text>
-                  <Text style={styles.sectionSubtitle}>{images.length}/20 images uploaded</Text>
+                  <View style={styles.sectionSubtitleContainer}>
+                    <Text style={styles.sectionSubtitle}>
+                      {images.filter(img => img.image_type !== 'video').length}/10 images
+                    </Text>
+                    <Text style={[styles.sectionSubtitle, { marginLeft: 10 }]}>
+                      {images.filter(img => img.image_type === 'video').length}/5 videos
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.buttonGroup}>
+                <View style={[styles.buttonGroup, { flexWrap: 'wrap', justifyContent: 'flex-end', gap: 6 }]}>
                   <TouchableOpacity
                     style={[styles.addButton, styles.smallButton,
-                    (uploading || uploadingMultiple || images.length >= 20) && styles.addButtonDisabled]}
+                    (uploading || uploadingMultiple || images.filter(img => img.image_type !== 'video').length >= 10) && styles.addButtonDisabled]}
                     onPress={handleUploadImage}
-                    disabled={uploading || uploadingMultiple || images.length >= 20}
+                    disabled={uploading || uploadingMultiple || images.filter(img => img.image_type !== 'video').length >= 10}
                   >
                     {uploading ? (
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
                       <>
                         <Plus size={16} color="#fff" />
-                        <Text style={styles.smallButtonText}>Single</Text>
+                        <Text style={styles.smallButtonText}>Image</Text>
                       </>
                     )}
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.addButton, styles.smallButton,
-                    (uploading || uploadingMultiple || images.length >= 20) && styles.addButtonDisabled]}
+                    (uploading || uploadingMultiple || images.filter(img => img.image_type !== 'video').length >= 10) && styles.addButtonDisabled]}
                     onPress={handleUploadMultipleImages}
-                    disabled={uploading || uploadingMultiple || images.length >= 20}
+                    disabled={uploading || uploadingMultiple || images.filter(img => img.image_type !== 'video').length >= 10}
                   >
                     {uploadingMultiple ? (
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
                       <>
                         <ImageIcon size={16} color="#fff" />
-                        <Text style={styles.smallButtonText}>Multiple</Text>
+                        <Text style={styles.smallButtonText}>Bulk</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.addButton, styles.smallButton, { backgroundColor: '#6c7ef7' },
+                    (uploading || images.filter(img => img.image_type === 'video').length >= 5) && styles.addButtonDisabled]}
+                    onPress={handleUploadVideo}
+                    disabled={uploading || images.filter(img => img.image_type === 'video').length >= 5}
+                  >
+                    {uploading ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Video size={16} color="#fff" />
+                        <Text style={styles.smallButtonText}>Video</Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -2853,11 +2936,11 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.selectedEventIds && styles.editLabelError]}>Events you serve *</Text>
+                  <Text style={styles.editLabel}>Events you serve</Text>
 
                   {/* Event Dropdown Trigger */}
                   <TouchableOpacity
-                    style={[styles.dropdownTrigger, validationErrors.selectedEventIds && styles.validationInputInvalid]}
+                    style={styles.dropdownTrigger}
                     onPress={handleEventModalOpen}
                     activeOpacity={0.7}
                   >
@@ -3724,13 +3807,45 @@ export default function BusinessDetailsScreen() {
             >
               <X size={32} color="#fff" />
             </TouchableOpacity>
-            {previewImageUrl && (
-              <Image
-                source={{ uri: previewImageUrl }}
-                style={styles.previewImage}
-                resizeMode="contain"
-              />
-            )}
+
+            <PagerView 
+              style={styles.previewPager} 
+              initialPage={previewInitialIndex}
+              pageMargin={10}
+              onPageSelected={(e) => setCurrentPreviewIndex(e.nativeEvent.position)}
+            >
+              {images.map((item, index) => {
+                const imageSource = item.image_base64 || item.image_url;
+                const isVideo = item.image_type === 'video';
+                
+                return (
+                  <View key={`${item.id}-${index}`} style={styles.previewSlide}>
+                    {isVideo ? (
+                      <ExpoVideo
+                        source={{ uri: item.image_url || '' }}
+                        style={styles.previewImage}
+                        useNativeControls
+                        resizeMode={ResizeMode.CONTAIN}
+                        shouldPlay={index === currentPreviewIndex}
+                        isLooping
+                      />
+                    ) : (
+                      <Image
+                        source={{ uri: imageSource || undefined }}
+                        style={styles.previewImage}
+                        resizeMode="contain"
+                      />
+                    )}
+                  </View>
+                );
+              })}
+            </PagerView>
+            
+            <View style={styles.previewFooter}>
+              <Text style={styles.previewCounterText}>
+                {currentPreviewIndex + 1} / {images.length}
+              </Text>
+            </View>
           </View>
         </Modal>
         <Modal
@@ -4451,7 +4566,33 @@ const styles = StyleSheet.create({
   },
   previewImage: {
     width: Dimensions.get('window').width,
-    height: Dimensions.get('window').height * 0.8,
+    height: Dimensions.get('window').height,
+  },
+  previewPager: {
+    flex: 1,
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+  },
+  previewSlide: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  previewFooter: {
+    position: 'absolute',
+    bottom: 50,
+    width: '100%',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  previewCounterText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
   },
   dropdownTrigger: {
     flexDirection: 'row',
@@ -5146,5 +5287,33 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#1a1a1a',
     fontWeight: '500',
+  },
+  sectionSubtitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  videoPlaceholder: {
+    backgroundColor: '#f3f4f6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  videoPlaceholderText: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '500',
+  },
+  videoBadge: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    borderRadius: 4,
+    padding: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

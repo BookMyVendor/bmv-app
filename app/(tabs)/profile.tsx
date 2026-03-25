@@ -350,15 +350,17 @@ export default function ProfileScreen() {
           filePath = `profile-photos/${fileName}`;
           file = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
         } else {
-          // React Native: use expo-file-system (legacy API for compatibility)
-          const fs = await import('expo-file-system/legacy');
-          const fileInfo = await fs.getInfoAsync(photoUri as string);
-          if (!fileInfo.exists) throw new Error('File does not exist');
+          // React Native: use expo-file-system (New API in Expo 54+)
+          const FileSystem = await import('expo-file-system');
+          const fileObj = new FileSystem.File(photoUri as string);
+          if (!fileObj.exists) throw new Error('File does not exist');
+          
           fileExt = (photoUri as string).split('.').pop() || 'jpg';
           fileName = `${user?.id}-${Date.now()}.${fileExt}`;
           filePath = `profile-photos/${fileName}`;
+          
           // Read as base64
-          const base64Data = await fs.readAsStringAsync(photoUri as string, { encoding: 'base64' });
+          const base64Data = await fileObj.base64();
           // Turn base64 into buffer for upload
           let BufferClass = (global as any).Buffer || require('buffer').Buffer;
           file = BufferClass.from(base64Data, 'base64');

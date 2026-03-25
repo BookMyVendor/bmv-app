@@ -54,7 +54,7 @@ const BasicInformationStep = forwardRef<BasicInformationStepRef, BasicInformatio
     <View style={styles.content}>
 
       <View style={styles.field}>
-        <Text style={[styles.label, validationErrors.businessName && styles.labelError]}>Business Name *</Text>
+        <Text style={styles.label}>Business Name *</Text>
         <TextInput
           ref={businessNameRef}
           style={[

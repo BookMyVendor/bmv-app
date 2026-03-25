@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   ScrollView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X } from 'lucide-react-native';
 
 interface ReplyModalProps {
@@ -33,6 +34,7 @@ export default function ReplyModal({
 }: ReplyModalProps) {
   const [replyText, setReplyText] = useState(existingReply || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const insets = useSafeAreaInsets();
   const maxLength = 500;
 
   const handleSubmit = async () => {
@@ -63,14 +65,18 @@ export default function ReplyModal({
       onRequestClose={handleClose}
     >
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.container}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
         <Pressable style={styles.overlay} onPress={handleClose}>
-          <Pressable
-            style={styles.modalContent}
-            onPress={(e) => e.stopPropagation()}
-          >
+            <Pressable
+              style={[
+                styles.modalContent,
+                { paddingBottom: Math.max(insets.bottom, 16) }
+              ]}
+              onPress={(e) => e.stopPropagation()}
+            >
             <View style={styles.header}>
               <Text style={styles.headerTitle}>
                 {existingReply ? 'Edit Reply' : 'Reply to Review'}
@@ -164,10 +170,9 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     maxHeight: '90%',
-    paddingBottom: 40,
   },
   scrollView: {
-    flex: 1,
+    flexShrink: 1,
   },
   scrollContent: {
     flexGrow: 1,
@@ -238,7 +243,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    backgroundColor: '#fff',
   },
   cancelButton: {
     flex: 1,

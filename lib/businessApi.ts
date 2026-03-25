@@ -27,7 +27,7 @@ export interface PortfolioImage {
   image_base64: string | null;
   display_order: number;
   created_at: string;
-  image_type?: string; // 'gallery', 'cover', or 'portfolio'
+  image_type?: string; // 'gallery', 'cover', 'portfolio', or 'video'
 }
 
 export interface CreateOfferData {
@@ -53,9 +53,11 @@ export interface UpdateOfferData {
   is_active?: boolean;
 }
 
-const MAX_IMAGES_PER_BUSINESS = 20;
+const MAX_IMAGES_PER_BUSINESS = 10;
+const MAX_VIDEOS_PER_BUSINESS = 5;
 const OFFER_BANNER_MAX_SIZE = 5 * 1024 * 1024;
 const GALLERY_IMAGE_MAX_SIZE = 10 * 1024 * 1024;
+const GALLERY_VIDEO_MAX_SIZE = 25 * 1024 * 1024;
 
 export const validateImageFormat = (uri: string): boolean => {
   const validFormats = ['.jpg', '.jpeg', '.png', '.webp'];
@@ -106,10 +108,9 @@ export const uploadImageToStorage = async (
       });
       base64Data = dataUri.includes(',') ? dataUri.split(',')[1] : dataUri;
     } else {
-      // On mobile, use FileSystem
-      base64Data = await FileSystem.readAsStringAsync(uri, {
-        encoding: 'base64' as any,
-      });
+      // On mobile, use FileSystem (New API in Expo 54+)
+      const file = new FileSystem.File(uri);
+      base64Data = await file.base64();
     }
 
     if (!base64Data) {
@@ -263,7 +264,8 @@ export const getBusinessImages = async (
         *,
         file_storage:file_id (
           file_path,
-          storage_bucket
+          storage_bucket,
+          mime_type
         )
       `)
       .eq('business_id', businessId)
@@ -280,7 +282,7 @@ export const getBusinessImages = async (
       image_base64: null, // No longer stored as base64
       display_order: item.sort_order,
       created_at: item.created_at,
-      image_type: item.image_type || 'gallery',
+      image_type: item.file_storage?.mime_type?.startsWith('video/') ? 'video' : (item.image_type || 'gallery'),
     })) || [];
 
     return { data: transformedData, error: null };
@@ -374,14 +376,17 @@ export const uploadBusinessImage = async (
     console.log('uploadBusinessImage: file_storage record created, id:', fileData.id);
 
     // Step 3: Create vendor_business_media record
+    const hasCover = existingImages?.some(img => img.image_type === 'cover');
+    const imageType = !hasCover ? 'cover' : 'gallery';
     const nextOrder = existingImages ? existingImages.length : 0;
-    console.log('uploadBusinessImage: Creating vendor_business_media record...');
+    
+    console.log('uploadBusinessImage: Creating vendor_business_media record as:', imageType);
     const { data: mediaData, error: mediaError } = await supabaseCms
       .from('vendor_business_media')
       .insert({
         business_id: businessId,
         file_id: fileData.id,
-        image_type: 'gallery',
+        image_type: imageType,
         sort_order: nextOrder,
       })
       .select()
@@ -394,8 +399,22 @@ export const uploadBusinessImage = async (
     if (!mediaData) throw new Error('Failed to create media record');
     console.log('uploadBusinessImage: vendor_business_media record created, id:', mediaData.id);
 
-    // Return transformed data
     const imageUrl = getPublicUrl('vendor-media', uploadData.path);
+
+    // Step 4: If this is the first image, also update the business cover_photo_url
+    if (imageType === 'cover') {
+      console.log('uploadBusinessImage: Updating business cover_photo_url');
+      const { error: businessUpdateError } = await supabaseCore
+        .from('vendor_businesses')
+        .update({ cover_photo_url: imageUrl })
+        .eq('id', businessId);
+
+      if (businessUpdateError) {
+        console.error('uploadBusinessImage: Error updating business cover photo:', businessUpdateError);
+      }
+    }
+
+    // Return transformed data
     return {
       data: {
         id: mediaData.id,
@@ -404,11 +423,150 @@ export const uploadBusinessImage = async (
         image_base64: null,
         display_order: nextOrder,
         created_at: mediaData.created_at,
+        image_type: imageType,
       },
       error: null,
     };
   } catch (error) {
     return { data: null, error: error as Error };
+  }
+};
+
+export const uploadBusinessVideo = async (
+  businessId: string,
+  videoUri: string
+): Promise<{ data: PortfolioImage | null; error: Error | null }> => {
+  try {
+    const { data: allMedia } = await getBusinessImages(businessId);
+    const existingVideos = allMedia?.filter(m => m.image_type === 'video') || [];
+    
+    if (existingVideos.length >= MAX_VIDEOS_PER_BUSINESS) {
+      throw new Error(`Maximum ${MAX_VIDEOS_PER_BUSINESS} videos allowed per business`);
+    }
+
+    // Process video file
+    let videoData: Uint8Array;
+    let fileName: string;
+    let contentType: string;
+    let fileExt: string;
+
+    if (Platform.OS === 'web') {
+      const response = await fetch(videoUri);
+      const blob = await response.blob();
+      const arrayBuffer = await blob.arrayBuffer();
+      videoData = new Uint8Array(arrayBuffer);
+      fileExt = videoUri.split('.').pop()?.split('?')[0].toLowerCase() || 'mp4';
+      contentType = blob.type || `video/${fileExt}`;
+    } else {
+      // On mobile, use FileSystem (New API in Expo 54+)
+      const file = new FileSystem.File(videoUri);
+      const base64 = await file.base64();
+      const byteCharacters = atob(base64);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      videoData = new Uint8Array(byteNumbers);
+      fileExt = videoUri.split('.').pop()?.toLowerCase() || 'mp4';
+      contentType = `video/${fileExt}`;
+    }
+
+    fileName = `business-video-${businessId}-${Date.now()}.${fileExt}`;
+
+    // Step 1: Upload to storage
+    const { data: uploadData, error: uploadError } = await supabaseCore.storage
+      .from('vendor-media')
+      .upload(fileName, videoData, {
+        contentType,
+        upsert: false,
+      });
+
+    if (uploadError) throw uploadError;
+
+    // Step 2: Create file_storage record
+    const { data: fileData, error: fileError } = await supabaseCms
+      .from('file_storage')
+      .insert({
+        original_filename: fileName,
+        stored_filename: fileName,
+        file_path: uploadData.path,
+        file_size: videoData.length,
+        mime_type: contentType,
+        file_extension: fileExt,
+        storage_provider: 'supabase',
+        storage_bucket: 'vendor-media',
+        upload_status: 'completed',
+        uploaded_by_type: 'vendor',
+        uploaded_by_id: businessId,
+      })
+      .select()
+      .single();
+
+    if (fileError) throw fileError;
+
+    // Step 3: Create vendor_business_media record
+    const nextOrder = allMedia ? allMedia.length : 0;
+    const { data: mediaData, error: mediaError } = await supabaseCms
+      .from('vendor_business_media')
+      .insert({
+        business_id: businessId,
+        file_id: fileData.id,
+        image_type: 'gallery',
+        sort_order: nextOrder,
+      })
+      .select()
+      .single();
+
+    if (mediaError) throw mediaError;
+
+    const videoUrl = getPublicUrl('vendor-media', uploadData.path);
+    return {
+      data: {
+        id: mediaData.id,
+        business_id: businessId,
+        image_url: videoUrl,
+        image_base64: null,
+        display_order: nextOrder,
+        created_at: mediaData.created_at,
+        image_type: 'video',
+      },
+      error: null,
+    };
+  } catch (error) {
+    return { data: null, error: error as Error };
+  }
+};
+
+export const pickVideo = async (): Promise<{
+  uri: string | null;
+  size: number | null;
+  error: Error | null;
+}> => {
+  try {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      throw new Error('Photo Library access is required.');
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      quality: 0.8,
+    });
+
+    if (result.canceled) {
+      return { uri: null, size: null, error: null };
+    }
+
+    const asset = result.assets[0];
+    const fileSize = asset.fileSize || 0;
+
+    if (fileSize > GALLERY_VIDEO_MAX_SIZE) {
+      throw new Error(`Video file size exceeds 25MB limit (Current: ${(fileSize / (1024 * 1024)).toFixed(1)}MB)`);
+    }
+
+    return { uri: asset.uri, size: fileSize, error: null };
+  } catch (error) {
+    return { uri: null, size: null, error: error as Error };
   }
 };
 
@@ -440,6 +598,9 @@ export const uploadMultipleBusinessImages = async (
         `Can only upload ${availableSlots} more images. Current: ${currentCount}/${MAX_IMAGES_PER_BUSINESS}`
       );
     }
+
+    const hasCover = existingImages?.some(img => img.image_type === 'cover');
+    let coverFound = hasCover;
 
     for (let i = 0; i < imageUris.length; i++) {
       const imageUri = imageUris[i];
@@ -521,13 +682,14 @@ export const uploadMultipleBusinessImages = async (
 
         // Create vendor_business_media record
         const nextOrder = currentCount + successCount;
+        const imageType = !coverFound ? 'cover' : 'gallery';
 
         const { data: mediaData, error: mediaError } = await supabaseCms
           .from('vendor_business_media')
           .insert({
             business_id: businessId,
             file_id: fileData.id,
-            image_type: 'gallery',
+            image_type: imageType,
             sort_order: nextOrder,
           })
           .select()
@@ -536,6 +698,16 @@ export const uploadMultipleBusinessImages = async (
         if (mediaError) throw mediaError;
 
         const imageUrl = getPublicUrl('vendor-media', uploadData.path);
+
+        // Update cover photo if this became the cover
+        if (imageType === 'cover') {
+          coverFound = true;
+          await supabaseCore
+            .from('vendor_businesses')
+            .update({ cover_photo_url: imageUrl })
+            .eq('id', businessId);
+        }
+
         results.push({
           success: true,
           imageUrl: imageUrl,
