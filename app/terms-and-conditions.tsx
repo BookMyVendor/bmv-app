@@ -12,7 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Check } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
-import { supabaseCore } from '../lib/supabase';
+import { updateVendorMe } from '../lib/api/vendors';
 import ScreenBackground from '../components/ScreenBackground';
 
 const TERMS_ACCEPTANCE_KEY = 'vendor_terms_accepted';
@@ -43,19 +43,13 @@ export default function TermsAndConditionsScreen() {
       // If user exists, also try to store in database (optional - for future use)
       if (user?.id) {
         try {
-          // Try to update vendors table if terms_accepted field exists
-          // This will fail silently if field doesn't exist, which is fine
-          await supabaseCore
-            .from('vendors')
-            .update({
-              terms_accepted: true,
-              terms_accepted_at: new Date().toISOString(),
-            })
-            .eq('id', user.id);
+          await updateVendorMe({
+            terms_accepted: true,
+            terms_accepted_at: new Date().toISOString(),
+          });
           console.log('[T&C] Terms acceptance saved to database');
         } catch (dbError) {
-          // Ignore DB errors - AsyncStorage is the primary storage
-          console.log('[T&C] DB update optional - field may not exist yet');
+          console.log('[T&C] DB update optional');
         }
       }
 

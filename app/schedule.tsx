@@ -16,7 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ArrowLeft, Plus, Calendar, Clock, Trash2, ClipboardList, Building2, Pencil, X } from 'lucide-react-native';
 import ScreenBackground from '../components/ScreenBackground';
 import { useAuth } from '../contexts/AuthContext';
-import { supabaseCore } from '../lib/supabase';
+import { getVendorBusinesses } from '../lib/api/vendorBusinesses';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import notifee, { TriggerType, AndroidImportance } from '@notifee/react-native';
 
@@ -92,15 +92,11 @@ export default function ScheduleScreen() {
   }, [user?.id]);
 
   const loadBusinesses = async () => {
+    if (!user?.id) return;
     try {
-      const { data, error } = await supabaseCore
-        .from('vendor_businesses')
-        .select('id, business_name')
-        .eq('vendor_id', user?.id)
-        .order('created_at', { ascending: false });
-
+      const { data, error } = await getVendorBusinesses(user.id);
       if (!error && data) {
-        setBusinesses(data);
+        setBusinesses(data.map((b: any) => ({ id: b.id, business_name: b.business_name })));
       }
     } catch (e) {
       console.error('Error loading businesses:', e);

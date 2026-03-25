@@ -43,7 +43,8 @@ import {
   WifiOff,
 } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
-import { supabaseCore } from '../lib/supabase';
+import { getBusinessCategoryMappings, updateBusinessCategoryMappings } from '../lib/api/packages';
+import { getCategories } from '../lib/api/categories';
 import {
   getBusinessDetails,
   getOffers,
@@ -482,62 +483,36 @@ export default function BusinessDetailsScreen() {
 
   const loadCategoryMappings = async (): Promise<{ businessIds: string[]; eventIds: string[]; businessType: 'services' | 'rental' }> => {
     try {
-      const { data: mappings, error } = await supabaseCore
-        .from('vendor_business_category_mappings')
-        .select('category_id')
-        .eq('business_id', id);
-
+      const { data: mappings, error } = await getBusinessCategoryMappings(id);
       if (error) {
         console.error('Error loading category mappings:', error);
         return { businessIds: [], eventIds: [], businessType: 'services' };
       }
-
-      let determinedBusinessType: 'services' | 'rental' = 'services';
-
-      if (mappings && mappings.length > 0) {
-        const allCategoryIds = mappings.map((m) => m.category_id);
-
-        // Fetch categories to determine their types and business model
-        const { data: categories, error: catError } = await supabaseCore
-          .from('categories')
-          .select('id, category_type, category_level, parent_category_id, business_model')
-          .in('id', allCategoryIds);
-
-        if (catError) {
-          console.error('Error loading categories:', catError);
-          return { businessIds: [], eventIds: [], businessType: 'services' };
-        }
-
-        // Separate business and event categories
-        const businessCategoryIds: string[] = [];
-        const eventCategoryIds: string[] = [];
-
-        categories?.forEach((cat) => {
-          if (cat.category_type === 'business') {
-            businessCategoryIds.push(cat.id);
-            // Dynamic logic: if ANY category is rental, business type is rental
-            if (cat.business_model === 'rental') {
-              determinedBusinessType = 'rental';
-            }
-          } else if (cat.category_type === 'event') {
-            eventCategoryIds.push(cat.id);
-          }
-        });
-
-        setBusinessType(determinedBusinessType);
-        setEditData((prev: any) => ({ ...prev, businessType: determinedBusinessType }));
-        setSelectedCategoryIds(businessCategoryIds);
-        setSelectedEventIds(eventCategoryIds);
-
-        return { 
-          businessIds: businessCategoryIds, 
-          eventIds: eventCategoryIds, 
-          businessType: determinedBusinessType 
-        };
+      const list = mappings || [];
+      if (list.length === 0) {
+        setBusinessType('services');
+        return { businessIds: [], eventIds: [], businessType: 'services' };
       }
-
-      setBusinessType('services');
-      return { businessIds: [], eventIds: [], businessType: 'services' };
+      const allCategoryIds = list.map((m: any) => m.category_id || m.categories?.id).filter(Boolean);
+      const { data: categories } = await getCategories();
+      const catList = categories || [];
+      let determinedBusinessType: 'services' | 'rental' = 'services';
+      const businessCategoryIds: string[] = [];
+      const eventCategoryIds: string[] = [];
+      allCategoryIds.forEach((cid: string) => {
+        const cat = catList.find((c: any) => c.id === cid);
+        if (cat?.category_type === 'business') {
+          businessCategoryIds.push(cid);
+          if ((cat as any).business_model === 'rental') determinedBusinessType = 'rental';
+        } else if (cat?.category_type === 'event') {
+          eventCategoryIds.push(cid);
+        }
+      });
+      setBusinessType(determinedBusinessType);
+      setEditData((prev: any) => ({ ...prev, businessType: determinedBusinessType }));
+      setSelectedCategoryIds(businessCategoryIds);
+      setSelectedEventIds(eventCategoryIds);
+      return { businessIds: businessCategoryIds, eventIds: eventCategoryIds, businessType: determinedBusinessType };
     } catch (error) {
       console.error('Error loading category mappings:', error);
       return { businessIds: [], eventIds: [], businessType: 'services' };
@@ -547,39 +522,15 @@ export default function BusinessDetailsScreen() {
 
 
   const loadCategories = async (type?: 'services' | 'rental') => {
-    let businessCatsResult: any[] = [];
     try {
       setLoadingCategories(true);
+      const businessParams: any = { category_type: 'business', visible: true };
+      if (type === 'rental') businessParams.business_model = 'rental';
+      const { data: businessCats } = await getCategories(businessParams);
+      const businessCatsResult = businessCats || [];
+      setAllBusinessCategories(businessCatsResult);
 
-      // Fetch all business categories with hierarchy info
-      let businessQuery = supabaseCore
-        .from('categories')
-        .select('id, name, icon, parent_category_id, category_level, sort_order')
-        .eq('category_type', 'business')
-        .eq('visible', true);
-
-      // If rental type is selected, filter by business_model = 'rental'
-      if (type === 'rental') {
-        businessQuery = businessQuery.eq('business_model', 'rental');
-      }
-
-      const { data: businessCats, error: businessError } = await businessQuery
-        .order('sort_order', { ascending: true });
-
-      if (businessError) {
-        console.error('Error fetching business categories:', businessError);
-      } else {
-        businessCatsResult = businessCats || [];
-        setAllBusinessCategories(businessCatsResult);
-      }
-
-      // Fetch all event categories with hierarchy info
-      const { data: eventCats, error: eventError } = await supabaseCore
-        .from('categories')
-        .select('id, name, icon, parent_category_id, category_level, sort_order')
-        .eq('category_type', 'event')
-        .eq('visible', true)
-        .order('sort_order', { ascending: true });
+      const { data: eventCats, error: eventError } = await getCategories({ category_type: 'event', visible: true });
 
       if (eventError) {
         console.error('Error fetching event categories:', eventError);
@@ -1825,7 +1776,7 @@ export default function BusinessDetailsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const { error } = await deleteBusinessImage(image.id);
+              const { error } = await deleteBusinessImage(image.id, id);
               if (error) throw error;
               await loadData(); // Reload to get updated list
               Alert.alert('Success', 'Image deleted successfully');
@@ -2023,51 +1974,10 @@ export default function BusinessDetailsScreen() {
         }
       }
 
-      // Update category mappings
-      // First, delete existing mappings
-      const { error: deleteError } = await supabaseCore
-        .from('vendor_business_category_mappings')
-        .delete()
-        .eq('business_id', id);
-
-      if (deleteError) {
-        console.error('Error deleting category mappings:', deleteError);
-      }
-
-      // Then, insert new mappings
-      const categoryMappings: any[] = [];
-
-      // Add selected business category IDs
-      if (selectedCategoryIds.length > 0) {
-        selectedCategoryIds.forEach((categoryId) => {
-          categoryMappings.push({
-            vendor_id: user?.id,
-            business_id: id,
-            category_id: categoryId,
-          });
-        });
-      }
-
-      // Add event category IDs
-      if (selectedEventIds.length > 0) {
-        selectedEventIds.forEach((categoryId) => {
-          categoryMappings.push({
-            vendor_id: user?.id,
-            business_id: id,
-            category_id: categoryId,
-          });
-        });
-      }
-
-      // Insert all category mappings in a single batch
-      if (categoryMappings.length > 0) {
-        const { error: mappingError } = await supabaseCore
-          .from('vendor_business_category_mappings')
-          .insert(categoryMappings);
-
-        if (mappingError) {
-          console.error('Error inserting category mappings:', mappingError);
-        }
+      const allCategoryIds = [...selectedCategoryIds, ...selectedEventIds];
+      if (allCategoryIds.length > 0) {
+        const { error: mappingError } = await updateBusinessCategoryMappings(id, allCategoryIds);
+        if (mappingError) console.error('Error updating category mappings:', mappingError);
       }
 
       Alert.alert('Success', 'Business details updated successfully');

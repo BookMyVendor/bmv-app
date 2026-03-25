@@ -1,56 +1,62 @@
 import { getAccessToken, isTokenExpiredOrExpiringSoon, clearTokens } from './tokenStorage';
 import { refreshAccessToken } from './otpAuthApi';
+import { getApiBaseUrl, getAuthFunctionsBaseUrl } from './apiConfig';
+import { triggerAuthFailure } from './authFailure';
+
+export interface ApiError {
+  success: false;
+  error: string;
+  code?: string;
+  retryAfter?: number;
+}
+
+function resolveUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string' && !input.startsWith('http')) {
+    const base = getApiBaseUrl();
+    return input.startsWith('/') ? `${base}${input}` : `${base}/${input}`;
+  }
+  if (input instanceof URL) return input.toString();
+  if (input instanceof Request) return input.url;
+  return String(input);
+}
 
 /**
- * Enhanced fetch with automatic token refresh and retry on 401
+ * Enhanced fetch with automatic token refresh and retry on 401.
+ * Uses EXPO_PUBLIC_API_URL for relative paths. On 401 after failed refresh, clears tokens and calls triggerAuthFailure().
  */
 export async function apiFetch(
   input: RequestInfo | URL,
   options: RequestInit = {}
 ): Promise<Response> {
-  // Get access token
+  const url = resolveUrl(input);
   let accessToken = await getAccessToken();
 
-  // Check if token needs refresh (expired or expiring soon)
   if (accessToken && (await isTokenExpiredOrExpiringSoon())) {
-    console.log('[API] Token expired or expiring soon, refreshing...');
     const refreshResult = await refreshAccessToken();
     if (refreshResult.data) {
       accessToken = refreshResult.data.accessToken;
     } else {
-      // Refresh failed, clear tokens
       await clearTokens();
+      triggerAuthFailure();
       throw new Error('Token refresh failed. Please login again.');
     }
   }
 
-  // Add Authorization header if we have a token
   const headers = new Headers(options.headers);
   if (accessToken) {
     headers.set('Authorization', `Bearer ${accessToken}`);
   }
 
-  // Make the request using input instead of string url
-  let response = await fetch(input, {
-    ...options,
-    headers,
-  });
+  let response = await fetch(url, { ...options, headers });
 
-  // If 401, try to refresh token once and retry
   if (response.status === 401 && accessToken) {
-    console.log('[API] Got 401, attempting token refresh...');
     const refreshResult = await refreshAccessToken();
-
     if (refreshResult.data) {
-      // Retry with new token
       headers.set('Authorization', `Bearer ${refreshResult.data.accessToken}`);
-      response = await fetch(input, {
-        ...options,
-        headers,
-      });
+      response = await fetch(url, { ...options, headers });
     } else {
-      // Refresh failed, clear tokens
       await clearTokens();
+      triggerAuthFailure();
       throw new Error('Authentication failed. Please login again.');
     }
   }
@@ -58,42 +64,109 @@ export async function apiFetch(
   return response;
 }
 
+function parseApiError(response: Response, data: any): ApiError {
+  const success = false;
+  const error =
+    (typeof data?.error === 'string' ? data.error : null) ||
+    data?.message ||
+    data?.error?.message ||
+    `HTTP ${response.status}: ${response.statusText}`;
+  const code = data?.code ?? data?.error?.code ?? `HTTP_${response.status}`;
+  const retryAfter = data?.retryAfter ?? data?.error?.retryAfter;
+  return { success, error, code, retryAfter };
+}
+
+/** Backend may not expose all Edge Functions yet — log and let the app continue. */
+function log404NonBlocking(label: string, url: string) {
+  console.warn(`[API] 404 Not Found (non-blocking): ${label}`, url);
+}
+
 /**
- * Make authenticated API call with JSON response
+ * Authenticated API call with JSON response. Resolves relative URLs against API base.
+ * Returns errors in contract: { success: false, error: string, code?: string, retryAfter?: number }.
  */
 export async function apiCall<T>(
   url: string,
   options: RequestInit = {}
-): Promise<{ data?: T; error?: { code: string; message: string } }> {
+): Promise<{ data?: T; error?: ApiError }> {
   try {
-    const response = await apiFetch(url, {
+    const resolved = resolveUrl(url);
+    const response = await apiFetch(resolved, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
-        ...options.headers,
+        ...(options.headers as Record<string, string>),
       },
     });
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      return {
-        error: {
-          code: data?.code || `HTTP_${response.status}`,
-          message: data?.message || data?.error || `HTTP ${response.status}: ${response.statusText}`,
-        },
-      };
+    let data: any;
+    const text = await response.text();
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { error: text || response.statusText };
     }
 
-    return { data };
-  } catch (error: any) {
-    console.error('API call error:', error);
+    if (!response.ok) {
+      if (response.status === 404) {
+        log404NonBlocking(`apiCall ${resolved}`, resolved);
+        return { data: undefined, error: undefined };
+      }
+      return { error: parseApiError(response, data) };
+    }
+
+    return { data: (text ? data : undefined) as T };
+  } catch (err: any) {
     return {
       error: {
+        success: false,
+        error: err?.message || 'Network error. Please check your connection.',
         code: 'NETWORK_ERROR',
-        message: error.message || 'Network error. Please check your connection.',
       },
     };
   }
 }
 
+/** Spec success responses are { success: true, [key]: value }. Use responseKey to unwrap. */
+export async function functionsCall<T = any>(
+  functionName: string,
+  body: Record<string, unknown>,
+  responseKey?: string
+): Promise<{ data?: T; error?: ApiError }> {
+  try {
+    const url = `${getAuthFunctionsBaseUrl()}/${functionName}`;
+    const response = await apiFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    const text = await response.text();
+    let data: any;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { error: text || response.statusText };
+    }
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        log404NonBlocking(`functions/${functionName}`, url);
+        return { data: undefined, error: undefined };
+      }
+      return { error: parseApiError(response, data) };
+    }
+
+    const payload = text ? data : undefined;
+    const unwrapped = responseKey && payload && payload[responseKey] !== undefined ? payload[responseKey] : payload;
+    return { data: unwrapped as T };
+  } catch (err: any) {
+    return {
+      error: {
+        success: false,
+        error: err?.message || 'Network error. Please check your connection.',
+        code: 'NETWORK_ERROR',
+      },
+    };
+  }
+}

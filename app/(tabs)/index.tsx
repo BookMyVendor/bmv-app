@@ -16,7 +16,8 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TrendingUp, Calendar, Eye, X, ChevronRight, Bell, WifiOff } from 'lucide-react-native';
 import { useAuth } from '../../contexts/AuthContext';
-import { supabaseCore, supabaseCrm } from '../../lib/supabase';
+import { getVendorBusinesses } from '../../lib/api/vendorBusinesses';
+import { getLeads } from '../../lib/api/leads';
 import { checkNotificationPermission, requestNotificationPermission } from '../../lib/pushNotifications';
 import { STATUS_OPTIONS, LeadStatus } from '../../types/leads';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
@@ -143,30 +144,14 @@ export default function DashboardScreen() {
     } catch { }
 
     try {
-      const { data, error } = await supabaseCore
-        .from('vendor_businesses')
-        .select(`
-          *,
-          vendor_business_category_mappings (
-            categories (
-              name
-            )
-          )
-        `)
-        .eq('vendor_id', user.id)
-        .order('created_at', { ascending: false });
+      const { data, error } = await getVendorBusinesses(user.id);
+      if (error) throw new Error(error.error);
 
-      if (error) throw error;
-
-      const formattedBusinesses = (data || []).map((business: any) => {
-        const category = business.vendor_business_category_mappings?.[0]?.categories?.name;
-
-        return {
-          ...business,
-          business_description: business.description,
-          business_category: category || 'General',
-        };
-      });
+      const formattedBusinesses = (data || []).map((business: any) => ({
+        ...business,
+        business_description: business.description,
+        business_category: (business as any).business_category || (business as any).vendor_business_category_mappings?.[0]?.categories?.name || 'General',
+      }));
 
       setBusinesses(formattedBusinesses);
       AsyncStorage.setItem(`dashboard_businesses_${user.id}`, JSON.stringify(formattedBusinesses)).catch(() => { });
@@ -191,17 +176,17 @@ export default function DashboardScreen() {
       }
     } catch { }
 
+    if (!user?.id) return;
     try {
+      const { data: leads, error } = await getLeads({ vendor_id: user.id });
+      if (error) throw new Error(error.error);
       const counts: Record<string, number> = {};
-      await Promise.all(
-        businessIds.map(async (id) => {
-          const { count } = await supabaseCrm
-            .from('customer_leads')
-            .select('*', { count: 'exact', head: true })
-            .eq('business_id', id);
-          counts[id] = count || 0;
-        })
-      );
+      businessIds.forEach((id) => { counts[id] = 0; });
+      (leads || []).forEach((lead: any) => {
+        if (lead.business_id && counts[lead.business_id] !== undefined) {
+          counts[lead.business_id]++;
+        }
+      });
       setBusinessLeadCounts(counts);
       AsyncStorage.setItem(`dashboard_business_counts_${user?.id}`, JSON.stringify(counts)).catch(() => { });
       setIsOffline(false);
@@ -222,72 +207,31 @@ export default function DashboardScreen() {
     } catch { }
 
     try {
-      const { data: businessData } = await supabaseCore
-        .from('vendor_businesses')
-        .select('id')
-        .eq('vendor_id', user.id);
-
-      if (!businessData || businessData.length === 0) {
-        setLeadStats({
-          total: 0,
-          monthly: 0,
-          today: 0,
-          byStatus: { new: 0, contacted: 0, quoted: 0, converted: 0, lost: 0 },
-        });
-        return;
-      }
-
-      const statusFilter = selectedStatuses.length > 0 ? selectedStatuses : undefined;
-
-      let totalQuery = supabaseCrm
-        .from('customer_leads')
-        .select('*', { count: 'exact', head: true })
-        .eq('vendor_id', user.id);
-      if (statusFilter) totalQuery = totalQuery.in('lead_status', statusFilter);
-      const { count: totalCount } = await totalQuery;
-
+      const { data: leads, error } = await getLeads({
+        vendor_id: user.id,
+        ...(selectedStatuses.length > 0 ? { lead_status: selectedStatuses } : {}),
+      });
+      if (error) throw new Error(error.error);
+      const list = leads || [];
       const startOfMonth = new Date();
       startOfMonth.setDate(1);
       startOfMonth.setHours(0, 0, 0, 0);
-      let monthlyQuery = supabaseCrm
-        .from('customer_leads')
-        .select('*', { count: 'exact', head: true })
-        .eq('vendor_id', user.id)
-        .gte('created_at', startOfMonth.toISOString());
-      if (statusFilter) monthlyQuery = monthlyQuery.in('lead_status', statusFilter);
-      const { count: monthlyCount } = await monthlyQuery;
-
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
-      let todayQuery = supabaseCrm
-        .from('customer_leads')
-        .select('*', { count: 'exact', head: true })
-        .eq('vendor_id', user.id)
-        .gte('created_at', startOfDay.toISOString());
-      if (statusFilter) todayQuery = todayQuery.in('lead_status', statusFilter);
-      const { count: todayCount } = await todayQuery;
-
-      const { data: allLeads } = await supabaseCrm
-        .from('customer_leads')
-        .select('lead_status')
-        .eq('vendor_id', user.id);
-
       const statusCounts: Record<LeadStatus, number> = {
         new: 0, contacted: 0, quoted: 0, converted: 0, lost: 0,
       };
-      allLeads?.forEach((lead) => {
+      list.forEach((lead: any) => {
         if (lead.lead_status in statusCounts) {
           statusCounts[lead.lead_status as LeadStatus]++;
         }
       });
-
       const stats = {
-        total: totalCount || 0,
-        monthly: monthlyCount || 0,
-        today: todayCount || 0,
+        total: list.length,
+        monthly: list.filter((l: any) => new Date(l.created_at) >= startOfMonth).length,
+        today: list.filter((l: any) => new Date(l.created_at) >= startOfDay).length,
         byStatus: statusCounts,
       };
-
       setLeadStats(stats);
       AsyncStorage.setItem(`dashboard_lead_stats_${user.id}_${selectedStatuses.join(',')}`, JSON.stringify(stats)).catch(() => { });
       setIsOffline(false);

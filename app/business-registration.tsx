@@ -17,7 +17,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
-import { supabaseCore } from '../lib/supabase';
+import { createVendorBusiness } from '../lib/api/vendorBusinesses';
+import { updateBusinessCategoryMappings } from '../lib/api/packages';
 import BasicInformationStep, { BasicInformationStepRef } from '../components/registration/BasicInformationStep';
 import ServicesExperienceStep, { ServicesExperienceStepRef } from '../components/registration/ServicesExperienceStep';
 import LocationCoverageStep, { LocationCoverageStepRef } from '../components/registration/LocationCoverageStep';
@@ -626,58 +627,38 @@ export default function BusinessRegistrationScreen() {
         return 0;
       };
 
-      // Step 1: Create business with all fields (cover photo will be uploaded after)
-      const { data: createdBusiness, error: businessError } = await supabaseCore
-        .from('vendor_businesses')
-        .insert({
-          vendor_id: user?.id,
-          business_name: businessData.businessName,
-          business_email: businessData.email,
-          description: businessData.businessDescription,
-          address: businessData.businessAddress,
-          city: businessData.city,
-          state: businessData.state,
-          pincode: businessData.pincode || null,
-          locality: businessData.locality || null,
-          latitude: null,
-          longitude: null,
-          operating_locations: businessData.operatingLocations || [],
-          service_radius_km: businessData.serviceRadiusKm || 0,
-          contact_person_name: businessData.contactPersonName,
-          contact_person_phone: stripCountryCode(businessData.phoneNumber), // Ensure no +91
-          contact_person_role: businessData.contactPersonRole || null,
-          business_registration_number: businessData.panNumber || null, // PAN stored in business_registration_number field
-          website_url: businessData.websiteUrl || null,
-          instagram_url: businessData.instagramUrl || null,
-          facebook_url: businessData.facebookUrl || null,
-          youtube_url: businessData.youtubeUrl || null,
-          cover_photo_url: null, // Will be set after uploading cover image
-          years_experience: parseYearsOfExperience(businessData.yearsOfExperience || '0'),
-          gst_number: businessData.gstNumber || null,
-          status: 'pending',
-          availability: businessData.operatingHours || null, // Map operatingHours to availability column
-          subscription_status: 'trial',
-        })
-        .select()
-        .single();
-
-      if (businessError) throw businessError;
+      const businessPayload = {
+        vendor_id: user?.id,
+        business_name: businessData.businessName,
+        business_email: businessData.email,
+        description: businessData.businessDescription,
+        address: businessData.businessAddress,
+        city: businessData.city,
+        state: businessData.state,
+        pincode: businessData.pincode || null,
+        locality: businessData.locality || null,
+        latitude: null,
+        longitude: null,
+        operating_locations: businessData.operatingLocations || [],
+        service_radius_km: businessData.serviceRadiusKm || 0,
+        contact_person_name: businessData.contactPersonName,
+        contact_person_phone: stripCountryCode(businessData.phoneNumber),
+        contact_person_role: businessData.contactPersonRole || null,
+        business_registration_number: businessData.panNumber || null,
+        website_url: businessData.websiteUrl || null,
+        instagram_url: businessData.instagramUrl || null,
+        facebook_url: businessData.facebookUrl || null,
+        youtube_url: businessData.youtubeUrl || null,
+        cover_photo_url: null,
+        years_experience: parseYearsOfExperience(businessData.yearsOfExperience || '0'),
+        gst_number: businessData.gstNumber || null,
+        status: 'pending',
+        availability: businessData.operatingHours || null,
+        subscription_status: 'trial',
+      };
+      const { data: createdBusiness, error: businessError } = await createVendorBusiness(businessPayload as any);
+      if (businessError) throw new Error(businessError.error);
       if (!createdBusiness) throw new Error('Failed to create business');
-
-      // Step 2: Save businessType to vendor_business_form_data
-      if (businessData.businessType) {
-        const { error: formError } = await supabaseCore
-          .from('vendor_business_form_data')
-          .insert({
-            business_id: createdBusiness.id,
-            field_name: 'businessType',
-            field_value: businessData.businessType
-          });
-        
-        if (formError) {
-          console.error('Error saving businessType:', formError);
-        }
-      }
 
       // Step 3: Upload cover photo if provided (after business is created)
       if (businessData.coverPhotoUri) {
@@ -761,46 +742,15 @@ export default function BusinessRegistrationScreen() {
         }
       }
 
-      // Step 6: Insert category mappings
-      const categoryMappings: any[] = [];
-
-      // Add selected business category IDs (including root categories)
       const allSelectedCategoryIds = [...(businessData.selectedCategoryIds || [])];
-      // Include root category if selected and not already in the list
       if (businessData.selectedRootCategoryId && !allSelectedCategoryIds.includes(businessData.selectedRootCategoryId)) {
         allSelectedCategoryIds.push(businessData.selectedRootCategoryId);
       }
-
-      if (allSelectedCategoryIds.length > 0) {
-        allSelectedCategoryIds.forEach((categoryId) => {
-          categoryMappings.push({
-            vendor_id: user?.id,
-            business_id: createdBusiness.id,
-            category_id: categoryId,
-          });
-        });
-      }
-
-      // Add event category IDs
-      if (businessData.selectedEventIds && businessData.selectedEventIds.length > 0) {
-        businessData.selectedEventIds.forEach((categoryId: string) => {
-          categoryMappings.push({
-            vendor_id: user?.id,
-            business_id: createdBusiness.id,
-            category_id: categoryId,
-          });
-        });
-      }
-
-      // Insert all category mappings in a single batch
-      if (categoryMappings.length > 0) {
-        const { error: mappingError } = await supabaseCore
-          .from('vendor_business_category_mappings')
-          .insert(categoryMappings);
-
-        if (mappingError) {
-          console.error('Error inserting category mappings:', mappingError);
-        }
+      const eventIds = businessData.selectedEventIds || [];
+      const allCategoryIds = [...allSelectedCategoryIds, ...eventIds];
+      if (allCategoryIds.length > 0) {
+        const { error: mappingError } = await updateBusinessCategoryMappings(createdBusiness.id, allCategoryIds);
+        if (mappingError) console.error('Error saving category mappings:', mappingError);
       }
 
       // Step 7: Create default package with pricing info

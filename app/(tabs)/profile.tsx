@@ -22,7 +22,9 @@ import { Camera, LogOut, Save, ShieldAlert, Trash2, WifiOff } from 'lucide-react
 import { Formik } from 'formik';
 import * as Yup from 'yup';
 import { useAuth } from '../../contexts/AuthContext';
-import { supabaseCore, supabaseCms } from '../../lib/supabase';
+import { getFileUrl } from '../../lib/api/fileStorage';
+import { uploadProfilePhoto } from '../../lib/api/media';
+import { updateVendorMe } from '../../lib/api/vendors';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
 import { validateEmail } from '../../lib/validation';
 import { sendOTP, resendOTP } from '../../lib/otpAuthApi';
@@ -177,25 +179,13 @@ export default function ProfileScreen() {
     setResendCountdown(0);
   };
 
-  // Fetch image URL from file_storage when profile loads
   useEffect(() => {
     const fetchImageUrl = async () => {
       if (profile?.image_file_id) {
-        const { data: fileData } = await supabaseCms
-          .from('file_storage')
-          .select('file_path, storage_bucket')
-          .eq('id', profile.image_file_id)
-          .single();
-
-        if (fileData) {
-          const { data: urlData } = supabaseCore.storage
-            .from(fileData.storage_bucket || 'vendor-media')
-            .getPublicUrl(fileData.file_path);
-          setPhotoUri(urlData.publicUrl);
-        }
+        const { data } = await getFileUrl(profile.image_file_id);
+        if (data?.url) setPhotoUri(data.url);
       }
     };
-
     fetchImageUrl();
   }, [profile?.image_file_id]);
 
@@ -318,199 +308,38 @@ export default function ProfileScreen() {
       // Check if it's a local/blob URI (not an http/https URL from storage)
       const isLocalImage = photoUri && !photoUri.startsWith('http://') && !photoUri.startsWith('https://');
 
-      if (isLocalImage) {
-        console.log('📤 Uploading new profile photo:', photoUri);
-
-        let blob: Blob | undefined;
-        let fileExt = 'jpg';
-        let fileName: string;
-        let filePath: string;
-        let file: any;
+      if (isLocalImage && photoUri) {
+        const formData = new FormData();
         if (Platform.OS === 'web') {
-          // Web: fetch as before
-          const response = await fetch(photoUri as string);
-          if (!response.ok) {
-            throw new Error('Failed to load image');
-          }
-          blob = await response.blob();
-          if (blob.type) {
-            if (blob.type.includes('png')) fileExt = 'png';
-            else if (blob.type.includes('jpeg') || blob.type.includes('jpg')) fileExt = 'jpg';
-            else if (blob.type.includes('webp')) fileExt = 'webp';
-          } else {
-            fileExt = (photoUri as string).split('.').pop() || 'jpg';
-          }
-          fileName = `${user?.id}-${Date.now()}.${fileExt}`;
-          filePath = `profile-photos/${fileName}`;
-          file = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
+          const response = await fetch(photoUri);
+          if (!response.ok) throw new Error('Failed to load image');
+          const blob = await response.blob();
+          const ext = blob.type?.includes('png') ? 'png' : 'jpg';
+          const name = `${user?.id}-${Date.now()}.${ext}`;
+          formData.append('image', new File([blob], name, { type: blob.type || 'image/jpeg' }));
         } else {
-          // React Native: use expo-file-system (legacy API for compatibility)
           const fs = await import('expo-file-system/legacy');
-          const fileInfo = await fs.getInfoAsync(photoUri as string);
+          const fileInfo = await fs.getInfoAsync(photoUri);
           if (!fileInfo.exists) throw new Error('File does not exist');
-          fileExt = (photoUri as string).split('.').pop() || 'jpg';
-          fileName = `${user?.id}-${Date.now()}.${fileExt}`;
-          filePath = `profile-photos/${fileName}`;
-          // Read as base64
-          const base64Data = await fs.readAsStringAsync(photoUri as string, { encoding: 'base64' });
-          // Turn base64 into buffer for upload
-          let BufferClass = (global as any).Buffer || require('buffer').Buffer;
-          file = BufferClass.from(base64Data, 'base64');
+          const ext = photoUri.split('.').pop() || 'jpg';
+          const name = `${user?.id}-${Date.now()}.${ext}`;
+          formData.append('image', { uri: photoUri, name, type: `image/${ext === 'jpg' ? 'jpeg' : ext}` } as any);
         }
-
-        console.log('📤 Uploading to storage:', filePath);
-
-        let blobObj: { size: number; type: string };
-        if (Platform.OS === 'web') {
-          blobObj = blob ? { size: blob.size, type: blob.type } : { size: 0, type: 'image/jpeg' };
-        } else {
-          blobObj = { size: file.length, type: `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}` };
-        }
-
-        const { error: uploadError } = await supabaseCore.storage
-          .from('vendor-media')
-          .upload(filePath, file, {
-            contentType: blobObj.type || 'image/jpeg',
-          });
-
-
-        if (uploadError) {
-          console.error('❌ Storage upload error:', uploadError);
-          throw uploadError;
-        }
-        console.log('✅ Image uploaded to storage');
-
-        // Step 2: Create file_storage record
-        console.log('📤 Creating file_storage record');
-        const { data: fileData, error: fileError } = await supabaseCms
-          .from('file_storage')
-          .insert({
-            original_filename: fileName,
-            stored_filename: fileName,
-            file_path: filePath,
-            file_size: blobObj.size,
-            mime_type: blobObj.type,
-            file_extension: fileExt,
-            storage_provider: 'supabase',
-            storage_bucket: 'vendor-media',
-            upload_status: 'completed',
-            uploaded_by_type: 'vendor',
-            uploaded_by_id: user?.id,
-          })
-          .select()
-          .single();
-
-        if (fileError) {
-          console.error('❌ File storage record error:', fileError);
-          throw fileError;
-        }
-        console.log('✅ File storage record created:', fileData.id);
-        imageFileId = fileData.id;
-
-        // Step 3: Create vendor_verification_documents entry for profile photo
-        const { data: docTypeData } = await supabaseCore
-          .from('document_types')
-          .select('id')
-          .eq('type_code', 'profile_photo')
-          .maybeSingle();
-
-        if (docTypeData) {
-          // Create verification document entry
-          const { error: verificationDocError } = await supabaseCms
-            .from('vendor_verification_documents')
-            .insert({
-              vendor_id: user?.id,
-              document_type_id: docTypeData.id,
-              file_id: fileData.id,
-              verification_status: 'pending',
-              uploaded_at: new Date().toISOString(),
-            });
-
-          // Don't throw error if this fails - it's optional tracking
-          if (verificationDocError) {
-            console.warn('Failed to create verification document entry:', verificationDocError);
-          }
-        }
-        // no-op
+        const uploadResult = await uploadProfilePhoto(formData);
+        if (uploadResult.error) throw new Error(uploadResult.error.error);
+        if (uploadResult.data?.file_id) imageFileId = uploadResult.data.file_id;
+        if (uploadResult.data?.url) setPhotoUri(uploadResult.data.url);
       }
 
-      // Step 4: Update vendors table
-      console.log('📤 Updating vendor record');
-      console.log('  - user?.id:', user?.id);
-      console.log('  - imageFileId:', imageFileId);
-      console.log('  - isLocalImage:', isLocalImage);
-      console.log('  - update data:', {
-        first_name: values.firstName,
-        last_name: values.lastName,
-        email: values.email,
-        image_file_id: imageFileId || null,
-      });
-
-      const updateData: any = {
+      const updatePayload: Record<string, unknown> = {
         first_name: values.firstName,
         last_name: values.lastName,
         email: values.email,
       };
-
-      // Only include image_file_id if we have a value (either new or existing)
-      if (imageFileId) {
-        updateData.image_file_id = imageFileId;
-      }
-
-      console.log('  - Final update data:', updateData);
-
-      const { data: updateResult, error } = await supabaseCore
-        .from('vendors')
-        .update(updateData)
-        .eq('id', user?.id)
-        .select();
-
-      if (error) {
-        console.error('❌ Vendor update error:', error);
-        console.error('  - Error details:', JSON.stringify(error, null, 2));
-        throw error;
-      }
-
-      console.log('✅ Vendor record updated');
-      console.log('  - Update result:', updateResult);
-
-      // Verify the update by fetching the record
-      const { data: verifyData, error: verifyError } = await supabaseCore
-        .from('vendors')
-        .select('image_file_id')
-        .eq('id', user?.id)
-        .single();
-
-      if (verifyError) {
-        console.warn('⚠️ Could not verify update:', verifyError);
-      } else {
-        console.log('✅ Verified image_file_id in database:', verifyData?.image_file_id);
-      }
-
-      // Small delay to ensure database update is committed
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Refresh profile to get updated data
+      if (imageFileId) updatePayload.image_file_id = imageFileId;
+      const { error: updateErr } = await updateVendorMe(updatePayload);
+      if (updateErr) throw new Error(updateErr.error);
       await refreshProfile();
-
-      // If we uploaded a new image, update the photoUri to show the uploaded image
-      if (isLocalImage && imageFileId) {
-        // Fetch the public URL for the uploaded image
-        const { data: fileData } = await supabaseCms
-          .from('file_storage')
-          .select('file_path, storage_bucket')
-          .eq('id', imageFileId)
-          .single();
-
-        if (fileData) {
-          const { data: urlData } = supabaseCore.storage
-            .from(fileData.storage_bucket || 'vendor-media')
-            .getPublicUrl(fileData.file_path);
-          setPhotoUri(urlData.publicUrl);
-          console.log('✅ Updated photoUri to:', urlData.publicUrl);
-        }
-      }
-
       Alert.alert('Success', 'Profile updated successfully');
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to save profile');

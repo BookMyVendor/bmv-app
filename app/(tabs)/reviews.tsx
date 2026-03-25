@@ -31,8 +31,7 @@ import {
   WifiOff,
 } from 'lucide-react-native';
 import { useAuth } from '../../contexts/AuthContext';
-import { supabaseCore, supabaseCrm, supabaseCms } from '../../lib/supabase';
-import { getPublicUrl } from '../../lib/businessApi';
+import { getReviews, updateReview } from '../../lib/api/reviews';
 import FilterModal from '../../components/FilterModal';
 import SortModal from '../../components/SortModal';
 import ReplyModal from '../../components/ReplyModal';
@@ -98,216 +97,22 @@ export default function ReviewsScreen() {
   const fetchReviews = async () => {
     try {
       if (!user?.id) return;
-
       const isRefresh = refreshing;
       if (!isRefresh) setLoading(true);
-
-      // Check cache first
       try {
         const cachedReviews = await AsyncStorage.getItem(`vendor_reviews_${user.id}`);
-        if (cachedReviews) {
-          setReviews(JSON.parse(cachedReviews));
-        }
-      } catch (cacheError) {
-        console.error("Cache read error:", cacheError);
-      }
+        if (cachedReviews) setReviews(JSON.parse(cachedReviews));
+      } catch { }
 
-      // Get business data for mapping business_id to business_name
-      const { data: businessData, error: businessError } = await supabaseCore
-        .from('vendor_businesses')
-        .select('id, business_name')
-        .eq('vendor_id', user.id);
-
-      if (businessError) {
-        console.error('Error fetching businesses:', businessError);
-      }
-
-      const businessMap = new Map((businessData || []).map((b) => [b.id, b.business_name]));
-
-      // Fetch all reviews for this vendor (by vendor_id), regardless of status or business_id
-      // Fetch reviews first, then join with related tables manually for better reliability
-      const { data: reviewsData, error: reviewsError } = await supabaseCrm
-        .from('customer_reviews')
-        .select('*')
-        .eq('vendor_id', user.id)
-        .order('created_at', { ascending: false });
-
-      if (reviewsError) {
-        console.error('Error fetching reviews:', reviewsError);
-        throw reviewsError;
-      }
-
-      if (!reviewsData || reviewsData.length === 0) {
-        console.log('No reviews found for vendor:', user.id);
-        setReviews([]);
-        setLoading(false);
-        setRefreshing(false);
-        return;
-      }
-
-      console.log(`Found ${reviewsData.length} reviews for vendor ${user.id}`);
-
-      // Fetch customers separately
-      const customerIds = [...new Set(reviewsData.map((r: any) => r.customer_id).filter(Boolean))];
-      const customersMap = new Map();
-      if (customerIds.length > 0) {
-        const { data: customersData, error: customersError } = await supabaseCrm
-          .from('customers')
-          .select('id, name, email')
-          .in('id', customerIds);
-
-        if (customersError) {
-          console.error('Error fetching customers:', customersError);
-        } else if (customersData) {
-          customersData.forEach((c: any) => customersMap.set(c.id, c));
-        }
-      }
-
-      // Fetch leads separately
-      const leadIds = [...new Set(reviewsData.map((r: any) => r.lead_id).filter(Boolean))];
-      const leadsMap = new Map();
-      if (leadIds.length > 0) {
-        const { data: leadsData, error: leadsError } = await supabaseCrm
-          .from('customer_leads')
-          .select('id, template_id, sub_template_id')
-          .in('id', leadIds);
-
-        if (leadsError) {
-          console.error('Error fetching leads:', leadsError);
-        } else if (leadsData) {
-          leadsData.forEach((l: any) => leadsMap.set(l.id, l));
-        }
-      }
-
-      // Map reviews with manually fetched data
-      const reviewsWithJoins = reviewsData.map((review: any) => ({
-        ...review,
-        customers: customersMap.get(review.customer_id) || null,
-        customer_leads: leadsMap.get(review.lead_id) || null,
-      }));
-
-      // Fetch event template names for event types
-      const templateIds = reviewsWithJoins
-        .map((r: any) => r.customer_leads?.template_id || r.customer_leads?.sub_template_id)
-        .filter(Boolean);
-
-      let eventTypeMap = new Map();
-      if (templateIds.length > 0) {
-        const { data: templates, error: templatesError } = await supabaseCore
-          .from('event_templates')
-          .select('id, name')
-          .in('id', templateIds);
-
-        const { data: subTemplates, error: subTemplatesError } = await supabaseCore
-          .from('event_sub_templates')
-          .select('id, name')
-          .in('id', templateIds);
-
-        if (templatesError) {
-          console.error('Error fetching templates:', templatesError);
-        } else if (templates) {
-          templates.forEach((t: any) => eventTypeMap.set(t.id, t.name));
-        }
-
-        if (subTemplatesError) {
-          console.error('Error fetching sub-templates:', subTemplatesError);
-        } else if (subTemplates) {
-          subTemplates.forEach((t: any) => eventTypeMap.set(t.id, t.name));
-        }
-      }
-
-      // Fetch review media: cms.review_media → cms.file_storage → build mediaItems per review
-      const reviewIds = reviewsWithJoins.map((r: any) => r.id);
-      const reviewMediaMap = new Map<string, string[]>();
-      if (reviewIds.length > 0) {
-        const { data: reviewMediaData, error: reviewMediaError } = await supabaseCms
-          .from('review_media')
-          .select('review_id, file_id')
-          .in('review_id', reviewIds);
-
-        if (reviewMediaError) {
-          console.error('Error fetching review_media:', reviewMediaError);
-        } else if (reviewMediaData?.length) {
-          reviewMediaData.forEach((rm: any) => {
-            if (rm.review_id && rm.file_id) {
-              const list = reviewMediaMap.get(rm.review_id) || [];
-              list.push(rm.file_id);
-              reviewMediaMap.set(rm.review_id, list);
-            }
-          });
-        }
-      }
-
-      const allFileIds = [...new Set(Array.from(reviewMediaMap.values()).flat())];
-      const fileStorageMap = new Map<string, { url: string; mimeType?: string }>();
-      if (allFileIds.length > 0) {
-        const { data: fileStorageData, error: fileStorageError } = await supabaseCms
-          .from('file_storage')
-          .select('id, storage_bucket, file_path, mime_type')
-          .in('id', allFileIds);
-
-        if (fileStorageError) {
-          console.error('Error fetching file_storage for review media:', fileStorageError);
-        } else if (fileStorageData?.length) {
-          fileStorageData.forEach((fs: any) => {
-            const path = fs.file_path;
-            if (path) {
-              // Review media is always in the 'reviews' bucket
-              fileStorageMap.set(fs.id, {
-                url: getPublicUrl('reviews', path),
-                mimeType: fs.mime_type || undefined,
-              });
-            }
-          });
-        }
-      }
-
-      // Map reviews to match the Review interface
-      const reviewsWithBusiness = reviewsWithJoins.map((review: any) => {
-        const customer = review.customers || {};
-        const lead = review.customer_leads || {};
-        const eventTypeId = lead?.template_id || lead?.sub_template_id;
-        const eventType = eventTypeId ? eventTypeMap.get(eventTypeId) : null;
-
-        // Get business name if business_id exists, otherwise show "No Business"
-        const businessName = review.business_id
-          ? (businessMap.get(review.business_id) || 'Unknown Business')
-          : 'No Business';
-
-        const fileIdsForReview = reviewMediaMap.get(review.id) || [];
-        const mediaItems = fileIdsForReview
-          .map((fid) => fileStorageMap.get(fid))
-          .filter(Boolean) as { url: string; mimeType?: string }[];
-
-        return {
-          id: review.id,
-          customer_name: customer.name || 'Anonymous',
-          profile_photo_url: null,
-          rating: review.rating,
-          comment: review.review_text || review.review_title || null,
-          event_type: eventType,
-          is_flagged: review.status === 'rejected',
-          vendor_response: review.vendor_response || null,
-          responded_at: review.vendor_response_date || null,
-          created_at: review.created_at,
-          businesses: {
-            business_name: businessName,
-          },
-          mediaItems: mediaItems.length > 0 ? mediaItems : undefined,
-        };
-      });
-
-      console.log(`Mapped ${reviewsWithBusiness.length} reviews`);
-      setReviews(reviewsWithBusiness);
-
-      // Update cache
+      const { data, error } = await getReviews();
+      if (error) throw new Error(error.error);
+      const list = (data || []) as Review[];
+      setReviews(list);
       try {
-        AsyncStorage.setItem(`vendor_reviews_${user.id}`, JSON.stringify(reviewsWithBusiness));
-      } catch (e) { }
+        AsyncStorage.setItem(`vendor_reviews_${user.id}`, JSON.stringify(list));
+      } catch { }
     } catch (error) {
       console.error('Error fetching reviews:', error);
-      // We do not clear reviews here to allow showing cached data
-      // setReviews([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -326,17 +131,12 @@ export default function ReviewsScreen() {
 
   const submitReply = async (replyText: string) => {
     if (!selectedReview) return;
-
     try {
-      const { error } = await supabaseCrm
-        .from('customer_reviews')
-        .update({
-          vendor_response: replyText,
-          vendor_response_date: new Date().toISOString(),
-        })
-        .eq('id', selectedReview.id);
-
-      if (error) throw error;
+      const { error } = await updateReview(selectedReview.id, {
+        vendor_response: replyText,
+        vendor_response_date: new Date().toISOString(),
+      });
+      if (error) throw new Error(error.error);
       await fetchReviews();
     } catch (error) {
       console.error('Error submitting reply:', error);

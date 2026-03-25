@@ -202,16 +202,17 @@ export default function LoginScreen() {
             contentContainerStyle={{ flexGrow: 1 }}
             keyboardShouldPersistTaps="handled"
           >
-            <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-              <View style={styles.innerContent}>
-                {/* MAIN CONTENT (fills space) */}
-                <View style={{ flex: 1, paddingBottom: 20 }}>
+            <View style={styles.innerContent}>
+              {/* MAIN CONTENT (fills space) */}
+              <View style={{ flex: 1, paddingBottom: 20 }}>
+                <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
                   <View style={styles.headerContainer}>
                     <Text style={styles.titleSmall}>Welcome to</Text>
                     <ExternalLogo size={LOGO_SIZE} />
                   </View>
+                </TouchableWithoutFeedback>
 
-                  <View style={styles.formCard}>
+                <View style={styles.formCard}>
                     {/* Step Indicator */}
                     <View style={styles.stepIndicatorContainer}>
                       <View style={[styles.stepDot, step === 'phone' ? styles.stepDotActive : styles.stepDotInactive]} />
@@ -327,7 +328,8 @@ export default function LoginScreen() {
 
                   {/* Process Step Timeline */}
                   {step === 'phone' && (
-                    <>
+                    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+                      <View>
                       <View style={styles.processContainer}>
                         <View style={styles.processLine} />
                         <View style={styles.processItem}>
@@ -369,13 +371,11 @@ export default function LoginScreen() {
                       {process.env.EXPO_PUBLIC_NODE_ENV === 'development' && (
                         <Text style={styles.devTag}>DEVELOPMENT</Text>
                       )}
-                    </>
+                      </View>
+                    </TouchableWithoutFeedback>
                   )}
                 </View>
-
-
               </View>
-            </TouchableWithoutFeedback>
           </ScrollView>
         </View>
       </KeyboardAvoidingView>
@@ -395,7 +395,7 @@ export default function LoginScreen() {
           </TouchableOpacity>
         </View>
       </SafeAreaView>
-    </ScreenBackground >
+    </ScreenBackground>
   );
 }
 

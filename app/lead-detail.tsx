@@ -28,7 +28,9 @@ import {
   CheckCircle,
 } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
-import { supabaseCore, supabaseCms, supabaseCrm } from '../lib/supabase';
+import { getVendorBusinesses } from '../lib/api/vendorBusinesses';
+import { getCategories } from '../lib/api/categories';
+import { getLead, getLeadCommunications, createLeadCommunication, updateLead } from '../lib/api/leads';
 import { stripCountryCode } from '../lib/formatters';
 import { Lead, LeadActivity, STATUS_OPTIONS } from '../types/leads';
 import { getTimeAgo, formatEventDate } from '../lib/timeUtils';
@@ -72,50 +74,29 @@ export default function LeadDetailScreen() {
   const fetchLeadDetails = async () => {
     try {
       setLoading(true);
-
-      const { data: businessData } = await supabaseCore
-        .from('vendor_businesses')
-        .select('id, business_name')
-        .eq('vendor_id', user?.id);
-
-      if (!businessData || businessData.length === 0) {
+      const { data: businessData } = await getVendorBusinesses(user?.id!);
+      const businessList = businessData || [];
+      if (businessList.length === 0) {
         Alert.alert('Error', 'No businesses found');
         router.back();
         return;
       }
-
-      const businessIds = businessData.map((b) => b.id);
-      const businessMap = new Map(businessData.map((b) => [b.id, b.business_name]));
-
-      const { data, error } = await supabaseCrm
-        .from('customer_leads')
-        .select('*')
-        .eq('id', id)
-        .in('business_id', businessIds)
-        .maybeSingle();
-
-      if (error) throw error;
-
+      const businessMap = new Map(businessList.map((b: any) => [b.id, b.business_name]));
+      const { data, error } = await getLead(id);
+      if (error) throw new Error(error.error);
       if (data) {
-        let eventType = data.event_type || 'Unknown Event';
-        if (data.category_id) {
-          const { data: categoryData } = await supabaseCore
-            .from('categories')
-            .select('name')
-            .eq('id', data.category_id)
-            .maybeSingle();
-
-          if (categoryData) {
-            eventType = categoryData.name;
-          }
+        const d = data as any;
+        let eventType = d.event_type || 'Unknown Event';
+        if (d.category_id) {
+          const { data: categories } = await getCategories();
+          const cat = (categories || []).find((c: any) => c.id === d.category_id);
+          if (cat) eventType = cat.name;
         }
-
-        const leadWithDetails = {
-          ...data,
-          business_name: businessMap.get(data.business_id) || 'Unknown Business',
+        setLead({
+          ...d,
+          business_name: businessMap.get(d.business_id) || 'Unknown Business',
           event_type: eventType,
-        };
-        setLead(leadWithDetails as Lead);
+        } as Lead);
       } else {
         Alert.alert('Error', 'Lead not found');
         router.back();
@@ -130,27 +111,20 @@ export default function LeadDetailScreen() {
 
   const fetchActivities = async () => {
     try {
-      const { data, error } = await supabaseCrm
-        .from('lead_communications')
-        .select('*')
-        .eq('lead_id', id)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      const mappedActivities = (data || []).map((comm) => {
+      const { data, error } = await getLeadCommunications(id);
+      if (error) throw new Error(error.error);
+      const list = (data || []).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      const mappedActivities = list.map((comm: any) => {
         let actType = comm.communication_type;
         let msg = comm.message || '';
-
         if (actType === 'message' && msg.startsWith('[NOTE] ')) {
           actType = 'note';
           msg = msg.substring(7);
         }
-
         return {
           id: comm.id,
           lead_id: comm.lead_id,
-          activity_type: actType as any,
+          activity_type: actType,
           title: getActivityTitle(actType),
           description: msg,
           performed_by: comm.vendor_id,
@@ -158,7 +132,6 @@ export default function LeadDetailScreen() {
           metadata: comm.attachment_file_id ? { attachment_file_id: comm.attachment_file_id } : null,
         };
       });
-
       setActivities(mappedActivities);
     } catch (error) {
       console.error('Error fetching activities:', error);
@@ -180,10 +153,9 @@ export default function LeadDetailScreen() {
 
   // ── Actions ──────────────────────────────────────────────────────────────────
 
-  const logActivity = async (type: string, title: string, description: string) => {
+  const logActivity = async (type: string, _title: string, description: string) => {
     try {
-      await supabaseCrm.from('lead_communications').insert({
-        lead_id: id,
+      await createLeadCommunication(id, {
         vendor_id: user?.id,
         communication_type: type,
         message: description,
@@ -242,19 +214,9 @@ export default function LeadDetailScreen() {
   const handleStatusChange = async (newStatus: string) => {
     if (!lead) return;
     try {
-      const { error } = await supabaseCrm
-        .from('customer_leads')
-        .update({ lead_status: newStatus })
-        .eq('id', lead.id);
-
-      if (error) throw error;
-
-      await logActivity(
-        'status_change',
-        'Status changed',
-        `Status changed from ${lead.lead_status} to ${newStatus}`
-      );
-
+      const { error } = await updateLead(lead.id, { lead_status: newStatus });
+      if (error) throw new Error(error.error);
+      await logActivity('status_change', 'Status changed', `Status changed from ${lead.lead_status} to ${newStatus}`);
       setLead({ ...lead, lead_status: newStatus as any });
       Alert.alert('Success', 'Status updated successfully');
     } catch (error) {
@@ -267,16 +229,13 @@ export default function LeadDetailScreen() {
     if (!newNote.trim() || !lead) return;
     try {
       setSavingNote(true);
-      const { error } = await supabaseCrm.from('lead_communications').insert({
-        lead_id: lead.id,
+      const { error } = await createLeadCommunication(lead.id, {
         vendor_id: user?.id,
         communication_type: 'message',
         message: `[NOTE] ${newNote.trim()}`,
         is_from_vendor: true,
       });
-
-      if (error) throw error;
-
+      if (error) throw new Error(error.error);
       setNewNote('');
       setNotesModalVisible(false);
       fetchActivities();
