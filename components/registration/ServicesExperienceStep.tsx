@@ -17,6 +17,16 @@ import { Image as RNImage } from 'react-native';
 import { pickImage } from '../../lib/businessApi';
 import Dropdown from '../../components/Dropdown';
 import { supabaseCore } from '../../lib/supabase';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
+import {
+  buildCategoryIndex,
+  cleanupInvalidSpecializations,
+  dedupeIds,
+  getDescendantIds,
+  searchScopedCategories,
+  type CategoryRecord,
+  type CategoryIndex,
+} from '../../lib/categoryPickerUtils';
 
 interface ServicesExperienceStepProps {
   data: any;
@@ -32,9 +42,12 @@ export interface ServicesExperienceStepRef {
 interface Category {
   id: string;
   name: string;
+  slug?: string | null;
   icon?: string;
   parent_category_id: string | null;
   category_level: number;
+  category_type?: 'business' | 'event';
+  business_model?: string | null;
   sort_order?: number;
 }
 
@@ -114,6 +127,39 @@ const OPERATING_CITIES = [
   'Udaipur (Rajasthan)',
 ];
 
+let categoriesCache: CategoryRecord[] | null = null;
+let categoriesPromise: Promise<CategoryRecord[]> | null = null;
+
+const fetchAllCategoriesCached = async (): Promise<CategoryRecord[]> => {
+  if (categoriesCache) {
+    return categoriesCache;
+  }
+  if (categoriesPromise) {
+    return categoriesPromise;
+  }
+
+  categoriesPromise = (async () => {
+    const { data, error } = await supabaseCore
+      .from('categories')
+      .select('id, name, slug, icon, parent_category_id, category_level, sort_order, category_type, business_model, visible')
+      .eq('visible', true)
+      .order('sort_order', { ascending: true });
+
+    if (error) {
+      throw error;
+    }
+
+    categoriesCache = (data || []) as CategoryRecord[];
+    return categoriesCache;
+  })();
+
+  try {
+    return await categoriesPromise;
+  } finally {
+    categoriesPromise = null;
+  }
+};
+
 const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExperienceStepProps>(({
   data,
   onUpdate,
@@ -122,17 +168,22 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 }, ref) => {
   const insets = useSafeAreaInsets();
   const [uploading, setUploading] = useState(false);
-  const [allBusinessCategories, setAllBusinessCategories] = useState<Category[]>([]);
-  const [eventCategories, setEventCategories] = useState<Category[]>([]);
+  const [allCategories, setAllCategories] = useState<CategoryRecord[]>([]);
+  const [categoryIndex, setCategoryIndex] = useState<CategoryIndex | null>(null);
+  const [categoryLoadError, setCategoryLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedRootCategoryId, setSelectedRootCategoryId] = useState<string | null>(
+  const [selectedPrimaryCategoryId, setSelectedPrimaryCategoryId] = useState<string | null>(
     data.selectedRootCategoryId || null
   );
-  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>(
+  const [selectedSpecializationCategoryIds, setSelectedSpecializationCategoryIds] = useState<string[]>(
     data.selectedCategoryIds || []
   );
+  const [selectedEventCategoryIds, setSelectedEventCategoryIds] = useState<string[]>(
+    data.selectedEventIds || []
+  );
   const [expandedCategoryIds, setExpandedCategoryIds] = useState<Set<string>>(new Set());
-  const [searchQuery, setSearchQuery] = useState('');
+  const [primarySearchQuery, setPrimarySearchQuery] = useState('');
+  const [specializationSearchQuery, setSpecializationSearchQuery] = useState('');
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isRootDropdownOpen, setIsRootDropdownOpen] = useState(false);
   const [eventSearchQuery, setEventSearchQuery] = useState('');
@@ -143,6 +194,25 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   const [isPricingUnitDropdownOpen, setIsPricingUnitDropdownOpen] = useState(false);
   const [isCategoriesExpanded, setIsCategoriesExpanded] = useState(false);
   const [isEventsExpanded, setIsEventsExpanded] = useState(false);
+  const debouncedPrimarySearchQuery = useDebouncedValue(primarySearchQuery, 250);
+  const debouncedSpecializationSearchQuery = useDebouncedValue(specializationSearchQuery, 250);
+  const debouncedEventSearchQuery = useDebouncedValue(eventSearchQuery, 250);
+
+  const selectedRootCategoryId = selectedPrimaryCategoryId;
+  const selectedCategoryIds = selectedSpecializationCategoryIds;
+  const setSelectedRootCategoryId = setSelectedPrimaryCategoryId;
+  const setSelectedCategoryIds = setSelectedSpecializationCategoryIds;
+  const searchQuery = specializationSearchQuery;
+  const setSearchQuery = setSpecializationSearchQuery;
+  const selectedEventIds = selectedEventCategoryIds;
+  const eventCategories = useMemo(
+    () => allCategories.filter((category) => category.category_type === 'event') as Category[],
+    [allCategories]
+  );
+  const allBusinessCategories = useMemo(
+    () => allCategories.filter((category) => category.category_type === 'business') as Category[],
+    [allCategories]
+  );
 
   const [coverPhotoUri, setCoverPhotoUri] = useState<string | undefined>(data.coverPhotoUri);
 
@@ -169,7 +239,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         setIsRootDropdownOpen(true);
       } else if (!data.selectedCategoryIds || data.selectedCategoryIds.length === 0) {
         setIsCategoryModalOpen(true);
-      } else if (!data.selectedEventIds || data.selectedEventIds.length === 0) {
+      } else if (!selectedEventIds || selectedEventIds.length === 0) {
         setIsEventModalOpen(true);
       } else if (!data.operatingLocations || data.operatingLocations.length === 0) {
         setIsCityModalOpen(true);
@@ -179,16 +249,17 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
   const isInitialMount = useRef(true);
 
-  // Fetch categories on mount and re-fetch when business type changes
+  // Fetch categories on mount (cached), then filter by business type in-memory
   useEffect(() => {
-    fetchCategories(data.businessType);
+    fetchCategories();
 
     if (isInitialMount.current) {
       isInitialMount.current = false;
     } else {
       // Reset selected categories only when business type actually changes (not on initial mount)
-      setSelectedRootCategoryId(null);
-      setSelectedCategoryIds([]);
+      setSelectedPrimaryCategoryId(null);
+      setSelectedSpecializationCategoryIds([]);
+      setSelectedEventCategoryIds([]);
       onUpdate({
         selectedRootCategoryId: null,
         selectedCategoryIds: [],
@@ -200,74 +271,55 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   useEffect(() => {
     // Update parent component when selections change
     onUpdate({
-      selectedRootCategoryId,
-      selectedCategoryIds,
+      selectedRootCategoryId: selectedPrimaryCategoryId,
+      selectedCategoryIds: selectedSpecializationCategoryIds,
+      selectedEventIds: selectedEventCategoryIds,
     });
-  }, [selectedRootCategoryId, selectedCategoryIds]);
+    console.debug('[categories] selection transition', {
+      selectedPrimaryCategoryId,
+      selectedSpecializationCategoryIds,
+      selectedEventCategoryIds,
+    });
+  }, [selectedPrimaryCategoryId, selectedSpecializationCategoryIds, selectedEventCategoryIds]);
 
   // Auto-detect root category if we have selected sub-categories but no root
   useEffect(() => {
+    const allBusinessCategories = allCategories.filter((c) => c.category_type === 'business');
     if (allBusinessCategories.length > 0 && selectedCategoryIds.length > 0 && !selectedRootCategoryId) {
-      const firstSelectedCat = allBusinessCategories.find(c => c.id === selectedCategoryIds[0]);
+      const firstSelectedCat = allBusinessCategories.find((c) => c.id === selectedCategoryIds[0]);
       if (firstSelectedCat) {
         let current = firstSelectedCat;
         while (current.parent_category_id) {
-          const parent = allBusinessCategories.find(c => c.id === current.parent_category_id);
+          const parent = allBusinessCategories.find((c) => c.id === current.parent_category_id);
           if (!parent) break;
           current = parent;
         }
         if (current && current.id !== selectedRootCategoryId) {
-          setSelectedRootCategoryId(current.id);
+          setSelectedPrimaryCategoryId(current.id);
           // Don't modify expanded here to avoid infinite loops, but expanding root is usually desired
-          setExpandedCategoryIds(prev => new Set([...prev, current.id]));
+          setExpandedCategoryIds((prev) => new Set([...prev, current.id]));
         }
       }
     }
-  }, [allBusinessCategories, selectedCategoryIds, selectedRootCategoryId]);
+  }, [allCategories, selectedCategoryIds, selectedRootCategoryId]);
 
-  const fetchCategories = async (businessType?: string) => {
+  const fetchCategories = async () => {
     try {
       setLoading(true);
+      setCategoryLoadError(null);
+      const categories = await fetchAllCategoriesCached();
+      setAllCategories(categories);
 
-      // Fetch all business categories with hierarchy info
-      let businessQuery = supabaseCore
-        .from('categories')
-        .select('id, name, icon, parent_category_id, category_level, sort_order')
-        .eq('category_type', 'business')
-        .eq('visible', true);
-
-      // If rental is selected, filter by business_model = 'rental'
-      if (businessType === 'rental') {
-        businessQuery = businessQuery.eq('business_model', 'rental');
-      } else {
-        // If service type is selected, filter by business_model != 'rental'
-        businessQuery = businessQuery.neq('business_model', 'rental');
-      }
-
-      const { data: businessCats, error: businessError } = await businessQuery
-        .order('sort_order', { ascending: true });
-
-      if (businessError) {
-        console.error('Error fetching business categories:', businessError);
-      } else {
-        setAllBusinessCategories(businessCats || []);
-      }
-
-      // Fetch all event categories with hierarchy info
-      const { data: eventCats, error: eventError } = await supabaseCore
-        .from('categories')
-        .select('id, name, icon, parent_category_id, category_level, sort_order')
-        .eq('category_type', 'event')
-        .eq('visible', true)
-        .order('sort_order', { ascending: true });
-
-      if (eventError) {
-        console.error('Error fetching event categories:', eventError);
-      } else {
-        setEventCategories((eventCats || []) as Category[]);
-      }
+      const index = buildCategoryIndex(categories);
+      setCategoryIndex(index);
+      console.debug('[categories] fetch success', { count: categories.length });
+      console.debug('[categories] event parent resolution', {
+        path: index.eventResolutionPath,
+        eventParentId: index.eventParentId,
+      });
     } catch (error) {
       console.error('Error fetching categories:', error);
+      setCategoryLoadError('Unable to load categories. Please retry.');
     } finally {
       setLoading(false);
     }
@@ -342,11 +394,17 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   const filterCategories = (nodes: CategoryNode[], query: string): CategoryNode[] => {
     if (!query.trim()) return nodes;
 
-    const lowerQuery = query.toLowerCase();
+    const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
     const filtered: CategoryNode[] = [];
 
     const matchesQuery = (node: CategoryNode): boolean => {
-      return node.name.toLowerCase().includes(lowerQuery);
+      const slugTokens = (node.slug || '')
+        .toLowerCase()
+        .split(/[-_\s]+/)
+        .filter(Boolean)
+        .join(' ');
+      const haystack = `${node.name.toLowerCase()} ${(node.slug || '').toLowerCase()} ${slugTokens}`;
+      return terms.every((term) => haystack.includes(term));
     };
 
     const filterNode = (node: CategoryNode): CategoryNode | null => {
@@ -388,21 +446,36 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   // Filter subtree by search (for modal)
   const filteredSubtree = useMemo(() => {
     if (!subtreeForSelectedRoot) return [];
-    const filtered = filterCategories([subtreeForSelectedRoot], searchQuery);
+    const filtered = filterCategories([subtreeForSelectedRoot], debouncedSpecializationSearchQuery);
     return filtered[0] ? filtered[0].children : [];
-  }, [subtreeForSelectedRoot, searchQuery]);
+  }, [subtreeForSelectedRoot, debouncedSpecializationSearchQuery]);
 
   // Get root categories (level 1 or no parent)
   const rootCategories = useMemo(() => {
-    return allBusinessCategories.filter(
-      (cat) => cat.category_level === 1 || cat.parent_category_id === null
-    );
-  }, [allBusinessCategories]);
+    return allBusinessCategories.filter((cat) => {
+      const isRoot = cat.category_level === 1 || cat.parent_category_id === null;
+      if (!isRoot) return false;
+      if (data.businessType === 'rental') return cat.business_model === 'rental';
+      return cat.business_model !== 'rental';
+    });
+  }, [allBusinessCategories, data.businessType]);
+
+  const filteredRootCategories = useMemo(() => {
+    if (!categoryIndex) return rootCategories;
+    const scopedIds = rootCategories.map((category) => category.id);
+    const matchedIds = searchScopedCategories(debouncedPrimarySearchQuery, scopedIds, categoryIndex);
+    const matched = new Set(matchedIds);
+    return rootCategories.filter((category) => matched.has(category.id));
+  }, [rootCategories, debouncedPrimarySearchQuery, categoryIndex]);
 
   // Handle root category selection (from dropdown)
   const handleRootSelection = (categoryId: string) => {
     setSelectedRootCategoryId(categoryId);
-    setSelectedCategoryIds([]);
+    if (categoryIndex) {
+      setSelectedCategoryIds((prev) => cleanupInvalidSpecializations(prev, categoryId, categoryIndex));
+    } else {
+      setSelectedCategoryIds([]);
+    }
     setExpandedCategoryIds(new Set([categoryId]));
   };
 
@@ -467,7 +540,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           }
         }
       }
-      return newIds;
+      return dedupeIds(newIds);
     });
   };
 
@@ -524,14 +597,6 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       return changed ? newExpanded : currentExpanded;
     });
   }, [selectedCategoryIds, selectedRootCategoryId, allBusinessCategories]);
-
-  // Sync selection to parent
-  useEffect(() => {
-    onUpdate({
-      selectedRootCategoryId,
-      selectedCategoryIds
-    });
-  }, [selectedRootCategoryId, selectedCategoryIds]);
 
   // Render sub-category tree (checkboxes only, for modal under selected root)
   const renderSubCategoryTree = (nodes: CategoryNode[], level: number = 0): React.ReactNode => {
@@ -622,7 +687,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   };
 
   const toggleEventType = (eventId: string) => {
-    const currentIds = data.selectedEventIds || [];
+    const currentIds = selectedEventIds || [];
     const isSelected = currentIds.includes(eventId);
     let newIds = [...currentIds];
 
@@ -667,7 +732,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       }
     }
 
-    handleChange('selectedEventIds', newIds);
+    setSelectedEventCategoryIds(dedupeIds(newIds));
   };
 
   // Toggle event expansion
@@ -686,7 +751,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   // Render event category tree recursively
   const renderEventCategoryTree = (nodes: CategoryNode[], level: number = 0): React.ReactNode => {
     return nodes.map((node) => {
-      const isSelected = (data.selectedEventIds || []).includes(node.id);
+      const isSelected = selectedEventIds.includes(node.id);
       const isExpanded = expandedEventIds.has(node.id);
       const hasChildren = node.children.length > 0;
 
@@ -751,7 +816,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       const newExpanded = new Set(currentExpanded);
       let changed = false;
 
-      (data.selectedEventIds || []).forEach((eventId: string) => {
+      selectedEventIds.forEach((eventId: string) => {
         // Expand the category itself if it has children
         const hasChildren = eventCategories.some(
           (c) => c.parent_category_id === eventId
@@ -778,7 +843,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
       return changed ? newExpanded : currentExpanded;
     });
-  }, [data.selectedEventIds, eventCategories]);
+  }, [selectedEventIds, eventCategories]);
 
   // Get event category path (excluding root/parent category)
   const getEventPath = (eventId: string, events: Category[]): string => {
@@ -809,7 +874,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   // Get selected events with paths for display
   const selectedEventsWithPaths = useMemo(() => {
     // Only show child categories
-    const childIds = (data.selectedEventIds || []).filter((id: string) => {
+    const childIds = selectedEventIds.filter((id: string) => {
       const cat = eventCategories.find(c => c.id === id);
       return cat && cat.parent_category_id !== null;
     });
@@ -818,38 +883,46 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       id,
       path: getEventPath(id, eventCategories),
     }));
-  }, [data.selectedEventIds, eventCategories]);
+  }, [selectedEventIds, eventCategories]);
 
   // Get selected event names for display (for dropdown text)
   const selectedEventNames = useMemo(() => {
-    const selectedIds = data.selectedEventIds || [];
+    const selectedIds = selectedEventIds || [];
     return eventCategories
       .filter((cat) => selectedIds.includes(cat.id))
       .map((cat) => cat.name);
-  }, [data.selectedEventIds, eventCategories]);
+  }, [selectedEventIds, eventCategories]);
 
   // Build event category tree
   const eventCategoryTree = useMemo(() => {
-    return buildCategoryTree(eventCategories);
-  }, [eventCategories]);
+    if (!categoryIndex?.eventParentId) {
+      return [];
+    }
+    const fullTree = buildCategoryTree(eventCategories);
+    const eventParentNode = fullTree.find((node) => node.id === categoryIndex.eventParentId);
+    if (!eventParentNode) {
+      return [];
+    }
+    return [eventParentNode];
+  }, [eventCategories, categoryIndex]);
 
   // Filter event tree based on search
   const filteredEventTree = useMemo(() => {
-    return filterCategories(eventCategoryTree, eventSearchQuery);
-  }, [eventCategoryTree, eventSearchQuery]);
+    return filterCategories(eventCategoryTree, debouncedEventSearchQuery);
+  }, [eventCategoryTree, debouncedEventSearchQuery]);
 
   // Get display text for event dropdown
   const getEventDropdownDisplayText = (): string => {
     if (loading) {
-      return 'Loading Events you serve...';
+      return 'Loading event categories...';
     }
     if (selectedEventsWithPaths.length === 0) {
-      return 'Select Events you serve';
+      return 'Select event categories';
     }
     if (selectedEventsWithPaths.length === 1) {
       return selectedEventsWithPaths[0].path;
     }
-    return `${selectedEventsWithPaths.length} events selected`;
+    return `${selectedEventsWithPaths.length} event categories selected`;
   };
 
   const toggleCitySelection = (city: string) => {
@@ -947,13 +1020,13 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   };
 
   const handleEventDone = () => {
-    const hasSubEventType = (data.selectedEventIds || []).some((id: string) => {
+    const hasSubEventType = selectedEventIds.some((id: string) => {
       const cat = eventCategories.find(c => c.id === id);
       return cat && cat.parent_category_id !== null;
     });
 
     if (!hasSubEventType) {
-      Alert.alert('Validation Error', 'Please select at least one sub-category for Events you serve');
+      Alert.alert('Validation Error', 'Please select at least one event category');
       return;
     }
     setIsEventModalOpen(false);
@@ -992,17 +1065,20 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
   // Select All / Deselect All helpers for Events modal
   const getAllEventIds = (): string[] => {
-    return eventCategories.map((c) => c.id);
+    if (!categoryIndex?.eventParentId) {
+      return [];
+    }
+    return getDescendantIds(categoryIndex, categoryIndex.eventParentId);
   };
 
   const handleSelectAllEvents = () => {
     const allIds = getAllEventIds();
-    const currentEventIds = data.selectedEventIds || [];
+    const currentEventIds = selectedEventIds || [];
     const allSelected = allIds.every((id) => currentEventIds.includes(id));
     if (allSelected) {
-      handleChange('selectedEventIds', []);
+      setSelectedEventCategoryIds([]);
     } else {
-      handleChange('selectedEventIds', allIds);
+      setSelectedEventCategoryIds(dedupeIds(allIds));
       // Auto-expand all event categories
       setExpandedEventIds((prev) => new Set([...prev, ...allIds]));
     }
@@ -1010,17 +1086,31 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
   const isAllEventsSelected = (): boolean => {
     const allIds = getAllEventIds();
-    const currentEventIds = data.selectedEventIds || [];
+    const currentEventIds = selectedEventIds || [];
     return allIds.length > 0 && allIds.every((id) => currentEventIds.includes(id));
   };
 
-  const rootDropdownOptions = rootCategories.map((c) => ({
+  const rootDropdownOptions = filteredRootCategories.map((c) => ({
     label: c.icon ? `${c.icon} ${c.name}` : c.name,
     value: c.id,
   }));
 
   return (
     <View style={[styles.container, styles.content]}>
+      {loading && (
+        <View style={styles.selectedContainer}>
+          <ActivityIndicator size="small" color="#007AFF" />
+          <Text style={styles.helperText}>Loading categories...</Text>
+        </View>
+      )}
+      {categoryLoadError && (
+        <View style={styles.selectedContainer}>
+          <Text style={styles.errorText}>{categoryLoadError}</Text>
+          <TouchableOpacity style={styles.modalButton} onPress={fetchCategories}>
+            <Text style={styles.modalButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
       <View style={styles.field}>
         <Text style={styles.label}>Business Type *</Text>
         <View style={styles.businessTypeGroup}>
@@ -1064,10 +1154,17 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
       <View style={styles.field}>
         <Text style={styles.label}>Primary Category *</Text>
+        <TextInput
+          style={styles.modalSearchInput}
+          placeholder="Search primary category"
+          placeholderTextColor="#999"
+          value={primarySearchQuery}
+          onChangeText={setPrimarySearchQuery}
+        />
         <Dropdown
           options={rootDropdownOptions}
           value={selectedRootCategoryId || ''}
-          placeholder={loading ? 'Loading categories...' : 'Select a category'}
+          placeholder={loading ? 'Loading categories...' : 'Select primary category'}
           onChange={(value: string) => handleRootSelection(value)}
           open={isRootDropdownOpen}
           onOpenChange={setIsRootDropdownOpen}
@@ -1076,7 +1173,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Specialization *</Text>
+        <Text style={styles.label}>Specializations *</Text>
         <TouchableOpacity
           style={[
             styles.dropdownTrigger,
@@ -1099,10 +1196,10 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               : loading
                 ? 'Loading services...'
                 : selectedCategoriesWithPaths.length === 0
-                  ? 'Select Specialization'
+                  ? 'Select Specializations'
                   : selectedCategoriesWithPaths.length === 1
                     ? selectedCategoriesWithPaths[0].path
-                    : `${selectedCategoriesWithPaths.length} Specialization selected`}
+                    : `${selectedCategoriesWithPaths.length} specializations selected`}
           </Text>
           <ChevronDown size={20} color={selectedRootCategoryId ? '#666' : '#ccc'} />
         </TouchableOpacity>
@@ -1151,10 +1248,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         >
           <Pressable
             style={styles.modalOverlay}
-            onPress={() => {
-              setSelectedCategoryIds([]);
-              setIsCategoryModalOpen(false);
-            }}
+            onPress={() => setIsCategoryModalOpen(false)}
           >
             <Pressable
               style={styles.modalContent}
@@ -1163,14 +1257,11 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>
                   {subtreeForSelectedRoot
-                    ? `Specialization under ${subtreeForSelectedRoot.name}`
-                    : 'Select Specialization'}
+                    ? `Specializations under ${subtreeForSelectedRoot.name}`
+                    : 'Select Specializations'}
                 </Text>
                 <TouchableOpacity
-                  onPress={() => {
-                    setSelectedCategoryIds([]);
-                    setIsCategoryModalOpen(false);
-                  }}
+                  onPress={() => setIsCategoryModalOpen(false)}
                   style={styles.closeButton}
                 >
                   <X size={24} color="#666" />
@@ -1179,7 +1270,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
               <TextInput
                 style={styles.modalSearchInput}
-                placeholder="Search Specialization..."
+                placeholder="Search specializations"
                 placeholderTextColor="#999"
                 value={searchQuery}
                 onChangeText={setSearchQuery}
@@ -1207,8 +1298,8 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
                 {filteredSubtree.length === 0 ? (
                   <Text style={styles.emptyText}>
                     {subtreeForSelectedRoot?.children?.length === 0
-                      ? 'No Specialization'
-                      : 'No matching Specialization'}
+                      ? 'No Specializations'
+                      : `No categories found for "${debouncedSpecializationSearchQuery}"`}
                   </Text>
                 ) : (
                   renderSubCategoryTree(filteredSubtree)
@@ -1229,16 +1320,17 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       </View>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Events you serve</Text>
+        <Text style={styles.label}>Event Categories</Text>
 
         {/* Event Dropdown Trigger */}
         <TouchableOpacity
-          style={styles.dropdownTrigger}
-          onPress={() => setIsEventModalOpen(true)}
+          style={[styles.dropdownTrigger, !categoryIndex?.eventParentId && styles.dropdownTriggerDisabled]}
+          onPress={() => categoryIndex?.eventParentId && setIsEventModalOpen(true)}
           activeOpacity={0.7}
+          disabled={!categoryIndex?.eventParentId}
         >
           <Text style={[styles.dropdownText, selectedEventNames.length === 0 && styles.placeholder]}>
-            {getEventDropdownDisplayText()}
+            {categoryIndex?.eventParentId ? getEventDropdownDisplayText() : 'Event Planners categories unavailable'}
           </Text>
           <ChevronDown size={20} color="#666" />
         </TouchableOpacity>
@@ -1251,7 +1343,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           <View style={styles.selectedContainer}>
             <View style={styles.selectedHeader}>
               <Text style={[styles.selectedLabel, { marginBottom: 0 }]}>
-                Selected Events ({selectedEventsWithPaths.length}):
+                Selected Event Categories ({selectedEventsWithPaths.length}):
               </Text>
               {selectedEventsWithPaths.length > 3 && (
                 <TouchableOpacity onPress={() => setIsEventsExpanded(!isEventsExpanded)}>
@@ -1292,22 +1384,16 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         >
           <Pressable
             style={styles.modalOverlay}
-            onPress={() => {
-              handleChange('selectedEventIds', []);
-              setIsEventModalOpen(false);
-            }}
+            onPress={() => setIsEventModalOpen(false)}
           >
             <Pressable
               style={styles.modalContent}
               onPress={(e) => e.stopPropagation()}
             >
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Select Events</Text>
+                <Text style={styles.modalTitle}>Select Event Categories</Text>
                 <TouchableOpacity
-                  onPress={() => {
-                    handleChange('selectedEventIds', []);
-                    setIsEventModalOpen(false);
-                  }}
+                  onPress={() => setIsEventModalOpen(false)}
                   style={styles.closeButton}
                 >
                   <X size={24} color="#666" />
@@ -1317,7 +1403,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               {/* Search Input */}
               <TextInput
                 style={styles.modalSearchInput}
-                placeholder="Search Events you serve..."
+                placeholder="Search event categories"
                 placeholderTextColor="#999"
                 value={eventSearchQuery}
                 onFocus={onFocus}
@@ -1345,7 +1431,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
                 showsVerticalScrollIndicator={true}
               >
                 {filteredEventTree.length === 0 ? (
-                  <Text style={styles.emptyText}>No events found</Text>
+                  <Text style={styles.emptyText}>No categories found for "{debouncedEventSearchQuery}"</Text>
                 ) : (
                   renderEventCategoryTree(filteredEventTree)
                 )}
