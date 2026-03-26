@@ -10,8 +10,7 @@
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "android": "expo run:android",
-    "ios": "expo run:ios",
-    "test": "vitest run"
+    "ios": "expo run:ios"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
@@ -72,7 +71,6 @@
     "cross-env": "^10.1.0",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~10.0.0",
-    "typescript": "~5.9.2",
-    "vitest": "^3.2.4"
+    "typescript": "~5.9.2"
   }
 }
