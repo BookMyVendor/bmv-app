@@ -12,21 +12,12 @@ import {
   Pressable,
   Alert,
 } from 'react-native';
-import { Check, ChevronRight, ChevronDown, X, Search, Plus, Star } from 'lucide-react-native';
+import { Check, ChevronDown, X, Search, Plus, Star } from 'lucide-react-native';
 import { Image as RNImage } from 'react-native';
 import { pickImage } from '../../lib/businessApi';
-import Dropdown from '../../components/Dropdown';
 import { supabaseCore } from '../../lib/supabase';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import {
-  buildCategoryIndex,
-  cleanupInvalidSpecializations,
-  dedupeIds,
-  getDescendantIds,
-  searchScopedCategories,
-  type CategoryRecord,
-  type CategoryIndex,
-} from '../../lib/categoryPickerUtils';
+import { dedupeIds, type CategoryRecord } from '../../lib/categoryPickerUtils';
 
 interface ServicesExperienceStepProps {
   data: any;
@@ -43,53 +34,49 @@ interface Category {
   id: string;
   name: string;
   slug?: string | null;
-  icon?: string;
+  icon?: string | null;
   parent_category_id: string | null;
   category_level: number;
   category_type?: 'business' | 'event';
   business_model?: string | null;
-  sort_order?: number;
+  sort_order?: number | null;
 }
 
-interface CategoryNode extends Category {
-  children: CategoryNode[];
-  path?: string;
+interface FlatServiceItem {
+  id: string;
+  name: string;
+  icon?: string | null;
+  slug?: string | null;
+  rootId: string;
+  path: string;
 }
-
-const EXPERIENCE_OPTIONS = [
-  'Less than 1 year',
-  '1-3 years',
-  '3-5 years',
-  '5-10 years',
-  'More than 10 years',
-];
 
 const PRICING_MAPPING: Record<string, string[]> = {
-  'Cat': ['Per plate', 'Per event', 'Per day', 'Per live counter'], // Caterers
-  'Photo': ['Per day', 'Per event', 'Per hour'], // Photography / Videography
+  'Cat': ['Per plate', 'Per event', 'Per day', 'Per live counter'],
+  'Photo': ['Per day', 'Per event', 'Per hour'],
   'Video': ['Per day', 'Per event', 'Per hour'],
-  'Decor': ['Per event', 'Per day', 'Per setup'], // Decoration / Mandap
+  'Decor': ['Per event', 'Per day', 'Per setup'],
   'Mandap': ['Per event', 'Per day', 'Per setup'],
-  'Sound': ['Per event', 'Per day', 'Per hour', 'Per equipment set'], // Sound & Music
+  'Sound': ['Per event', 'Per day', 'Per hour', 'Per equipment set'],
   'Music': ['Per event', 'Per day', 'Per hour', 'Per equipment set'],
-  'Artist': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'], // Artists (DJs, Makeup, etc)
+  'Artist': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
   'DJ': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
   'Makeup': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
   'Mehndi': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
   'Dancer': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
   'Anchor': ['Per event', 'Per day', 'Per hour', 'Per person', 'Per performance'],
-  'Transport': ['Per trip', 'Per day', 'Per vehicle', 'Per hour'], // Transportation
+  'Transport': ['Per trip', 'Per day', 'Per vehicle', 'Per hour'],
   'Travel': ['Per trip', 'Per day', 'Per vehicle', 'Per hour'],
-  'Housekeeping': ['Per day', 'Per shift', 'Per person', 'Per event'], // Housekeeping & Security
+  'Housekeeping': ['Per day', 'Per shift', 'Per person', 'Per event'],
   'Security': ['Per day', 'Per shift', 'Per person', 'Per event'],
-  'Venue': ['Per day', 'Per event', 'Per hour'], // Venues
-  'Cake': ['Per kg', 'Per cake', 'Per design'], // Cakes
-  'Ritual': ['Per ritual', 'Per event', 'Per day', 'Per consultation'], // Festival & Ritual Services
+  'Venue': ['Per day', 'Per event', 'Per hour'],
+  'Cake': ['Per kg', 'Per cake', 'Per design'],
+  'Ritual': ['Per ritual', 'Per event', 'Per day', 'Per consultation'],
   'Pandit': ['Per ritual', 'Per event', 'Per day', 'Per consultation'],
   'Priest': ['Per ritual', 'Per event', 'Per day', 'Per consultation'],
-  'Rental': ['Per item', 'Per day', 'Per event', 'Per hour'], // Rentals
-  'Light': ['Per item', 'Per day', 'Per event', 'Per hour'], // Lighting (part of Rentals typically or Tech)
-  'Event Management': ['Per event', 'Per day', 'Percentage of event cost'], // Event Management Companies
+  'Rental': ['Per item', 'Per day', 'Per event', 'Per hour'],
+  'Light': ['Per item', 'Per day', 'Per event', 'Per hour'],
+  'Event Management': ['Per event', 'Per day', 'Percentage of event cost'],
   'Planner': ['Per event', 'Per day', 'Percentage of event cost'],
 };
 
@@ -160,6 +147,24 @@ const fetchAllCategoriesCached = async (): Promise<CategoryRecord[]> => {
   }
 };
 
+const getRootId = (id: string, byId: Map<string, Category>): string => {
+  let curr = byId.get(id);
+  while (curr?.parent_category_id) {
+    curr = byId.get(curr.parent_category_id);
+  }
+  return curr?.id ?? id;
+};
+
+const buildPath = (id: string, byId: Map<string, Category>): string => {
+  const parts: string[] = [];
+  let curr: Category | undefined = byId.get(id);
+  while (curr) {
+    parts.unshift(curr.name);
+    curr = curr.parent_category_id ? byId.get(curr.parent_category_id) : undefined;
+  }
+  return parts.join(' > ');
+};
+
 const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExperienceStepProps>(({
   data,
   onUpdate,
@@ -168,1302 +173,447 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 }, ref) => {
   const insets = useSafeAreaInsets();
   const [uploading, setUploading] = useState(false);
-  const [allCategories, setAllCategories] = useState<CategoryRecord[]>([]);
-  const [categoryIndex, setCategoryIndex] = useState<CategoryIndex | null>(null);
-  const [categoryLoadError, setCategoryLoadError] = useState<string | null>(null);
+  const [allCategories, setAllCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedPrimaryCategoryId, setSelectedPrimaryCategoryId] = useState<string | null>(
-    data.selectedRootCategoryId || null
-  );
-  const [selectedSpecializationCategoryIds, setSelectedSpecializationCategoryIds] = useState<string[]>(
+  const [categoryLoadError, setCategoryLoadError] = useState<string | null>(null);
+
+  const [selectedSpecializationIds, setSelectedSpecializationIds] = useState<string[]>(
     data.selectedCategoryIds || []
   );
-  const [selectedEventCategoryIds, setSelectedEventCategoryIds] = useState<string[]>(
+  const [selectedEventIds, setSelectedEventIds] = useState<string[]>(
     data.selectedEventIds || []
   );
-  const [expandedCategoryIds, setExpandedCategoryIds] = useState<Set<string>>(new Set());
-  const [primarySearchQuery, setPrimarySearchQuery] = useState('');
-  const [specializationSearchQuery, setSpecializationSearchQuery] = useState('');
-  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
-  const [isRootDropdownOpen, setIsRootDropdownOpen] = useState(false);
-  const [eventSearchQuery, setEventSearchQuery] = useState('');
-  const [isEventModalOpen, setIsEventModalOpen] = useState(false);
-  const [isExperienceDropdownOpen, setIsExperienceDropdownOpen] = useState(false);
-  const [expandedEventIds, setExpandedEventIds] = useState<Set<string>>(new Set());
 
-  const [isPricingUnitDropdownOpen, setIsPricingUnitDropdownOpen] = useState(false);
-  const [isCategoriesExpanded, setIsCategoriesExpanded] = useState(false);
-  const [isEventsExpanded, setIsEventsExpanded] = useState(false);
-  const debouncedPrimarySearchQuery = useDebouncedValue(primarySearchQuery, 250);
-  const debouncedSpecializationSearchQuery = useDebouncedValue(specializationSearchQuery, 250);
-  const debouncedEventSearchQuery = useDebouncedValue(eventSearchQuery, 250);
-
-  const selectedRootCategoryId = selectedPrimaryCategoryId;
-  const selectedCategoryIds = selectedSpecializationCategoryIds;
-  const setSelectedRootCategoryId = setSelectedPrimaryCategoryId;
-  const setSelectedCategoryIds = setSelectedSpecializationCategoryIds;
-  const searchQuery = specializationSearchQuery;
-  const setSearchQuery = setSpecializationSearchQuery;
-  const selectedEventIds = selectedEventCategoryIds;
-  const eventCategories = useMemo(
-    () => allCategories.filter((category) => category.category_type === 'event') as Category[],
-    [allCategories]
-  );
-  const allBusinessCategories = useMemo(
-    () => allCategories.filter((category) => category.category_type === 'business') as Category[],
-    [allCategories]
-  );
-
-  const [coverPhotoUri, setCoverPhotoUri] = useState<string | undefined>(data.coverPhotoUri);
-
-  // Sync cover photo with parent
-  useEffect(() => {
-    if (data.coverPhotoUri !== coverPhotoUri) {
-      onUpdate({ 
-        coverPhotoUri: coverPhotoUri,
-        portfolioImages: coverPhotoUri ? [coverPhotoUri] : []
-      });
-    }
-  }, [coverPhotoUri]);
-
+  const [serviceSearchQuery, setServiceSearchQuery] = useState('');
+  const debouncedServiceSearch = useDebouncedValue(serviceSearchQuery, 250);
 
   const [isCityModalOpen, setIsCityModalOpen] = useState(false);
   const [citySearchQuery, setCitySearchQuery] = useState('');
 
+  const [coverPhotoUri, setCoverPhotoUri] = useState<string | undefined>(data.coverPhotoUri);
 
+  const serviceSearchRef = useRef<TextInput>(null);
+  const isInitialMount = useRef(true);
 
-  // Expose method to focus next empty mandatory field
   useImperativeHandle(ref, () => ({
     focusNextEmptyField: () => {
-      if (!data.selectedRootCategoryId) {
-        setIsRootDropdownOpen(true);
-      } else if (!data.selectedCategoryIds || data.selectedCategoryIds.length === 0) {
-        setIsCategoryModalOpen(true);
-      } else if (!selectedEventIds || selectedEventIds.length === 0) {
-        setIsEventModalOpen(true);
+      if (selectedSpecializationIds.length === 0) {
+        serviceSearchRef.current?.focus();
       } else if (!data.operatingLocations || data.operatingLocations.length === 0) {
         setIsCityModalOpen(true);
       }
     },
   }));
 
-  const isInitialMount = useRef(true);
+  // ─── Derived data ──────────────────────────────────────────────────────────
 
-  // Fetch categories on mount (cached), then filter by business type in-memory
+  const allBusinessCategories = useMemo(
+    () => allCategories.filter((c) => c.category_type === 'business'),
+    [allCategories]
+  );
+
+  const eventRootCategories = useMemo(
+    () =>
+      allCategories
+        .filter((c) => c.category_type === 'event' && c.parent_category_id === null)
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    [allCategories]
+  );
+
+  const flatServiceItems = useMemo<FlatServiceItem[]>(() => {
+    const byId = new Map<string, Category>();
+    allBusinessCategories.forEach((c) => byId.set(c.id, c));
+
+    const isRental = data.businessType === 'rental';
+
+    return allBusinessCategories
+      .filter((c) => {
+        if (c.parent_category_id === null) return false;
+        if (isRental) return c.business_model === 'rental';
+        return c.business_model !== 'rental';
+      })
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        icon: c.icon,
+        slug: c.slug,
+        rootId: getRootId(c.id, byId),
+        path: buildPath(c.id, byId),
+      }))
+      .sort((a, b) => a.path.localeCompare(b.path));
+  }, [allBusinessCategories, data.businessType]);
+
+  const filteredServiceItems = useMemo<FlatServiceItem[]>(() => {
+    const q = debouncedServiceSearch.trim().toLowerCase();
+    if (!q) return flatServiceItems;
+    const terms = q.split(/\s+/).filter(Boolean);
+    return flatServiceItems.filter((item) => {
+      const hay = `${item.name.toLowerCase()} ${item.path.toLowerCase()} ${(item.slug || '').toLowerCase()}`;
+      return terms.every((t) => hay.includes(t));
+    });
+  }, [flatServiceItems, debouncedServiceSearch]);
+
+  const derivedRootCategoryId = useMemo<string | null>(() => {
+    if (selectedSpecializationIds.length === 0) return null;
+    const first = flatServiceItems.find((item) => item.id === selectedSpecializationIds[0]);
+    return first?.rootId ?? null;
+  }, [selectedSpecializationIds, flatServiceItems]);
+
+  const selectedSpecializationItems = useMemo<FlatServiceItem[]>(() => {
+    return selectedSpecializationIds
+      .map((id) => flatServiceItems.find((item) => item.id === id))
+      .filter((item): item is FlatServiceItem => item !== undefined);
+  }, [selectedSpecializationIds, flatServiceItems]);
+
+  const selectedEventItems = useMemo(
+    () => eventRootCategories.filter((c) => selectedEventIds.includes(c.id)),
+    [eventRootCategories, selectedEventIds]
+  );
+
+  const pricingUnitOptions = useMemo(() => {
+    if (selectedSpecializationItems.length === 0) return DEFAULT_PRICING_UNITS;
+    const firstName = selectedSpecializationItems[0].name;
+    const match = Object.keys(PRICING_MAPPING).find((key) =>
+      firstName.toLowerCase().includes(key.toLowerCase())
+    );
+    if (match) return PRICING_MAPPING[match];
+
+    if (derivedRootCategoryId) {
+      const rootCat = allBusinessCategories.find((c) => c.id === derivedRootCategoryId);
+      if (rootCat) {
+        const rootMatch = Object.keys(PRICING_MAPPING).find((key) =>
+          rootCat.name.toLowerCase().includes(key.toLowerCase())
+        );
+        if (rootMatch) return PRICING_MAPPING[rootMatch];
+      }
+    }
+
+    return DEFAULT_PRICING_UNITS;
+  }, [selectedSpecializationItems, allBusinessCategories, derivedRootCategoryId]);
+
+  // ─── Effects ───────────────────────────────────────────────────────────────
+
   useEffect(() => {
     fetchCategories();
-
     if (isInitialMount.current) {
       isInitialMount.current = false;
     } else {
-      // Reset selected categories only when business type actually changes (not on initial mount)
-      setSelectedPrimaryCategoryId(null);
-      setSelectedSpecializationCategoryIds([]);
-      setSelectedEventCategoryIds([]);
-      onUpdate({
-        selectedRootCategoryId: null,
-        selectedCategoryIds: [],
-        selectedEventIds: [],
-      });
+      setSelectedSpecializationIds([]);
+      setSelectedEventIds([]);
+      onUpdate({ selectedRootCategoryId: null, selectedCategoryIds: [], selectedEventIds: [] });
     }
   }, [data.businessType]);
 
   useEffect(() => {
-    // Update parent component when selections change
     onUpdate({
-      selectedRootCategoryId: selectedPrimaryCategoryId,
-      selectedCategoryIds: selectedSpecializationCategoryIds,
-      selectedEventIds: selectedEventCategoryIds,
+      selectedRootCategoryId: derivedRootCategoryId,
+      selectedCategoryIds: selectedSpecializationIds,
+      selectedEventIds: selectedEventIds,
     });
-    console.debug('[categories] selection transition', {
-      selectedPrimaryCategoryId,
-      selectedSpecializationCategoryIds,
-      selectedEventCategoryIds,
-    });
-  }, [selectedPrimaryCategoryId, selectedSpecializationCategoryIds, selectedEventCategoryIds]);
+  }, [derivedRootCategoryId, selectedSpecializationIds, selectedEventIds]);
 
-  // Auto-detect root category if we have selected sub-categories but no root
   useEffect(() => {
-    const allBusinessCategories = allCategories.filter((c) => c.category_type === 'business');
-    if (allBusinessCategories.length > 0 && selectedCategoryIds.length > 0 && !selectedRootCategoryId) {
-      const firstSelectedCat = allBusinessCategories.find((c) => c.id === selectedCategoryIds[0]);
-      if (firstSelectedCat) {
-        let current = firstSelectedCat;
-        while (current.parent_category_id) {
-          const parent = allBusinessCategories.find((c) => c.id === current.parent_category_id);
-          if (!parent) break;
-          current = parent;
-        }
-        if (current && current.id !== selectedRootCategoryId) {
-          setSelectedPrimaryCategoryId(current.id);
-          // Don't modify expanded here to avoid infinite loops, but expanding root is usually desired
-          setExpandedCategoryIds((prev) => new Set([...prev, current.id]));
-        }
-      }
+    if (data.coverPhotoUri !== coverPhotoUri) {
+      onUpdate({
+        coverPhotoUri,
+        portfolioImages: coverPhotoUri ? [coverPhotoUri] : [],
+      });
     }
-  }, [allCategories, selectedCategoryIds, selectedRootCategoryId]);
+  }, [coverPhotoUri]);
+
+  // ─── Fetch ─────────────────────────────────────────────────────────────────
 
   const fetchCategories = async () => {
     try {
       setLoading(true);
       setCategoryLoadError(null);
       const categories = await fetchAllCategoriesCached();
-      setAllCategories(categories);
-
-      const index = buildCategoryIndex(categories);
-      setCategoryIndex(index);
-      console.debug('[categories] fetch success', { count: categories.length });
-      console.debug('[categories] event parent resolution', {
-        path: index.eventResolutionPath,
-        eventParentId: index.eventParentId,
-      });
+      setAllCategories(categories as Category[]);
     } catch (error) {
-      console.error('Error fetching categories:', error);
+      console.error('[categories] fetch error:', error);
       setCategoryLoadError('Unable to load categories. Please retry.');
     } finally {
       setLoading(false);
     }
   };
 
-  // Build hierarchical tree structure
-  const buildCategoryTree = (categories: Category[]): CategoryNode[] => {
-    const categoryMap = new Map<string, CategoryNode>();
-    const rootCategories: CategoryNode[] = [];
+  // ─── Handlers ──────────────────────────────────────────────────────────────
 
-    // First pass: create all nodes
-    categories.forEach((cat) => {
-      categoryMap.set(cat.id, {
-        ...cat,
-        children: [],
-      });
-    });
-
-    // Second pass: build tree structure
-    categories.forEach((cat) => {
-      const node = categoryMap.get(cat.id)!;
-      if (cat.parent_category_id) {
-        const parent = categoryMap.get(cat.parent_category_id);
-        if (parent) {
-          parent.children.push(node);
-        }
-      } else {
-        rootCategories.push(node);
+  const toggleSpecialization = (id: string) => {
+    setSelectedSpecializationIds((prev) => {
+      if (prev.includes(id)) {
+        return prev.filter((x) => x !== id);
       }
+      return dedupeIds([...prev, id]);
     });
-
-    // Sort children by sort_order
-    const sortChildren = (nodes: CategoryNode[]) => {
-      nodes.forEach((node) => {
-        node.children.sort((a, b) => {
-          const aOrder = allBusinessCategories.find((c) => c.id === a.id)?.sort_order ?? 0;
-          const bOrder = allBusinessCategories.find((c) => c.id === b.id)?.sort_order ?? 0;
-          return aOrder - bOrder;
-        });
-        sortChildren(node.children);
-      });
-    };
-
-    sortChildren(rootCategories);
-    return rootCategories;
   };
 
-  // Get full path for a category (excluding root/parent category)
-  const getCategoryPath = (categoryId: string, categories: Category[]): string => {
-    const categoryMap = new Map<string, Category>();
-    categories.forEach((cat) => categoryMap.set(cat.id, cat));
-
-    const path: string[] = [];
-    let currentId: string | null = categoryId;
-
-    while (currentId) {
-      const cat = categoryMap.get(currentId);
-      if (!cat) break;
-      path.unshift(cat.name);
-      currentId = cat.parent_category_id;
-    }
-
-    // Remove the root category (first element) if there are multiple levels
-    if (path.length > 1) {
-      path.shift(); // Remove the first element (root category)
-    }
-
-    return path.join(' > ');
-  };
-
-  // Filter categories based on search query
-  const filterCategories = (nodes: CategoryNode[], query: string): CategoryNode[] => {
-    if (!query.trim()) return nodes;
-
-    const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
-    const filtered: CategoryNode[] = [];
-
-    const matchesQuery = (node: CategoryNode): boolean => {
-      const slugTokens = (node.slug || '')
-        .toLowerCase()
-        .split(/[-_\s]+/)
-        .filter(Boolean)
-        .join(' ');
-      const haystack = `${node.name.toLowerCase()} ${(node.slug || '').toLowerCase()} ${slugTokens}`;
-      return terms.every((term) => haystack.includes(term));
-    };
-
-    const filterNode = (node: CategoryNode): CategoryNode | null => {
-      const filteredChildren = node.children
-        .map(filterNode)
-        .filter((n): n is CategoryNode => n !== null);
-
-      if (matchesQuery(node) || filteredChildren.length > 0) {
-        return {
-          ...node,
-          children: filteredChildren,
-        };
+  const toggleEventRoot = (id: string) => {
+    setSelectedEventIds((prev) => {
+      if (prev.includes(id)) {
+        return prev.filter((x) => x !== id);
       }
-      return null;
-    };
-
-    nodes.forEach((node) => {
-      const filteredNode = filterNode(node);
-      if (filteredNode) {
-        filtered.push(filteredNode);
-      }
+      return dedupeIds([...prev, id]);
     });
-
-    return filtered;
-  };
-
-  // Build category tree
-  const categoryTree = useMemo(() => {
-    return buildCategoryTree(allBusinessCategories);
-  }, [allBusinessCategories]);
-
-  // Subtree for selected root only (for sub-categories modal)
-  const subtreeForSelectedRoot = useMemo(() => {
-    if (!selectedRootCategoryId) return null;
-    const rootNode = categoryTree.find((n) => n.id === selectedRootCategoryId);
-    return rootNode || null;
-  }, [categoryTree, selectedRootCategoryId]);
-
-  // Filter subtree by search (for modal)
-  const filteredSubtree = useMemo(() => {
-    if (!subtreeForSelectedRoot) return [];
-    const filtered = filterCategories([subtreeForSelectedRoot], debouncedSpecializationSearchQuery);
-    return filtered[0] ? filtered[0].children : [];
-  }, [subtreeForSelectedRoot, debouncedSpecializationSearchQuery]);
-
-  // Get root categories (level 1 or no parent)
-  const rootCategories = useMemo(() => {
-    return allBusinessCategories.filter((cat) => {
-      const isRoot = cat.category_level === 1 || cat.parent_category_id === null;
-      if (!isRoot) return false;
-      if (data.businessType === 'rental') return cat.business_model === 'rental';
-      return cat.business_model !== 'rental';
-    });
-  }, [allBusinessCategories, data.businessType]);
-
-  const filteredRootCategories = useMemo(() => {
-    if (!categoryIndex) return rootCategories;
-    const scopedIds = rootCategories.map((category) => category.id);
-    const matchedIds = searchScopedCategories(debouncedPrimarySearchQuery, scopedIds, categoryIndex);
-    const matched = new Set(matchedIds);
-    return rootCategories.filter((category) => matched.has(category.id));
-  }, [rootCategories, debouncedPrimarySearchQuery, categoryIndex]);
-
-  // Handle root category selection (from dropdown)
-  const handleRootSelection = (categoryId: string) => {
-    setSelectedRootCategoryId(categoryId);
-    if (categoryIndex) {
-      setSelectedCategoryIds((prev) => cleanupInvalidSpecializations(prev, categoryId, categoryIndex));
-    } else {
-      setSelectedCategoryIds([]);
-    }
-    setExpandedCategoryIds(new Set([categoryId]));
-  };
-
-  // Toggle only child category selection (used in sub-categories modal)
-  const toggleCategorySelection = (categoryId: string) => {
-    setSelectedCategoryIds((prev) => {
-      let newIds = [...prev];
-      const isSelected = prev.includes(categoryId);
-
-      // Helper to find all descendants recursively
-      const getDescendants = (parentId: string): string[] => {
-        let descendants: string[] = [];
-        const children = allBusinessCategories.filter(c => c.parent_category_id === parentId);
-        if (children.length > 0) {
-          children.forEach(child => {
-            descendants.push(child.id);
-            descendants = [...descendants, ...getDescendants(child.id)];
-          });
-        }
-        return descendants;
-      };
-
-      const descendants = getDescendants(categoryId);
-
-      if (isSelected) {
-        // Deselecting: remove id and all descendants
-        newIds = newIds.filter((id) => id !== categoryId && !descendants.includes(id));
-
-        setExpandedCategoryIds((expanded) => {
-          const next = new Set(expanded);
-          next.delete(categoryId);
-          return next;
-        });
-      } else {
-        // Selecting: add id and all descendants
-        if (!newIds.includes(categoryId)) newIds.push(categoryId);
-
-        descendants.forEach(childId => {
-          if (!newIds.includes(childId)) {
-            newIds.push(childId);
-          }
-        });
-
-        // Auto-expand the parent category to show selected children
-        setExpandedCategoryIds((expanded) => {
-          const newExpanded = new Set(expanded);
-          newExpanded.add(categoryId);
-          return newExpanded;
-        });
-
-        const category = allBusinessCategories.find((c) => c.id === categoryId);
-        if (category) {
-          const parentChain: string[] = [];
-          let currentParentId: string | null = category.parent_category_id;
-          while (currentParentId) {
-            parentChain.push(currentParentId);
-            const parent = allBusinessCategories.find((c) => c.id === currentParentId);
-            currentParentId = parent?.parent_category_id || null;
-          }
-          if (parentChain.length > 0) {
-            setExpandedCategoryIds((expanded) => new Set([...expanded, ...parentChain]));
-          }
-        }
-      }
-      return dedupeIds(newIds);
-    });
-  };
-
-  // Toggle category expansion
-  const toggleExpansion = (categoryId: string) => {
-    setExpandedCategoryIds((expanded) => {
-      const newExpanded = new Set(expanded);
-      if (newExpanded.has(categoryId)) {
-        newExpanded.delete(categoryId);
-      } else {
-        newExpanded.add(categoryId);
-      }
-      return newExpanded;
-    });
-  };
-
-  // Auto-expand selected categories with children and their parent chains
-  useEffect(() => {
-    setExpandedCategoryIds((currentExpanded) => {
-      const newExpanded = new Set(currentExpanded);
-      let changed = false;
-
-      // Include root category in selectedCategoryIds if it's selected
-      const allSelectedIds = [...selectedCategoryIds];
-      if (selectedRootCategoryId && !allSelectedIds.includes(selectedRootCategoryId)) {
-        allSelectedIds.push(selectedRootCategoryId);
-      }
-
-      allSelectedIds.forEach((categoryId) => {
-        // Expand the category itself if it has children
-        const hasChildren = allBusinessCategories.some(
-          (c) => c.parent_category_id === categoryId
-        );
-        if (hasChildren && !newExpanded.has(categoryId)) {
-          newExpanded.add(categoryId);
-          changed = true;
-        }
-
-        // Expand parent chain so selected child categories are visible
-        const category = allBusinessCategories.find((c) => c.id === categoryId);
-        if (category) {
-          let currentParentId: string | null = category.parent_category_id;
-          while (currentParentId) {
-            if (!newExpanded.has(currentParentId)) {
-              newExpanded.add(currentParentId);
-              changed = true;
-            }
-            const parent = allBusinessCategories.find((c) => c.id === currentParentId);
-            currentParentId = parent?.parent_category_id || null;
-          }
-        }
-      });
-
-      return changed ? newExpanded : currentExpanded;
-    });
-  }, [selectedCategoryIds, selectedRootCategoryId, allBusinessCategories]);
-
-  // Render sub-category tree (checkboxes only, for modal under selected root)
-  const renderSubCategoryTree = (nodes: CategoryNode[], level: number = 0): React.ReactNode => {
-    return nodes.map((node) => {
-      const isSelected = selectedCategoryIds.includes(node.id);
-      const isExpanded = expandedCategoryIds.has(node.id);
-      const hasChildren = node.children.length > 0;
-
-      return (
-        <View key={node.id} style={styles.categoryItem}>
-          <TouchableOpacity
-            style={[styles.categoryRow, { paddingLeft: level * 20 + 12 }]}
-            onPress={() => toggleCategorySelection(node.id)}
-            activeOpacity={0.7}
-          >
-            {hasChildren && (
-              <TouchableOpacity
-                style={styles.expandButton}
-                onPress={(e) => {
-                  e.stopPropagation();
-                  toggleExpansion(node.id);
-                }}
-              >
-                {isExpanded ? (
-                  <ChevronDown size={16} color="#666" />
-                ) : (
-                  <ChevronRight size={16} color="#666" />
-                )}
-              </TouchableOpacity>
-            )}
-            {!hasChildren && <View style={styles.expandButton} />}
-
-            <View style={styles.checkbox}>
-              {isSelected ? (
-                <View style={styles.checkboxSelected}>
-                  <Check size={14} color="#fff" strokeWidth={3} />
-                </View>
-              ) : (
-                <View style={styles.checkboxUnselected} />
-              )}
-            </View>
-
-            {node.icon && <Text style={styles.categoryIcon}>{node.icon}</Text>}
-            <Text
-              style={[styles.categoryName, isSelected && styles.categoryNameSelected]}
-            >
-              {node.name}
-            </Text>
-          </TouchableOpacity>
-
-          {hasChildren && isExpanded && (
-            <View style={styles.childrenContainer}>
-              {renderSubCategoryTree(node.children, level + 1)}
-            </View>
-          )}
-        </View>
-      );
-    });
-  };
-
-  // Get selected categories with full paths (only leaf-level selected items)
-  const selectedCategoriesWithPaths = useMemo(() => {
-    // Only show selected categories that:
-    // 1. Have a parent (not root)
-    // 2. Don't have any selected children (leaf-level in selection)
-    const leafIds = selectedCategoryIds.filter(id => {
-      const cat = allBusinessCategories.find(c => c.id === id);
-      if (!cat || cat.parent_category_id === null) return false;
-      // Check if any of its children are also selected
-      const hasSelectedChild = allBusinessCategories.some(
-        c => c.parent_category_id === id && selectedCategoryIds.includes(c.id)
-      );
-      return !hasSelectedChild;
-    });
-
-    return leafIds.map((id) => {
-      const cat = allBusinessCategories.find(c => c.id === id);
-      return {
-        id,
-        path: getCategoryPath(id, allBusinessCategories),
-        name: cat?.name || ''
-      };
-    });
-  }, [selectedCategoryIds, allBusinessCategories]);
-
-  const handleChange = (field: string, value: any) => {
-    onUpdate({ [field]: value });
-  };
-
-  const toggleEventType = (eventId: string) => {
-    const currentIds = selectedEventIds || [];
-    const isSelected = currentIds.includes(eventId);
-    let newIds = [...currentIds];
-
-    if (isSelected) {
-      // Deselecting
-      newIds = newIds.filter((id) => id !== eventId);
-
-      // Also deselect all children if this is a parent category
-      const childCategories = eventCategories.filter(c => c.parent_category_id === eventId);
-      if (childCategories.length > 0) {
-        const childIds = childCategories.map(c => c.id);
-        newIds = newIds.filter(id => !childIds.includes(id));
-      }
-
-      // Collapse when deselecting
-      setExpandedEventIds((expanded) => {
-        const newExpanded = new Set(expanded);
-        if (newExpanded.has(eventId)) {
-          newExpanded.delete(eventId);
-        }
-        return newExpanded;
-      });
-    } else {
-      // Selecting
-      newIds.push(eventId);
-
-      // Also select all children if this is a parent category
-      const childCategories = eventCategories.filter(c => c.parent_category_id === eventId);
-      if (childCategories.length > 0) {
-        childCategories.forEach(child => {
-          if (!newIds.includes(child.id)) {
-            newIds.push(child.id);
-          }
-        });
-
-        // Auto-expand the parent category to show selected children
-        setExpandedEventIds((expanded) => {
-          const newExpanded = new Set(expanded);
-          newExpanded.add(eventId);
-          return newExpanded;
-        });
-      }
-    }
-
-    setSelectedEventCategoryIds(dedupeIds(newIds));
-  };
-
-  // Toggle event expansion
-  const toggleEventExpansion = (eventId: string) => {
-    setExpandedEventIds((expanded) => {
-      const newExpanded = new Set(expanded);
-      if (newExpanded.has(eventId)) {
-        newExpanded.delete(eventId);
-      } else {
-        newExpanded.add(eventId);
-      }
-      return newExpanded;
-    });
-  };
-
-  // Render event category tree recursively
-  const renderEventCategoryTree = (nodes: CategoryNode[], level: number = 0): React.ReactNode => {
-    return nodes.map((node) => {
-      const isSelected = selectedEventIds.includes(node.id);
-      const isExpanded = expandedEventIds.has(node.id);
-      const hasChildren = node.children.length > 0;
-
-      return (
-        <View key={node.id} style={styles.categoryItem}>
-          <TouchableOpacity
-            style={[styles.categoryRow, { paddingLeft: level * 20 + 12 }]}
-            onPress={() => toggleEventType(node.id)}
-            activeOpacity={0.7}
-          >
-            {hasChildren && (
-              <TouchableOpacity
-                style={styles.expandButton}
-                onPress={(e) => {
-                  e.stopPropagation();
-                  toggleEventExpansion(node.id);
-                }}
-              >
-                {isExpanded ? (
-                  <ChevronDown size={16} color="#666" />
-                ) : (
-                  <ChevronRight size={16} color="#666" />
-                )}
-              </TouchableOpacity>
-            )}
-            {!hasChildren && <View style={styles.expandButton} />}
-
-            <View style={styles.checkbox}>
-              {isSelected ? (
-                <View style={styles.checkboxSelected}>
-                  <Check size={14} color="#fff" strokeWidth={3} />
-                </View>
-              ) : (
-                <View style={styles.checkboxUnselected} />
-              )}
-            </View>
-            {node.icon && (
-              <Text style={styles.categoryIcon}>{node.icon}</Text>
-            )}
-            <Text
-              style={[
-                styles.eventOptionText,
-                isSelected && styles.eventOptionTextSelected,
-              ]}
-            >
-              {node.name}
-            </Text>
-          </TouchableOpacity>
-          {hasChildren && isExpanded && (
-            <View style={styles.childrenContainer}>
-              {renderEventCategoryTree(node.children, level + 1)}
-            </View>
-          )}
-        </View>
-      );
-    });
-  };
-
-  // Auto-expand selected event categories with children and their parent chains
-  useEffect(() => {
-    setExpandedEventIds((currentExpanded) => {
-      const newExpanded = new Set(currentExpanded);
-      let changed = false;
-
-      selectedEventIds.forEach((eventId: string) => {
-        // Expand the category itself if it has children
-        const hasChildren = eventCategories.some(
-          (c) => c.parent_category_id === eventId
-        );
-        if (hasChildren && !newExpanded.has(eventId)) {
-          newExpanded.add(eventId);
-          changed = true;
-        }
-
-        // Expand parent chain so selected child categories are visible
-        const category = eventCategories.find((c) => c.id === eventId);
-        if (category) {
-          let currentParentId: string | null = category.parent_category_id;
-          while (currentParentId) {
-            if (!newExpanded.has(currentParentId)) {
-              newExpanded.add(currentParentId);
-              changed = true;
-            }
-            const parent = eventCategories.find((c) => c.id === currentParentId);
-            currentParentId = parent?.parent_category_id || null;
-          }
-        }
-      });
-
-      return changed ? newExpanded : currentExpanded;
-    });
-  }, [selectedEventIds, eventCategories]);
-
-  // Get event category path (excluding root/parent category)
-  const getEventPath = (eventId: string, events: Category[]): string => {
-    const event = events.find((e) => e.id === eventId);
-    if (!event) return '';
-
-    const path: string[] = [event.name];
-    let currentId: string | null = event.parent_category_id;
-
-    while (currentId) {
-      const parent = events.find((e) => e.id === currentId);
-      if (parent) {
-        path.unshift(parent.name);
-        currentId = parent.parent_category_id;
-      } else {
-        currentId = null;
-      }
-    }
-
-    // Remove the root category (first element) if there are multiple levels
-    if (path.length > 1) {
-      path.shift(); // Remove the first element (root category)
-    }
-
-    return path.join(' > ');
-  };
-
-  // Get selected events with paths for display
-  const selectedEventsWithPaths = useMemo(() => {
-    // Only show child categories
-    const childIds = selectedEventIds.filter((id: string) => {
-      const cat = eventCategories.find(c => c.id === id);
-      return cat && cat.parent_category_id !== null;
-    });
-
-    return childIds.map((id: string) => ({
-      id,
-      path: getEventPath(id, eventCategories),
-    }));
-  }, [selectedEventIds, eventCategories]);
-
-  // Get selected event names for display (for dropdown text)
-  const selectedEventNames = useMemo(() => {
-    const selectedIds = selectedEventIds || [];
-    return eventCategories
-      .filter((cat) => selectedIds.includes(cat.id))
-      .map((cat) => cat.name);
-  }, [selectedEventIds, eventCategories]);
-
-  // Build event category tree
-  const eventCategoryTree = useMemo(() => {
-    if (!categoryIndex?.eventParentId) {
-      return [];
-    }
-    const fullTree = buildCategoryTree(eventCategories);
-    const eventParentNode = fullTree.find((node) => node.id === categoryIndex.eventParentId);
-    if (!eventParentNode) {
-      return [];
-    }
-    return [eventParentNode];
-  }, [eventCategories, categoryIndex]);
-
-  // Filter event tree based on search
-  const filteredEventTree = useMemo(() => {
-    return filterCategories(eventCategoryTree, debouncedEventSearchQuery);
-  }, [eventCategoryTree, debouncedEventSearchQuery]);
-
-  // Get display text for event dropdown
-  const getEventDropdownDisplayText = (): string => {
-    if (loading) {
-      return 'Loading event categories...';
-    }
-    if (selectedEventsWithPaths.length === 0) {
-      return 'Select event categories';
-    }
-    if (selectedEventsWithPaths.length === 1) {
-      return selectedEventsWithPaths[0].path;
-    }
-    return `${selectedEventsWithPaths.length} event categories selected`;
   };
 
   const toggleCitySelection = (city: string) => {
     const currentLocations = data.operatingLocations || [];
-
     if (city === 'Pan India') {
       if (currentLocations.includes('*')) {
-        handleChange('operatingLocations', []);
+        onUpdate({ operatingLocations: [] });
       } else {
-        // If Pan India selected, clear all other cities and just set '*'
-        handleChange('operatingLocations', ['*']);
+        onUpdate({ operatingLocations: ['*'] });
       }
       return;
     }
-
-    // If a normal city is selected while Pan India (*) is present, remove '*'
     let newLocations = currentLocations.filter((c: string) => c !== '*');
-
     if (newLocations.includes(city)) {
-      handleChange('operatingLocations', newLocations.filter((c: string) => c !== city));
+      onUpdate({ operatingLocations: newLocations.filter((c: string) => c !== city) });
     } else {
-      handleChange('operatingLocations', [...newLocations, city]);
+      onUpdate({ operatingLocations: [...newLocations, city] });
     }
   };
 
-  const filteredCities = OPERATING_CITIES.filter(city =>
-    city.toLowerCase().includes(citySearchQuery.toLowerCase())
-  );
-
-  // Determine applicable pricing units based on selected service category
-  const pricingUnitOptions = useMemo(() => {
-    if (selectedCategoriesWithPaths.length === 0) return DEFAULT_PRICING_UNITS;
-
-    // Use the first selected category to determine units
-    // In a real app we might want to be smarter if multiple different types are selected
-    // but usually a business has a primary domain.
-    const firstCatName = selectedCategoriesWithPaths[0].name || '';
-
-    // Find matching key in PRICING_MAPPING
-    const match = Object.keys(PRICING_MAPPING).find(key =>
-      firstCatName.toLowerCase().includes(key.toLowerCase())
-    );
-
-    if (match) {
-      return PRICING_MAPPING[match];
-    }
-
-    // Secondary check: look at root category if available
-    if (selectedRootCategoryId) {
-      const rootCat = allBusinessCategories.find(c => c.id === selectedRootCategoryId);
-      if (rootCat) {
-        const rootMatch = Object.keys(PRICING_MAPPING).find(key =>
-          rootCat.name.toLowerCase().includes(key.toLowerCase())
-        );
-        if (rootMatch) {
-          return PRICING_MAPPING[rootMatch];
-        }
-      }
-    }
-
-    return DEFAULT_PRICING_UNITS;
-  }, [selectedCategoriesWithPaths, allBusinessCategories, selectedRootCategoryId]);
-  
   const handlePickCoverPhoto = async () => {
     const { uri, error } = await pickImage();
     if (error) {
       Alert.alert('Error', error.message);
       return;
     }
-
-    if (uri) {
-      setCoverPhotoUri(uri);
-    }
+    if (uri) setCoverPhotoUri(uri);
   };
 
-  const handleRemoveCoverPhoto = () => {
-    setCoverPhotoUri(undefined);
-  };
+  const filteredCities = OPERATING_CITIES.filter((city) =>
+    city.toLowerCase().includes(citySearchQuery.toLowerCase())
+  );
 
-
-
-  // Loading indicator overlay removed to prevent UI jumping. Components will display inline loading states.
-
-  const handleCategoryDone = () => {
-    const hasSubCategory = selectedCategoryIds.some(id => {
-      const cat = allBusinessCategories.find(c => c.id === id);
-      return cat && cat.parent_category_id !== null;
-    });
-
-    if (!hasSubCategory) {
-      Alert.alert('Validation Error', 'Please select at least one sub-category');
-      return;
-    }
-    setIsCategoryModalOpen(false);
-  };
-
-  const handleEventDone = () => {
-    const hasSubEventType = selectedEventIds.some((id: string) => {
-      const cat = eventCategories.find(c => c.id === id);
-      return cat && cat.parent_category_id !== null;
-    });
-
-    if (!hasSubEventType) {
-      Alert.alert('Validation Error', 'Please select at least one event category');
-      return;
-    }
-    setIsEventModalOpen(false);
-  };
-
-  // Select All / Deselect All helpers for Services modal
-  const getAllSubtreeIds = (): string[] => {
-    if (!subtreeForSelectedRoot) return [];
-    const getAllIds = (nodes: any[]): string[] => {
-      let ids: string[] = [];
-      nodes.forEach((node) => {
-        ids.push(node.id);
-        if (node.children?.length > 0) ids = [...ids, ...getAllIds(node.children)];
-      });
-      return ids;
-    };
-    return getAllIds(subtreeForSelectedRoot.children || []);
-  };
-
-  const handleSelectAllServices = () => {
-    const allIds = getAllSubtreeIds();
-    const allSelected = allIds.every((id) => selectedCategoryIds.includes(id));
-    if (allSelected) {
-      setSelectedCategoryIds([]);
-    } else {
-      setSelectedCategoryIds(allIds);
-      // Auto-expand all selected categories
-      setExpandedCategoryIds((prev) => new Set([...prev, ...allIds]));
-    }
-  };
-
-  const isAllServicesSelected = (): boolean => {
-    const allIds = getAllSubtreeIds();
-    return allIds.length > 0 && allIds.every((id) => selectedCategoryIds.includes(id));
-  };
-
-  // Select All / Deselect All helpers for Events modal
-  const getAllEventIds = (): string[] => {
-    if (!categoryIndex?.eventParentId) {
-      return [];
-    }
-    return getDescendantIds(categoryIndex, categoryIndex.eventParentId);
-  };
-
-  const handleSelectAllEvents = () => {
-    const allIds = getAllEventIds();
-    const currentEventIds = selectedEventIds || [];
-    const allSelected = allIds.every((id) => currentEventIds.includes(id));
-    if (allSelected) {
-      setSelectedEventCategoryIds([]);
-    } else {
-      setSelectedEventCategoryIds(dedupeIds(allIds));
-      // Auto-expand all event categories
-      setExpandedEventIds((prev) => new Set([...prev, ...allIds]));
-    }
-  };
-
-  const isAllEventsSelected = (): boolean => {
-    const allIds = getAllEventIds();
-    const currentEventIds = selectedEventIds || [];
-    return allIds.length > 0 && allIds.every((id) => currentEventIds.includes(id));
-  };
-
-  const rootDropdownOptions = filteredRootCategories.map((c) => ({
-    label: c.icon ? `${c.icon} ${c.name}` : c.name,
-    value: c.id,
-  }));
+  // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
     <View style={[styles.container, styles.content]}>
+
+      {/* Loading / error banners */}
       {loading && (
-        <View style={styles.selectedContainer}>
+        <View style={styles.infoBanner}>
           <ActivityIndicator size="small" color="#007AFF" />
           <Text style={styles.helperText}>Loading categories...</Text>
         </View>
       )}
       {categoryLoadError && (
-        <View style={styles.selectedContainer}>
+        <View style={styles.infoBanner}>
           <Text style={styles.errorText}>{categoryLoadError}</Text>
-          <TouchableOpacity style={styles.modalButton} onPress={fetchCategories}>
-            <Text style={styles.modalButtonText}>Retry</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={fetchCategories}>
+            <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
         </View>
       )}
+
+      {/* Business Type */}
       <View style={styles.field}>
         <Text style={styles.label}>Business Type *</Text>
         <View style={styles.businessTypeGroup}>
-          <TouchableOpacity
-            style={styles.businessTypeButton}
-            activeOpacity={0.7}
-            onPress={() => onUpdate({ businessType: 'services' })}
-          >
-            <View
-              style={[
-                styles.businessTypeRadioOuter,
-                data.businessType === 'services' && styles.businessTypeRadioOuterSelected,
-              ]}
+          {(['services', 'rental'] as const).map((type) => (
+            <TouchableOpacity
+              key={type}
+              style={styles.businessTypeButton}
+              activeOpacity={0.7}
+              onPress={() => onUpdate({ businessType: type })}
             >
-              {data.businessType === 'services' && (
-                <View style={styles.businessTypeRadioInner} />
-              )}
-            </View>
-            <Text style={styles.businessTypeRadioText}>Service based</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.businessTypeButton}
-            activeOpacity={0.7}
-            onPress={() => onUpdate({ businessType: 'rental' })}
-          >
-            <View
-              style={[
-                styles.businessTypeRadioOuter,
-                data.businessType === 'rental' && styles.businessTypeRadioOuterSelected,
-              ]}
-            >
-              {data.businessType === 'rental' && (
-                <View style={styles.businessTypeRadioInner} />
-              )}
-            </View>
-            <Text style={styles.businessTypeRadioText}>Rental based</Text>
-          </TouchableOpacity>
+              <View
+                style={[
+                  styles.radioOuter,
+                  data.businessType === type && styles.radioOuterSelected,
+                ]}
+              >
+                {data.businessType === type && <View style={styles.radioInner} />}
+              </View>
+              <Text style={styles.radioText}>
+                {type === 'services' ? 'Service based' : 'Rental based'}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
       </View>
 
+      {/* ── Service Categories ─────────────────────────────────────────────── */}
       <View style={styles.field}>
-        <Text style={styles.label}>Primary Category *</Text>
-        <TextInput
-          style={styles.modalSearchInput}
-          placeholder="Search primary category"
-          placeholderTextColor="#999"
-          value={primarySearchQuery}
-          onChangeText={setPrimarySearchQuery}
-        />
-        <Dropdown
-          options={rootDropdownOptions}
-          value={selectedRootCategoryId || ''}
-          placeholder={loading ? 'Loading categories...' : 'Select primary category'}
-          onChange={(value: string) => handleRootSelection(value)}
-          open={isRootDropdownOpen}
-          onOpenChange={setIsRootDropdownOpen}
-          error={validationErrors.selectedRootCategoryId || validationErrors.selectedCategoryIds}
-        />
-      </View>
+        <Text style={[styles.label, validationErrors.selectedCategoryIds && styles.labelError]}>
+          Specializations *
+        </Text>
 
-      <View style={styles.field}>
-        <Text style={styles.label}>Specializations *</Text>
-        <TouchableOpacity
-          style={[
-            styles.dropdownTrigger,
-            !selectedRootCategoryId && styles.dropdownTriggerDisabled,
-            validationErrors.selectedCategoryIds && styles.dropdownTriggerError,
-          ]}
-          onPress={() => selectedRootCategoryId && setIsCategoryModalOpen(true)}
-          activeOpacity={0.7}
-          disabled={!selectedRootCategoryId}
-        >
-          <Text
-            style={[
-              styles.dropdownText,
-              !selectedRootCategoryId && styles.placeholder,
-              selectedCategoriesWithPaths.length === 0 && selectedRootCategoryId && styles.placeholder,
-            ]}
+        {/* Search box */}
+        <View style={styles.searchBox}>
+          <Search size={18} color="#999" style={styles.searchIcon} />
+          <TextInput
+            ref={serviceSearchRef}
+            style={styles.searchInput}
+            placeholder="Search categories..."
+            placeholderTextColor="#999"
+            value={serviceSearchQuery}
+            onChangeText={setServiceSearchQuery}
+            onFocus={onFocus}
+            returnKeyType="search"
+          />
+          {serviceSearchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setServiceSearchQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <X size={16} color="#999" />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Results list */}
+        {!loading && (
+          <ScrollView
+            style={styles.resultsList}
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator
           >
-            {!selectedRootCategoryId
-              ? 'Select a category first'
-              : loading
-                ? 'Loading services...'
-                : selectedCategoriesWithPaths.length === 0
-                  ? 'Select Specializations'
-                  : selectedCategoriesWithPaths.length === 1
-                    ? selectedCategoriesWithPaths[0].path
-                    : `${selectedCategoriesWithPaths.length} specializations selected`}
-          </Text>
-          <ChevronDown size={20} color={selectedRootCategoryId ? '#666' : '#ccc'} />
-        </TouchableOpacity>
+            {filteredServiceItems.length === 0 ? (
+              <Text style={styles.emptyText}>
+                {flatServiceItems.length === 0
+                  ? 'No categories available'
+                  : `No results for "${debouncedServiceSearch}"`}
+              </Text>
+            ) : (
+              filteredServiceItems.map((item) => {
+                const isSelected = selectedSpecializationIds.includes(item.id);
+                return (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[styles.resultRow, isSelected && styles.resultRowSelected]}
+                    onPress={() => toggleSpecialization(item.id)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.resultRowContent}>
+                      {item.icon ? (
+                        <Text style={styles.resultIcon}>{item.icon}</Text>
+                      ) : null}
+                      <Text
+                        style={[styles.resultPath, isSelected && styles.resultPathSelected]}
+                        numberOfLines={2}
+                      >
+                        {item.path}
+                      </Text>
+                    </View>
+                    <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
+                      {isSelected && <Check size={12} color="#fff" strokeWidth={3} />}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
+            )}
+          </ScrollView>
+        )}
 
         {validationErrors.selectedCategoryIds && (
           <Text style={styles.errorText}>{validationErrors.selectedCategoryIds}</Text>
         )}
 
-        {/* Selected Services Offered*/}
-        {selectedCategoriesWithPaths.length > 0 && (
-          <View style={styles.selectedContainer}>
-            <View style={styles.selectedHeader}>
-              <Text style={styles.selectedLabel}>
-                Selected ({selectedCategoriesWithPaths.length}):
-              </Text>
-              {selectedCategoriesWithPaths.length > 3 && (
-                <TouchableOpacity onPress={() => setIsCategoriesExpanded(!isCategoriesExpanded)}>
-                  <ChevronDown
-                    size={20}
-                    color="#666"
-                    style={{ transform: [{ rotate: isCategoriesExpanded ? '180deg' : '0deg' }] }}
-                  />
-                </TouchableOpacity>
-              )}
+        {/* Selected chips */}
+        {selectedSpecializationItems.length > 0 && (
+          <View style={styles.chipsContainer}>
+            <Text style={styles.chipsLabel}>
+              Selected ({selectedSpecializationItems.length}):
+            </Text>
+            <View style={styles.chips}>
+              {selectedSpecializationItems.map((item) => (
+                <View key={item.id} style={styles.chip}>
+                  <Text style={styles.chipText} numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => toggleSpecialization(item.id)}
+                    style={styles.chipRemove}
+                    hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                  >
+                    <X size={12} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              ))}
             </View>
-            {(isCategoriesExpanded ? selectedCategoriesWithPaths : selectedCategoriesWithPaths.slice(0, 3)).map((item: { id: string; path: string }) => (
-              <View key={item.id} style={styles.selectedChip}>
-                <Text style={styles.selectedChipText}>{item.path}</Text>
-                <TouchableOpacity
-                  onPress={() => toggleCategorySelection(item.id)}
-                  style={styles.removeButton}
-                >
-                  <X size={16} color="#fff" />
-                </TouchableOpacity>
-              </View>
-            ))}
           </View>
         )}
-
-        {/* Sub-categories modal (tree for selected root only) */}
-        <Modal
-          visible={isCategoryModalOpen}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setIsCategoryModalOpen(false)}
-        >
-          <Pressable
-            style={styles.modalOverlay}
-            onPress={() => setIsCategoryModalOpen(false)}
-          >
-            <Pressable
-              style={styles.modalContent}
-              onPress={(e) => e.stopPropagation()}
-            >
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>
-                  {subtreeForSelectedRoot
-                    ? `Specializations under ${subtreeForSelectedRoot.name}`
-                    : 'Select Specializations'}
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setIsCategoryModalOpen(false)}
-                  style={styles.closeButton}
-                >
-                  <X size={24} color="#666" />
-                </TouchableOpacity>
-              </View>
-
-              <TextInput
-                style={styles.modalSearchInput}
-                placeholder="Search specializations"
-                placeholderTextColor="#999"
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-              />
-
-              {/* Select All strip */}
-              <TouchableOpacity
-                style={styles.selectAllRow}
-                onPress={handleSelectAllServices}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.selectAllCheck, isAllServicesSelected() && styles.selectAllCheckActive]}>
-                  {isAllServicesSelected() && <Check size={12} color="#fff" strokeWidth={3} />}
-                </View>
-                <Text style={[styles.selectAllText, isAllServicesSelected() && styles.selectAllTextActive]}>
-                  {isAllServicesSelected() ? 'Deselect All' : 'Select All'}
-                </Text>
-              </TouchableOpacity>
-
-              <ScrollView
-                style={styles.modalCategoryTree}
-                nestedScrollEnabled
-                showsVerticalScrollIndicator
-              >
-                {filteredSubtree.length === 0 ? (
-                  <Text style={styles.emptyText}>
-                    {subtreeForSelectedRoot?.children?.length === 0
-                      ? 'No Specializations'
-                      : `No categories found for "${debouncedSpecializationSearchQuery}"`}
-                  </Text>
-                ) : (
-                  renderSubCategoryTree(filteredSubtree)
-                )}
-              </ScrollView>
-
-              <View style={styles.modalFooter}>
-                <TouchableOpacity
-                  style={styles.modalButton}
-                  onPress={handleCategoryDone}
-                >
-                  <Text style={styles.modalButtonText}>Done</Text>
-                </TouchableOpacity>
-              </View>
-            </Pressable>
-          </Pressable>
-        </Modal>
       </View>
 
+      {/* ── Event Categories ───────────────────────────────────────────────── */}
       <View style={styles.field}>
         <Text style={styles.label}>Event Categories</Text>
 
-        {/* Event Dropdown Trigger */}
-        <TouchableOpacity
-          style={[styles.dropdownTrigger, !categoryIndex?.eventParentId && styles.dropdownTriggerDisabled]}
-          onPress={() => categoryIndex?.eventParentId && setIsEventModalOpen(true)}
-          activeOpacity={0.7}
-          disabled={!categoryIndex?.eventParentId}
-        >
-          <Text style={[styles.dropdownText, selectedEventNames.length === 0 && styles.placeholder]}>
-            {categoryIndex?.eventParentId ? getEventDropdownDisplayText() : 'Event Planners categories unavailable'}
-          </Text>
-          <ChevronDown size={20} color="#666" />
-        </TouchableOpacity>
-        {validationErrors.selectedEventIds && (
-          <Text style={styles.errorText}>{validationErrors.selectedEventIds}</Text>
-        )}
-
-        {/* Selected Events Display */}
-        {selectedEventsWithPaths.length > 0 && (
-          <View style={styles.selectedContainer}>
-            <View style={styles.selectedHeader}>
-              <Text style={[styles.selectedLabel, { marginBottom: 0 }]}>
-                Selected Event Categories ({selectedEventsWithPaths.length}):
-              </Text>
-              {selectedEventsWithPaths.length > 3 && (
-                <TouchableOpacity onPress={() => setIsEventsExpanded(!isEventsExpanded)}>
-                  <ChevronDown
-                    size={20}
-                    color="#666"
-                    style={{ transform: [{ rotate: isEventsExpanded ? '180deg' : '0deg' }] }}
-                  />
-                </TouchableOpacity>
-              )}
-            </View>
-            {(isEventsExpanded ? selectedEventsWithPaths : selectedEventsWithPaths.slice(0, 3)).map((item: { id: string, path: string }) => {
-              const eventCategory = eventCategories.find((cat) => cat.id === item.id);
+        {!loading && eventRootCategories.length === 0 ? (
+          <Text style={styles.helperText}>No event categories available</Text>
+        ) : (
+          <View style={styles.eventList}>
+            {eventRootCategories.map((cat) => {
+              const isSelected = selectedEventIds.includes(cat.id);
               return (
-                <View key={item.id} style={styles.selectedChip}>
-                  <Text style={styles.selectedChipText}>
-                    {eventCategory?.icon ? `${eventCategory.icon} ` : ''}
-                    {item.path}
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => toggleEventType(item.id)}
-                    style={styles.removeButton}
+                <TouchableOpacity
+                  key={cat.id}
+                  style={[styles.eventRow, isSelected && styles.eventRowSelected]}
+                  onPress={() => toggleEventRoot(cat.id)}
+                  activeOpacity={0.7}
+                >
+                  {cat.icon ? (
+                    <Text style={styles.eventIcon}>{cat.icon}</Text>
+                  ) : null}
+                  <Text
+                    style={[styles.eventName, isSelected && styles.eventNameSelected]}
+                    numberOfLines={1}
                   >
-                    <X size={16} color="#fff" />
-                  </TouchableOpacity>
-                </View>
+                    {cat.name}
+                  </Text>
+                  <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
+                    {isSelected && <Check size={12} color="#fff" strokeWidth={3} />}
+                  </View>
+                </TouchableOpacity>
               );
             })}
           </View>
         )}
 
-        {/* Event Selection Modal */}
-        <Modal
-          visible={isEventModalOpen}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setIsEventModalOpen(false)}
-        >
-          <Pressable
-            style={styles.modalOverlay}
-            onPress={() => setIsEventModalOpen(false)}
-          >
-            <Pressable
-              style={styles.modalContent}
-              onPress={(e) => e.stopPropagation()}
-            >
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Select Event Categories</Text>
-                <TouchableOpacity
-                  onPress={() => setIsEventModalOpen(false)}
-                  style={styles.closeButton}
-                >
-                  <X size={24} color="#666" />
-                </TouchableOpacity>
-              </View>
-
-              {/* Search Input */}
-              <TextInput
-                style={styles.modalSearchInput}
-                placeholder="Search event categories"
-                placeholderTextColor="#999"
-                value={eventSearchQuery}
-                onFocus={onFocus}
-                onChangeText={setEventSearchQuery}
-              />
-
-              {/* Select All strip */}
-              <TouchableOpacity
-                style={styles.selectAllRow}
-                onPress={handleSelectAllEvents}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.selectAllCheck, isAllEventsSelected() && styles.selectAllCheckActive]}>
-                  {isAllEventsSelected() && <Check size={12} color="#fff" strokeWidth={3} />}
+        {selectedEventItems.length > 0 && (
+          <View style={styles.chipsContainer}>
+            <Text style={styles.chipsLabel}>
+              Selected ({selectedEventItems.length}):
+            </Text>
+            <View style={styles.chips}>
+              {selectedEventItems.map((cat) => (
+                <View key={cat.id} style={styles.chip}>
+                  <Text style={styles.chipText} numberOfLines={1}>
+                    {cat.icon ? `${cat.icon} ` : ''}{cat.name}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => toggleEventRoot(cat.id)}
+                    style={styles.chipRemove}
+                    hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                  >
+                    <X size={12} color="#fff" />
+                  </TouchableOpacity>
                 </View>
-                <Text style={[styles.selectAllText, isAllEventsSelected() && styles.selectAllTextActive]}>
-                  {isAllEventsSelected() ? 'Deselect All' : 'Select All'}
-                </Text>
-              </TouchableOpacity>
-
-              {/* Event Category Tree */}
-              <ScrollView
-                style={styles.modalCategoryTree}
-                nestedScrollEnabled={true}
-                showsVerticalScrollIndicator={true}
-              >
-                {filteredEventTree.length === 0 ? (
-                  <Text style={styles.emptyText}>No categories found for "{debouncedEventSearchQuery}"</Text>
-                ) : (
-                  renderEventCategoryTree(filteredEventTree)
-                )}
-              </ScrollView>
-
-              <View style={styles.modalFooter}>
-                <TouchableOpacity
-                  style={styles.modalButton}
-                  onPress={handleEventDone}
-                >
-                  <Text style={styles.modalButtonText}>Done</Text>
-                </TouchableOpacity>
-              </View>
-            </Pressable>
-          </Pressable>
-        </Modal>
+              ))}
+            </View>
+          </View>
+        )}
       </View>
 
+      {/* ── Operating Locations ────────────────────────────────────────────── */}
       <View style={styles.field}>
         <Text style={styles.label}>Operating Locations *</Text>
         <TouchableOpacity
           style={[
             styles.dropdownTrigger,
-            validationErrors.operatingLocations && styles.dropdownTriggerError
+            validationErrors.operatingLocations && styles.dropdownTriggerError,
           ]}
           onPress={() => setIsCityModalOpen(true)}
           activeOpacity={0.7}
         >
-          <Text style={[
-            styles.dropdownText,
-            (!data.operatingLocations || data.operatingLocations.length === 0) && styles.placeholder
-          ]}>
+          <Text
+            style={[
+              styles.dropdownText,
+              (!data.operatingLocations || data.operatingLocations.length === 0) && styles.placeholder,
+            ]}
+          >
             {data.operatingLocations && data.operatingLocations.length > 0
               ? `${data.operatingLocations.length} locations selected`
               : 'Select operating locations'}
@@ -1476,10 +626,12 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         )}
 
         {data.operatingLocations && data.operatingLocations.length > 0 && (
-          <View style={styles.selectedLocationsContainer}>
+          <View style={styles.locationChips}>
             {data.operatingLocations.map((city: string) => (
               <View key={city} style={styles.locationChip}>
-                <Text style={styles.locationChipText}>{city === '*' ? 'Pan India' : city}</Text>
+                <Text style={styles.locationChipText}>
+                  {city === '*' ? 'Pan India' : city}
+                </Text>
                 <TouchableOpacity
                   onPress={() => toggleCitySelection(city === '*' ? 'Pan India' : city)}
                   style={styles.locationRemoveButton}
@@ -1492,6 +644,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         )}
       </View>
 
+      {/* City selection modal */}
       <Modal
         visible={isCityModalOpen}
         transparent
@@ -1526,27 +679,19 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               />
             </View>
 
-            <ScrollView
-              style={styles.optionsList}
-              keyboardShouldPersistTaps="handled"
-            >
+            <ScrollView style={styles.optionsList} keyboardShouldPersistTaps="handled">
               {filteredCities.map((city) => {
-                const isSelected = city === 'Pan India'
-                  ? data.operatingLocations?.includes('*')
-                  : data.operatingLocations?.includes(city);
+                const isSelected =
+                  city === 'Pan India'
+                    ? data.operatingLocations?.includes('*')
+                    : data.operatingLocations?.includes(city);
                 return (
                   <TouchableOpacity
                     key={city}
-                    style={[
-                      styles.option,
-                      isSelected && styles.optionSelected
-                    ]}
+                    style={[styles.option, isSelected && styles.optionSelected]}
                     onPress={() => toggleCitySelection(city)}
                   >
-                    <Text style={[
-                      styles.optionText,
-                      isSelected && styles.optionTextSelected
-                    ]}>
+                    <Text style={[styles.optionText, isSelected && styles.optionTextSelected]}>
                       {city}
                     </Text>
                     {isSelected && (
@@ -1559,12 +704,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               })}
             </ScrollView>
 
-            <View
-              style={[
-                styles.cityModalFooter,
-                { paddingBottom: Math.max(insets.bottom, 20) }
-              ]}
-            >
+            <View style={[styles.cityModalFooter, { paddingBottom: Math.max(insets.bottom, 20) }]}>
               <TouchableOpacity
                 style={styles.doneButton}
                 onPress={() => setIsCityModalOpen(false)}
@@ -1576,6 +716,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
         </View>
       </Modal>
 
+      {/* ── Business Cover Image ───────────────────────────────────────────── */}
       <View style={styles.field}>
         <Text style={styles.label}>Business Cover Image</Text>
         <Text style={styles.uploadHintTop}>
@@ -1592,7 +733,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
               </View>
               <TouchableOpacity
                 style={styles.portfolioRemoveButton}
-                onPress={handleRemoveCoverPhoto}
+                onPress={() => setCoverPhotoUri(undefined)}
               >
                 <X size={16} color="#fff" />
               </TouchableOpacity>
@@ -1600,10 +741,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           </View>
         ) : (
           <TouchableOpacity
-            style={[
-              styles.uploadButton,
-              uploading && styles.uploadButtonDisabled,
-            ]}
+            style={[styles.uploadButton, uploading && styles.uploadButtonDisabled]}
             onPress={handlePickCoverPhoto}
             disabled={uploading}
           >
@@ -1621,8 +759,6 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
           </TouchableOpacity>
         )}
       </View>
-
-
     </View>
   );
 });
@@ -1640,15 +776,6 @@ const styles = StyleSheet.create({
     paddingTop: 0,
     paddingBottom: 24,
   },
-  centerContent: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: '#666',
-  },
   field: {
     marginBottom: 20,
   },
@@ -1658,36 +785,226 @@ const styles = StyleSheet.create({
     color: '#1a1a1a',
     marginBottom: 8,
   },
-  input: {
-    backgroundColor: '#f8f8f8',
+  labelError: {
+    color: '#FF3B30',
+  },
+  errorText: {
+    fontSize: 12,
+    color: '#FF3B30',
+    marginTop: 4,
+  },
+  helperText: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 4,
+  },
+  infoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#f0f7ff',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#cce3ff',
+  },
+  retryButton: {
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    marginLeft: 'auto',
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  businessTypeGroup: {
+    flexDirection: 'row',
+    gap: 24,
+    marginTop: 4,
+  },
+  businessTypeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  radioOuter: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioOuterSelected: {
+    borderColor: '#6aa3ce',
+  },
+  radioInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#6aa3ce',
+  },
+  radioText: {
+    fontSize: 15,
+    color: '#1a1a1a',
+    fontWeight: '500',
+  },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f7f9',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e1e5ea',
+    paddingHorizontal: 14,
+    paddingVertical: 2,
+    marginBottom: 8,
+    gap: 8,
+  },
+  searchIcon: {
+    flexShrink: 0,
+  },
+  searchInput: {
+    flex: 1,
+    height: 44,
+    fontSize: 15,
+    color: '#1a1a1a',
+  },
+  resultsList: {
+    maxHeight: 260,
     borderWidth: 1,
     borderColor: '#e0e0e0',
     borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: '#1a1a1a',
+    backgroundColor: '#fff',
   },
-  textArea: {
-    minHeight: 100,
-    paddingTop: 14,
-  },
-  eventOption: {
+  resultRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 14,
     paddingVertical: 12,
-    paddingHorizontal: 20,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+    minHeight: 48,
   },
-  eventOptionText: {
-    fontSize: 16,
-    color: '#1a1a1a',
+  resultRowSelected: {
+    backgroundColor: '#f0f7ff',
+  },
+  resultRowContent: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginRight: 10,
   },
-  eventOptionTextSelected: {
-    fontWeight: '600',
+  resultIcon: {
+    fontSize: 16,
+  },
+  resultPath: {
+    flex: 1,
+    fontSize: 14,
+    color: '#333',
+    lineHeight: 20,
+  },
+  resultPathSelected: {
     color: '#007AFF',
+    fontWeight: '600',
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#d0d0d0',
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  checkboxSelected: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  emptyText: {
+    padding: 20,
+    textAlign: 'center',
+    color: '#999',
+    fontSize: 14,
+  },
+  chipsContainer: {
+    marginTop: 10,
+  },
+  chipsLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#555',
+    marginBottom: 6,
+  },
+  chips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#007AFF',
+    borderRadius: 20,
+    paddingLeft: 12,
+    paddingRight: 6,
+    paddingVertical: 6,
+    gap: 6,
+    maxWidth: '100%',
+  },
+  chipText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '500',
+    flexShrink: 1,
+  },
+  chipRemove: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  eventList: {
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    overflow: 'hidden',
+  },
+  eventRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    minHeight: 48,
+    gap: 10,
+  },
+  eventRowSelected: {
+    backgroundColor: '#f0f7ff',
+  },
+  eventIcon: {
+    fontSize: 18,
+  },
+  eventName: {
+    flex: 1,
+    fontSize: 15,
+    color: '#333',
+  },
+  eventNameSelected: {
+    color: '#007AFF',
+    fontWeight: '600',
   },
   dropdownTrigger: {
     flexDirection: 'row',
@@ -1711,98 +1028,44 @@ const styles = StyleSheet.create({
   dropdownTriggerError: {
     borderColor: '#FF3B30',
   },
-  dropdownTriggerDisabled: {
-    backgroundColor: '#f0f0f0',
-    borderColor: '#e8e8e8',
-    opacity: 0.9,
-  },
-  labelError: {
-    color: '#FF3B30',
-  },
-  inputError: {
-    borderColor: '#FF3B30',
-  },
-  errorText: {
-    fontSize: 12,
-    color: '#FF3B30',
-    marginTop: 4,
-  },
-  helperText: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
-  },
-  selectedHeader: {
+  locationChips: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  selectedContainer: {
+    flexWrap: 'wrap',
     marginTop: 12,
-    marginBottom: 16,
-    padding: 12,
-    backgroundColor: '#f0f7ff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#007AFF',
+    gap: 8,
   },
-  uploadButtonError: {
-    borderColor: '#FF3B30',
-    borderStyle: 'solid',
-  },
-  selectedLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 8,
-  },
-  selectedChip: {
+  locationChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#fff',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    backgroundColor: '#007AFF',
     borderRadius: 8,
-    marginBottom: 6,
-    borderWidth: 1,
-    borderColor: '#007AFF',
-    minHeight: 36,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
-  selectedChipText: {
+  locationChipText: {
+    color: '#fff',
     fontSize: 14,
-    color: '#1a1a1a',
-    flex: 1,
-    marginRight: 8,
+    marginRight: 6,
   },
-  removeButton: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#ff3b30',
-    justifyContent: 'center',
-    alignItems: 'center',
-    flexShrink: 0,
+  locationRemoveButton: {
+    padding: 2,
   },
-  modalOverlay: {
+  bottomSheetOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: 'flex-end',
   },
-  modalContent: {
+  bottomSheetContent: {
     backgroundColor: '#fff',
-    borderRadius: 20,
-    width: '92%',
-    maxWidth: 500,
-    maxHeight: '80%',
-    padding: 0,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    width: '100%',
+    overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 24,
-    elevation: 12,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 20,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1827,249 +1090,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  modalSearchInput: {
-    backgroundColor: '#f8f8f8',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
+  citySearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f7f9',
+    marginHorizontal: 20,
+    marginVertical: 12,
     borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: '#1a1a1a',
-    margin: 20,
-    marginBottom: 12,
-  },
-  modalCategoryTree: {
-    maxHeight: 400,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-  },
-  modalFooter: {
-    padding: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  modalButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  modalButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  selectAllRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-    backgroundColor: '#fafafa',
-  },
-  selectAllCheck: {
-    width: 20,
-    height: 20,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#ccc',
-    backgroundColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  selectAllCheckActive: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
-  },
-  selectAllText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#666',
-  },
-  selectAllTextActive: {
-    color: '#007AFF',
-  },
-  categoryTreeContainer: {
-    backgroundColor: '#f8f8f8',
-    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
-    maxHeight: 400,
-    paddingVertical: 8,
+    borderColor: '#e1e5ea',
   },
-  categoryItem: {
-    marginBottom: 0,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  categoryRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingVertical: 12,
-    paddingRight: 12,
-    minHeight: 44,
-  },
-  expandButton: {
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 6,
-    marginTop: 0,
-  },
-  radioButton: {
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  radioButtonSelected: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: '#007AFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  radioButtonInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#007AFF',
-  },
-  radioButtonOuter: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: '#ccc',
-    backgroundColor: '#fff',
-  },
-  checkbox: {
-    width: 22,
-    height: 22,
-    marginRight: 10,
-    marginTop: 0,
-    flexShrink: 0,
-  },
-  checkboxSelected: {
-    width: 22,
-    height: 22,
-    backgroundColor: '#007AFF',
-    borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  checkboxUnselected: {
-    width: 22,
-    height: 22,
-    borderWidth: 2,
-    borderColor: '#d0d0d0',
-    borderRadius: 6,
-    backgroundColor: '#fff',
-  },
-  categoryIcon: {
-    fontSize: 18,
-    marginRight: 8,
-  },
-  categoryName: {
-    fontSize: 15,
-    color: '#333',
-    flex: 1,
-    flexWrap: 'wrap',
-    lineHeight: 22,
-  },
-  categoryNameSelected: {
-    fontWeight: '600',
-    color: '#007AFF',
-  },
-  childrenContainer: {
-    marginLeft: 12,
-    borderLeftWidth: 1,
-    borderLeftColor: '#e8e8e8',
-  },
-  emptyText: {
-    padding: 20,
-    textAlign: 'center',
-    color: '#999',
-    fontSize: 14,
-  },
-  businessTypeGroup: {
-    flexDirection: 'row',
-    gap: 24,
-    marginTop: 4,
-  },
-  businessTypeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  businessTypeRadioOuter: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    borderColor: '#e0e0e0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  businessTypeRadioOuterSelected: {
-    borderColor: '#6aa3ce',
-  },
-  businessTypeRadioInner: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#6aa3ce',
-  },
-  businessTypeRadioText: {
-    fontSize: 15,
-    color: '#1a1a1a',
-    fontWeight: '500',
-  },
-  selectedLocationsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 12,
-    gap: 8,
-  },
-  locationChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  locationChipText: {
-    color: '#fff',
-    fontSize: 14,
-    marginRight: 6,
-  },
-  locationRemoveButton: {
-    padding: 2,
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    margin: 20,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-  },
-  searchIcon: {
-    marginRight: 8,
-  },
-  modalSearchInputInside: {
+  citySearchInput: {
     flex: 1,
     height: 48,
     fontSize: 16,
     color: '#1a1a1a',
+    marginLeft: 10,
   },
   optionsList: {
     flex: 1,
@@ -2098,41 +1135,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 2,
   },
-  bottomSheetOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  bottomSheetContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    width: '100%',
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 20,
-  },
-  citySearchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f5f7f9',
-    marginHorizontal: 20,
-    marginVertical: 12,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: '#e1e5ea',
-  },
-  citySearchInput: {
-    flex: 1,
-    height: 48,
-    fontSize: 16,
-    color: '#1a1a1a',
-    marginLeft: 10,
-  },
   cityModalFooter: {
     padding: 20,
     borderTopWidth: 1,
@@ -2150,11 +1152,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '600',
-  },
-  imageCount: {
-    fontSize: 12,
-    color: '#666',
-    marginLeft: 8,
   },
   uploadHintTop: {
     fontSize: 12,

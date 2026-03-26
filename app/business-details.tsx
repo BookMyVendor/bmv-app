@@ -17,7 +17,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import PagerView from 'react-native-pager-view';
+import { ImagePreviewPager } from '../components/media/ImagePreviewPager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -3808,8 +3808,8 @@ export default function BusinessDetailsScreen() {
               <X size={32} color="#fff" />
             </TouchableOpacity>
 
-            <PagerView 
-              style={styles.previewPager} 
+            <ImagePreviewPager
+              style={styles.previewPager}
               initialPage={previewInitialIndex}
               pageMargin={10}
               onPageSelected={(e) => setCurrentPreviewIndex(e.nativeEvent.position)}
@@ -3839,7 +3839,7 @@ export default function BusinessDetailsScreen() {
                   </View>
                 );
               })}
-            </PagerView>
+            </ImagePreviewPager>
             
             <View style={styles.previewFooter}>
               <Text style={styles.previewCounterText}>

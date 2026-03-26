@@ -1,9 +1,8 @@
 import { Tabs } from 'expo-router';
-import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LayoutDashboard, MessageSquare, Star, User } from 'lucide-react-native';
 import { Colors } from '../../constants/theme';
-import analytics from '@react-native-firebase/analytics';
+import { logTabEvent } from '../../lib/analyticsClient';
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
@@ -42,7 +41,7 @@ export default function TabLayout() {
         }}
         listeners={{
           tabPress: () => {
-            analytics().logEvent('tab_dashboard_tapped');
+            logTabEvent('tab_dashboard_tapped');
           },
         }}
       />
@@ -56,7 +55,7 @@ export default function TabLayout() {
         }}
         listeners={{
           tabPress: () => {
-            analytics().logEvent('tab_leads_tapped');
+            logTabEvent('tab_leads_tapped');
           },
         }}
       />
@@ -68,7 +67,7 @@ export default function TabLayout() {
         }}
         listeners={{
           tabPress: () => {
-            analytics().logEvent('tab_reviews_tapped');
+            logTabEvent('tab_reviews_tapped');
           },
         }}
       />
@@ -80,7 +79,7 @@ export default function TabLayout() {
         }}
         listeners={{
           tabPress: () => {
-            analytics().logEvent('tab_profile_tapped');
+            logTabEvent('tab_profile_tapped');
           },
         }}
       />
