@@ -67,7 +67,7 @@ export async function validatePincode(pincode: string): Promise<PincodeValidatio
     const firstPO = postOffices[0]
 
     // Get unique city names (post office names)
-    const cityOptions = [...new Set(postOffices.map((po) => po.Name))]
+    const cityOptions = Array.from(new Set(postOffices.map((po) => po.Name)))
 
     const validationResult: PincodeValidationResult = {
       valid: true,

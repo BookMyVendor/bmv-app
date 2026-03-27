@@ -173,12 +173,12 @@ export default function BusinessRegistrationScreen() {
   const areMandatoryFieldsFilled = (): boolean => {
     const hasBusinessName = !!(businessData.businessName?.trim());
     const hasContactName = !!(businessData.contactPersonName?.trim());
-    const hasEmail = !!(businessData.email?.trim()) && validateEmail(businessData.email);
+    const isEmailValid = !businessData.email || !businessData.email.trim() || validateEmail(businessData.email);
     const hasPhone = !!(businessData.phoneNumber?.trim());
     const hasCategory = !!(businessData.selectedRootCategoryId || (businessData.selectedCategoryIds && businessData.selectedCategoryIds.length > 0));
     const hasOperatingLocations = !!(businessData.operatingLocations && businessData.operatingLocations.length > 0);
 
-    return hasBusinessName && hasContactName && hasEmail && hasPhone && hasCategory && hasOperatingLocations;
+    return hasBusinessName && hasContactName && isEmailValid && hasPhone && hasCategory && hasOperatingLocations;
   };
 
   const handleNextField = () => {
@@ -190,9 +190,7 @@ export default function BusinessRegistrationScreen() {
     if (!businessData.contactPersonName || !businessData.contactPersonName.trim()) {
       errors.contactPersonName = 'Contact person name is required';
     }
-    if (!businessData.email || !businessData.email.trim()) {
-      errors.email = 'Email is required';
-    } else if (!validateEmail(businessData.email)) {
+    if (businessData.email && businessData.email.trim() && !validateEmail(businessData.email)) {
       errors.email = 'Please enter a valid email address';
     }
     if (!businessData.phoneNumber || !businessData.phoneNumber.trim()) {
@@ -233,9 +231,7 @@ export default function BusinessRegistrationScreen() {
     if (!businessData.contactPersonName || !businessData.contactPersonName.trim()) {
       errors.contactPersonName = 'Contact person name is required';
     }
-    if (!businessData.email || !businessData.email.trim()) {
-      errors.email = 'Email is required';
-    } else if (!validateEmail(businessData.email)) {
+    if (businessData.email && businessData.email.trim() && !validateEmail(businessData.email)) {
       errors.email = 'Please enter a valid email address';
     }
     if (!businessData.phoneNumber || !businessData.phoneNumber.trim()) {

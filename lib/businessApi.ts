@@ -1198,11 +1198,11 @@ export const getBusinessVerificationDocuments = async (
     }
 
     // Get unique document_type_ids
-    const documentTypeIds = [...new Set(
+    const documentTypeIds = Array.from(new Set(
       documents
         .map((doc: any) => doc.document_type_id)
         .filter((id: string | null) => id !== null)
-    )];
+    ));
 
     // Fetch document_types from core schema
     let documentTypesMap = new Map<string, { type_code: string; display_name: string }>();
