@@ -412,13 +412,16 @@ export default function BusinessProfileScreen() {
                 <TouchableOpacity onPress={() => router.back()} style={styles.topBarBtn}>
                     <ArrowLeft size={22} color="#007AFF" strokeWidth={2.2} />
                 </TouchableOpacity>
-                <TouchableOpacity
-                    style={styles.topBarEditBtn}
-                    onPress={() => (router as any).push(`/business-details?id=${id}`)}
-                    activeOpacity={0.7}
-                >
-                    <Edit2 size={18} color="#007AFF" strokeWidth={2} />
-                </TouchableOpacity>
+                <View style={styles.topBarActionContainer}>
+                    <TouchableOpacity
+                        style={styles.topBarEditBtn}
+                        onPress={() => (router as any).push(`/business-details?id=${id}`)}
+                        activeOpacity={0.7}
+                    >
+                        <Edit2 size={18} color="#007AFF" strokeWidth={2.2} />
+                    </TouchableOpacity>
+                    <Text style={styles.topBarEditLabel}>Edit Profile</Text>
+                </View>
             </View>
 
             {isOffline && (
@@ -688,6 +691,18 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.06,
         shadowRadius: 4,
         elevation: 2,
+    },
+    topBarActionContainer: {
+        alignItems: 'center',
+        paddingTop: 4,
+    },
+    topBarEditLabel: {
+        fontSize: 10,
+        fontWeight: '700',
+        color: '#007AFF',
+        marginTop: 4,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
     },
 
     // Business header

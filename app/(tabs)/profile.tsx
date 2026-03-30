@@ -37,8 +37,8 @@ const profileSchema = Yup.object().shape({
   firstName: Yup.string().required('First name is required'),
   lastName: Yup.string().required('Last name is required'),
   email: Yup.string()
-    .required('Email is required')
     .test('email-validation', 'Invalid email address', function (value) {
+      if (!value || value.trim() === '') return true;
       return validateEmail(value);
     }),
 });
@@ -63,6 +63,12 @@ export default function ProfileScreen() {
 
   const formattedPhone = () => {
     return stripCountryCode(profile?.phone) || '';
+  };
+
+  const getInitials = (firstName: string, lastName: string) => {
+    const f = firstName.trim() ? firstName.trim()[0] : '';
+    const l = lastName.trim() ? lastName.trim()[0] : '';
+    return (f + l).toUpperCase();
   };
 
   const handleRequestDeletionOtp = async () => {
@@ -433,6 +439,12 @@ export default function ProfileScreen() {
                 >
                   {photoUri ? (
                     <Image source={{ uri: photoUri }} style={styles.photo} />
+                  ) : values.firstName || values.lastName ? (
+                    <View style={[styles.photo, styles.initialsContainer]}>
+                      <Text style={styles.initialsText}>
+                        {getInitials(values.firstName, values.lastName)}
+                      </Text>
+                    </View>
                   ) : (
                     <View style={styles.photoPlaceholder}>
                       <Camera size={32} color={Colors.text.tertiary} />
@@ -454,7 +466,7 @@ export default function ProfileScreen() {
                   </Text>
                   <TextInput
                     ref={null}
-                    style={styles.input}
+                    style={[styles.input, touched.firstName && errors.firstName && styles.inputError]}
                     placeholder="Enter first name"
                     value={values.firstName}
                     onChangeText={handleChange('firstName')}
@@ -473,7 +485,7 @@ export default function ProfileScreen() {
                   </Text>
                   <TextInput
                     ref={lastNameRef}
-                    style={styles.input}
+                    style={[styles.input, touched.lastName && errors.lastName && styles.inputError]}
                     placeholder="Enter last name"
                     value={values.lastName}
                     onChangeText={handleChange('lastName')}
@@ -497,11 +509,11 @@ export default function ProfileScreen() {
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>
-                    Email Address <Text style={styles.required}>*</Text>
+                    Email Address
                   </Text>
                   <TextInput
                     ref={emailRef}
-                    style={styles.input}
+                    style={[styles.input, touched.email && errors.email && styles.inputError]}
                     placeholder="Enter email address"
                     keyboardType="email-address"
                     autoCapitalize="none"
@@ -698,6 +710,16 @@ const styles = StyleSheet.create({
     height: 120,
     borderRadius: 60,
   },
+  initialsContainer: {
+    backgroundColor: Colors.primary.main,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  initialsText: {
+    color: Colors.neutral.white,
+    fontSize: 40,
+    fontWeight: '700',
+  },
   photoPlaceholder: {
     width: 120,
     height: 120,
@@ -739,12 +761,15 @@ const styles = StyleSheet.create({
   },
   input: {
     backgroundColor: Colors.neutral.white,
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: Colors.neutral.light,
     borderRadius: BorderRadius.md,
     padding: Spacing.lg,
     fontSize: 16,
     color: Colors.text.primary,
+  },
+  inputError: {
+    borderColor: Colors.error.main,
   },
   saveButton: {
     borderRadius: BorderRadius.md,

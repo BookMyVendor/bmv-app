@@ -31,7 +31,7 @@ export interface PortfolioImage {
   image_base64: string | null;
   display_order: number;
   created_at: string;
-  image_type?: string; // 'gallery', 'cover', or 'portfolio'
+  image_type?: string; // 'gallery', 'cover', 'portfolio', or 'video'
 }
 
 export interface CreateOfferData {
@@ -57,9 +57,11 @@ export interface UpdateOfferData {
   is_active?: boolean;
 }
 
-const MAX_IMAGES_PER_BUSINESS = 20;
+const MAX_IMAGES_PER_BUSINESS = 10;
+const MAX_VIDEOS_PER_BUSINESS = 5;
 const OFFER_BANNER_MAX_SIZE = 5 * 1024 * 1024;
 const GALLERY_IMAGE_MAX_SIZE = 10 * 1024 * 1024;
+const GALLERY_VIDEO_MAX_SIZE = 25 * 1024 * 1024;
 
 export const validateImageFormat = (uri: string): boolean => {
   const validFormats = ['.jpg', '.jpeg', '.png', '.webp'];
@@ -215,6 +217,39 @@ export const uploadBusinessImage = async (
   }
 };
 
+export const pickVideo = async (): Promise<{
+  uri: string | null;
+  size: number | null;
+  error: Error | null;
+}> => {
+  try {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      throw new Error('Photo Library access is required.');
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      quality: 0.8,
+    });
+
+    if (result.canceled) {
+      return { uri: null, size: null, error: null };
+    }
+
+    const asset = result.assets[0];
+    const fileSize = asset.fileSize || 0;
+
+    if (fileSize > GALLERY_VIDEO_MAX_SIZE) {
+      throw new Error(`Video file size exceeds 25MB limit (Current: ${(fileSize / (1024 * 1024)).toFixed(1)}MB)`);
+    }
+
+    return { uri: asset.uri, size: fileSize, error: null };
+  } catch (error) {
+    return { uri: null, size: null, error: error as Error };
+  }
+};
+
 export interface UploadResult {
   success: boolean;
   imageUrl?: string;
@@ -241,6 +276,10 @@ export const uploadMultipleBusinessImages = async (
         `Can only upload ${availableSlots} more images. Current: ${currentCount}/${MAX_IMAGES_PER_BUSINESS}`
       );
     }
+
+    const hasCover = existingImages?.some(img => img.image_type === 'cover');
+    let coverFound = hasCover;
+
     for (let i = 0; i < imageUris.length; i++) {
       onProgress?.(i + 1, imageUris.length);
       const { data, error } = await uploadBusinessImage(businessId, imageUris[i]);
