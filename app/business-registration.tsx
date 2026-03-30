@@ -506,7 +506,7 @@ export default function BusinessRegistrationScreen() {
           cover_photo_url: null,
           years_experience: 0,
           gst_number: null,
-          status: 'pending',
+          status: 'approved',
           availability: null,
           subscription_status: 'trial',
         })
