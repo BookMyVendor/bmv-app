@@ -13,10 +13,9 @@ import {
   Alert,
   Platform,
 } from 'react-native';
-import { Check, ChevronRight, ChevronDown, X, Search, Plus, Star } from 'lucide-react-native';
-import { Image as RNImage } from 'react-native';
-import { pickImage } from '../../lib/businessApi';
-import { supabaseCore } from '../../lib/supabase';
+import { Check, ChevronRight, ChevronDown, X } from 'lucide-react-native';
+import Dropdown from '../../components/Dropdown';
+import { getCategories } from '../../lib/api/categories';
 
 interface ServicesExperienceStepProps {
   data: any;
@@ -184,35 +183,15 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   const fetchCategories = async (businessType?: string) => {
     try {
       setLoading(true);
-
-      let businessQuery = supabaseCore
-        .from('categories')
-        .select('id, name, icon, parent_category_id, category_level, sort_order')
-        .eq('category_type', 'business')
-        .eq('visible', true);
-
-      if (businessType === 'rental') {
-        businessQuery = businessQuery.eq('business_model', 'rental');
-      } else {
-        businessQuery = businessQuery.neq('business_model', 'rental');
-      }
-
-      const { data: businessCats, error: businessError } = await businessQuery
-        .order('sort_order', { ascending: true });
-
+      const businessParams: any = { category_type: 'business', visible: true };
+      if (businessType === 'rental') businessParams.business_model = 'rental';
+      const { data: businessCats, error: businessError } = await getCategories(businessParams);
       if (businessError) {
         console.error('Error fetching business categories:', businessError);
       } else {
-        setAllBusinessCategories(businessCats || []);
+        setAllBusinessCategories((businessCats || []) as any[]);
       }
-
-      const { data: eventCats, error: eventError } = await supabaseCore
-        .from('categories')
-        .select('id, name, icon, parent_category_id, category_level, sort_order')
-        .eq('category_type', 'event')
-        .eq('visible', true)
-        .order('sort_order', { ascending: true });
-
+      const { data: eventCats, error: eventError } = await getCategories({ category_type: 'event', visible: true });
       if (eventError) {
         console.error('Error fetching event categories:', eventError);
       } else {

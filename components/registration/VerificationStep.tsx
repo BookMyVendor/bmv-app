@@ -12,7 +12,7 @@ import {
   InteractionManager,
 } from 'react-native';
 import { Upload, X, FileText, Image as ImageIcon } from 'lucide-react-native';
-import { supabaseCore } from '../../lib/supabase';
+import { getDocumentTypes } from '../../lib/api/documentTypes';
 import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '../../lib/documentUpload';
 
 interface VerificationStepProps {
@@ -86,23 +86,18 @@ const VerificationStep = forwardRef<VerificationStepRef, VerificationStepProps>(
   const loadDocumentTypes = async () => {
     try {
       setLoadingTypes(true);
-      const { data: types, error } = await supabaseCore
-        .from('document_types')
-        .select('id, type_code, display_name')
-        .in('type_code', requiredDocumentTypeCodes)
-        .eq('is_active', true);
+      const { data: types, error } = await getDocumentTypes(requiredDocumentTypeCodes);
 
       if (error) {
         console.error('Error loading document types:', error);
         return;
       }
 
-      if (types) {
+      if (types?.length) {
         setDocumentTypes(types);
-        // Update document groups with display names
         setDocumentGroups((prev) =>
           prev.map((group) => {
-            const type = types.find((t) => t.type_code === group.typeCode);
+            const type = types.find((t: any) => t.type_code === group.typeCode);
             return {
               ...group,
               typeName: type?.display_name || group.typeCode,

@@ -19,7 +19,10 @@ import { Camera } from 'lucide-react-native';
 import { Formik } from 'formik';
 import * as Yup from 'yup';
 import { useAuth } from '../contexts/AuthContext';
-import { supabaseCore, supabaseCms } from '../lib/supabase';
+import { getFileUrl } from '../lib/api/fileStorage';
+import { uploadProfilePhoto } from '../lib/api/media';
+import { updateVendorMe } from '../lib/api/vendors';
+import { getVendorBusinesses } from '../lib/api/vendorBusinesses';
 import { validateEmail } from '../lib/validation';
 import ScreenBackground from '../components/ScreenBackground';
 import { stripCountryCode } from '../lib/formatters';
@@ -46,30 +49,11 @@ export default function CompleteProfileScreen() {
   const lastNameRef = useRef<TextInput>(null);
   const emailRef = useRef<TextInput>(null);
 
-  // Fetch existing profile photo if it exists
   useEffect(() => {
     if (profile?.image_file_id && !photoUri) {
-      const fetchProfilePhoto = async () => {
-        try {
-          const { data, error } = await supabaseCms
-            .from('file_storage')
-            .select('file_path, storage_bucket')
-            .eq('id', profile.image_file_id)
-            .single();
-
-          if (data && !error) {
-            const { data: { publicUrl } } = supabaseCore.storage
-              .from(data.storage_bucket || 'vendor-media')
-              .getPublicUrl(data.file_path);
-
-            console.log('Fetched existing profile photo URL:', publicUrl);
-            setPhotoUri(publicUrl);
-          }
-        } catch (error) {
-          console.error('Error fetching existing profile photo:', error);
-        }
-      };
-      fetchProfilePhoto();
+      getFileUrl(profile.image_file_id).then(({ data }) => {
+        if (data?.url) setPhotoUri(data.url);
+      }).catch(() => {});
     }
   }, [profile?.image_file_id]);
   const resizeImage = async (uri: string): Promise<string> => {
@@ -198,179 +182,38 @@ export default function CompleteProfileScreen() {
     try {
       let fileDataId: string | undefined;
 
-      // Step 1: Upload image to storage bucket if it's a new image (local URI)
       if (photoUri && !photoUri.startsWith('http')) {
-        console.log('📤 Step 1: Processing image from URI:', photoUri);
-
-        let fileBytes: Uint8Array;
-        let fileExt: string;
-        let mimeType: string;
-
+        const formData = new FormData();
         if (Platform.OS === 'web') {
-          // On web, fetch and convert to blob
-          const response = await fetch(photoUri!);
-          if (!response.ok) {
-            console.error('❌ Failed to fetch image:', response.status, response.statusText);
-            throw new Error('Failed to load image');
-          }
-          console.log('✅ Image fetched successfully');
-
+          const response = await fetch(photoUri);
+          if (!response.ok) throw new Error('Failed to load image');
           const blob = await response.blob();
-          console.log('✅ Blob created, size:', blob.size);
-          fileBytes = new Uint8Array(await blob.arrayBuffer());
-          fileExt = photoUri!.split('.').pop() || 'jpg';
-          mimeType = blob.type || `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`;
+          const ext = blob.type?.includes('png') ? 'png' : 'jpg';
+          formData.append('image', new File([blob], `${user.id}-${Date.now()}.${ext}`, { type: blob.type || 'image/jpeg' }));
         } else {
-          // On mobile, use ImageManipulator to get base64, then convert to Uint8Array
-          const manipResult = await ImageManipulator.manipulateAsync(
-            photoUri!,
-            [],
-            {
-              compress: 0.8,
-              format: ImageManipulator.SaveFormat.JPEG,
-              base64: true,
-            }
-          );
-
-          if (!manipResult.base64) {
-            throw new Error('Failed to process image');
-          }
-
-          // Convert base64 to Uint8Array
-          const base64Data = manipResult.base64;
-          const byteCharacters = atob(base64Data);
-          const byteNumbers = new Array(byteCharacters.length);
-          for (let i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
-          }
-          fileBytes = new Uint8Array(byteNumbers);
-          fileExt = 'jpg';
-          mimeType = 'image/jpeg';
+          const ext = photoUri.split('.').pop() || 'jpg';
+          formData.append('image', { uri: photoUri, name: `${user.id}-${Date.now()}.${ext}`, type: `image/${ext === 'jpg' ? 'jpeg' : ext}` } as any);
         }
-
-        const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-        const filePath = `profile-photos/${fileName}`;
-        console.log('📤 Step 2: Uploading to storage:', filePath);
-
-        // Upload to storage bucket
-        const { error: uploadError } = await supabaseCore.storage
-          .from('vendor-media')
-          .upload(filePath, fileBytes, {
-            contentType: mimeType,
-          });
-
-        if (uploadError) {
-          console.error('❌ Storage upload error:', uploadError, {
-            bucket: 'vendor-media',
-            path: filePath,
-            mimeType
-          });
-          throw uploadError;
-        }
-        console.log('✅ Image uploaded to storage');
-
-        // Step 2: Create file_storage record
-        console.log('📤 Step 3: Creating file_storage record');
-        const { data: fileStorageRecord, error: fileError } = await supabaseCms
-          .from('file_storage')
-          .insert({
-            original_filename: fileName,
-            stored_filename: fileName,
-            file_path: filePath,
-            file_size: fileBytes.length,
-            mime_type: mimeType,
-            file_extension: fileExt,
-            storage_provider: 'supabase',
-            storage_bucket: 'vendor-media',
-            upload_status: 'completed',
-            uploaded_by_type: 'vendor',
-            uploaded_by_id: user?.id,
-          })
-          .select()
-          .single();
-
-        if (fileError) {
-          console.error('❌ file_storage insert error:', fileError);
-          throw fileError;
-        }
-        console.log('✅ file_storage record created:', fileStorageRecord?.id);
-        fileDataId = fileStorageRecord.id;
-
-        // Step 3: Create vendor_verification_documents entry for profile photo (only for new uploads)
-        const { data: docTypeData } = await supabaseCore
-          .from('document_types')
-          .select('id')
-          .eq('type_code', 'profile_photo')
-          .maybeSingle();
-
-        if (docTypeData) {
-          // Create verification document entry
-          const { error: verificationDocError } = await supabaseCms
-            .from('vendor_verification_documents')
-            .insert({
-              vendor_id: user?.id,
-              document_type_id: docTypeData.id,
-              file_id: fileDataId,
-              verification_status: 'pending',
-              uploaded_at: new Date().toISOString(),
-            });
-
-          // Don't throw error if this fails - it's optional tracking
-          if (verificationDocError) {
-            console.warn('Failed to create verification document entry:', verificationDocError);
-          }
-        }
+        const uploadResult = await uploadProfilePhoto(formData);
+        if (uploadResult.error) throw new Error(uploadResult.error.error);
+        if (uploadResult.data?.file_id) fileDataId = uploadResult.data.file_id;
       }
 
-      console.log('📤 Step 4: Updating vendors table');
-      const updateData: any = {
+      const updatePayload: any = {
         first_name: values.firstName,
         last_name: values.lastName,
         email: values.email,
         image_file_id: fileDataId || profile?.image_file_id,
       };
-
-      const { error: vendorError } = await supabaseCore
-        .from('vendors')
-        .upsert({
-          id: user?.id,
-          phone: stripCountryCode(user?.phone),
-          ...updateData,
-        });
-
-      if (vendorError) {
-        console.error('❌ vendors update error symptoms:', {
-          code: vendorError.code,
-          message: vendorError.message,
-          details: vendorError.details
-        });
-        throw vendorError;
-      }
-      console.log('✅ vendors table updated successfully');
-
-      console.log('📤 Step 5: Refreshing profile with skipCache=true');
+      const { error: vendorError } = await updateVendorMe(updatePayload);
+      if (vendorError) throw new Error(vendorError.error);
       await refreshProfile();
       console.log('✅ Profile refreshed');
 
-
-      // Check if user already has a business
-      console.log('📤 Step 6: Checking for existing businesses');
-      const { data: existingBusinesses, error: checkBusinessError } = await supabaseCore
-        .from('vendor_businesses')
-        .select('id')
-        .eq('vendor_id', user?.id)
-        .limit(1);
-
-      if (checkBusinessError) {
-        console.error('❌ Error checking for existing business:', checkBusinessError);
-        // We still keep going but log it
-      }
-
-      if (existingBusinesses && existingBusinesses.length > 0) {
-        console.log('✅ User already has business(es) - navigating to dashboard');
+      const { data: businessList } = await getVendorBusinesses(user.id);
+      if (businessList && businessList.length > 0) {
         router.replace('/(tabs)');
       } else {
-        console.log('✅ No business found - navigating to business-registration');
         router.replace('/business-registration');
       }
     } catch (error: any) {

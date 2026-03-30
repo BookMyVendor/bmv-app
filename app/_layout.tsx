@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -52,17 +52,16 @@ function RootLayoutNav() {
     checkStorage();
   }, [checkStorage]);
 
-  // Setup push notification listeners
+  // Setup push notification listeners (native only — Firebase/FCM not initialized on web)
   useEffect(() => {
-    if (session) {
-      console.log('[PUSH] Initializing notification listeners');
-      const unsubscribe = setupPushNotifications(router);
-      return () => {
-        if (typeof unsubscribe === 'function') {
-          unsubscribe();
-        }
-      };
-    }
+    if (!session || Platform.OS === 'web') return;
+    console.log('[PUSH] Initializing notification listeners');
+    const unsubscribe = setupPushNotifications(router);
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    };
   }, [session, router]);
 
   // Refresh terms acceptance state when session/profile changes

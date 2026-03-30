@@ -55,6 +55,7 @@ export async function checkNotificationPermission(): Promise<boolean> {
  * Register the device's push token with the backend
  */
 export async function registerPushTokenFromDevice() {
+    if (Platform.OS === 'web') return;
     try {
         // Request permission
         const hasPermission = await requestNotificationPermission();
@@ -138,6 +139,10 @@ export function handleNotificationNavigation(remoteMessage: any, router: any) {
  * Initialize notification listeners
  */
 export function setupPushNotifications(router: any) {
+    if (Platform.OS === 'web') {
+        return () => {};
+    }
+
     // Create Android Channel (Required for foreground notifications on Android)
     const createChannel = async () => {
         if (Platform.OS === 'android') {

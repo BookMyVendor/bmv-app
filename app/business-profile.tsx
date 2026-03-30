@@ -28,7 +28,9 @@ import {
     WifiOff,
 } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
-import { supabaseCore, supabaseCrm } from '../lib/supabase';
+import { getVendorBusiness } from '../lib/api/vendorBusinesses';
+import { getLeads } from '../lib/api/leads';
+import { getReviews } from '../lib/api/reviews';
 import { getTimeAgo } from '../lib/timeUtils';
 import { Lead, STATUS_OPTIONS } from '../types/leads';
 import ScreenBackground from '../components/ScreenBackground';
@@ -155,35 +157,21 @@ export default function BusinessProfileScreen() {
     );
 
     const fetchBusiness = async () => {
+        if (!id || !user?.id) return;
         try {
             const cachedParams = await AsyncStorage.getItem(`business_profile_${id}`);
-            if(cachedParams) {
-               setBusiness(JSON.parse(cachedParams));
-            }
+            if (cachedParams) setBusiness(JSON.parse(cachedParams));
 
-            const { data, error } = await supabaseCore
-                .from('vendor_businesses')
-                .select(`
-          id,
-          business_name,
-          cover_photo_url,
-          vendor_business_category_mappings (
-            categories (name)
-          )
-        `)
-                .eq('id', id)
-                .eq('vendor_id', user?.id)
-                .maybeSingle();
-
-            if (error) throw error;
+            const { data, error } = await getVendorBusiness(id);
+            if (error) throw new Error(error.error);
             if (data) {
-                const category = (data as any).vendor_business_category_mappings?.[0]?.categories?.name;
-
-                const businessData = {
+                const raw = data as any;
+                const category = raw.business_category ?? raw.vendor_business_category_mappings?.[0]?.categories?.name ?? 'General';
+                const businessData: Business = {
                     id: data.id,
                     business_name: data.business_name,
-                    business_category: category || 'General',
-                    cover_photo_url: data.cover_photo_url,
+                    business_category: category,
+                    cover_photo_url: data.cover_photo_url ?? null,
                 };
                 setBusiness(businessData);
                 setIsOffline(false);
@@ -199,8 +187,6 @@ export default function BusinessProfileScreen() {
         if (!id || !user?.id) return;
         try {
             setLeadsLoading(true);
-
-            // Check cache first
             try {
                 const cachedLeads = await AsyncStorage.getItem(`business_leads_${id}`);
                 if (cachedLeads) {
@@ -209,32 +195,15 @@ export default function BusinessProfileScreen() {
                     setTotalLeads(parsedLeads.length);
                     setWonLeads(parsedLeads.filter((l: Lead) => l.lead_status === 'converted').length);
                 }
-            } catch (cacheError) {
-                console.error("Cache read error:", cacheError);
-            }
+            } catch (_) {}
 
-            const { data, error } = await supabaseCrm
-                .from('customer_leads')
-                .select('*')
-                .eq('business_id', id)
-                .eq('vendor_id', user.id)
-                .order('created_at', { ascending: false });
-
-            if (error) throw error;
-
-            const leadsData = (data || []) as Lead[];
+            const { data, error } = await getLeads({ business_id: id, vendor_id: user.id });
+            if (error) throw new Error(error.error);
+            const leadsData = (data ?? []) as unknown as Lead[];
             setLeads(leadsData);
-            
-            // Update cache
-            try {
-                 AsyncStorage.setItem(`business_leads_${id}`, JSON.stringify(leadsData));
-            } catch(e) {}
-
-            // Compute stats
-            const total = leadsData.length;
-            const won = leadsData.filter((l) => l.lead_status === 'converted').length;
-            setTotalLeads(total);
-            setWonLeads(won);
+            try { AsyncStorage.setItem(`business_leads_${id}`, JSON.stringify(leadsData)); } catch (_) {}
+            setTotalLeads(leadsData.length);
+            setWonLeads(leadsData.filter((l) => l.lead_status === 'converted').length);
         } catch (err) {
             console.error('Error fetching leads:', err);
         } finally {
@@ -246,68 +215,31 @@ export default function BusinessProfileScreen() {
         if (!id || !user?.id) return;
         try {
             setReviewsLoading(true);
-
-            // Check cache first
             try {
                 const cachedReviews = await AsyncStorage.getItem(`business_reviews_${id}`);
                 if (cachedReviews) {
-                    const parsedReviews = JSON.parse(cachedReviews);
-                    setReviews(parsedReviews);
-                    setReviewCount(parsedReviews.length);
-                    if (parsedReviews.length > 0) {
-                        const avg = parsedReviews.reduce((sum: number, r: Review) => sum + r.rating, 0) / parsedReviews.length;
-                        setAvgReview(parseFloat(avg.toFixed(1)));
-                    }
+                    const parsed = JSON.parse(cachedReviews);
+                    setReviews(parsed);
+                    setReviewCount(parsed.length);
+                    if (parsed.length > 0)
+                        setAvgReview(parseFloat((parsed.reduce((s: number, r: Review) => s + r.rating, 0) / parsed.length).toFixed(1)));
                 }
-            } catch (cacheError) {
-                console.error("Cache read error:", cacheError);
-            }
+            } catch (_) {}
 
-            const { data, error } = await supabaseCrm
-                .from('customer_reviews')
-                .select('id, rating, review_text, review_title, created_at, customer_id')
-                .eq('business_id', id)
-                .eq('vendor_id', user.id)
-                .order('created_at', { ascending: false });
-
-            if (error) throw error;
-
-            const reviewsRaw = data || [];
-
-            // Fetch customer names
-            const customerIds = [...new Set(reviewsRaw.map((r: any) => r.customer_id).filter(Boolean))];
-            const customersMap = new Map<string, string>();
-            if (customerIds.length > 0) {
-                const { data: customersData } = await supabaseCrm
-                    .from('customers')
-                    .select('id, name')
-                    .in('id', customerIds);
-                (customersData || []).forEach((c: any) => customersMap.set(c.id, c.name));
-            }
-
-            const mapped: Review[] = reviewsRaw.map((r: any) => ({
+            const { data, error } = await getReviews();
+            if (error) throw new Error(error.error);
+            const raw = (data ?? []).filter((r: any) => r.business_id === id);
+            const mapped: Review[] = raw.map((r: any) => ({
                 id: r.id,
-                customer_name: customersMap.get(r.customer_id) || 'Anonymous',
-                rating: r.rating,
+                customer_name: r.customers?.name ?? 'Anonymous',
+                rating: r.rating ?? 0,
                 comment: r.review_text || r.review_title || null,
                 created_at: r.created_at,
             }));
-
             setReviews(mapped);
-            
-             // Update cache
-             try {
-                 AsyncStorage.setItem(`business_reviews_${id}`, JSON.stringify(mapped));
-             } catch(e) {}
-
-            // Compute average
-            if (mapped.length > 0) {
-                const avg = mapped.reduce((sum, r) => sum + r.rating, 0) / mapped.length;
-                setAvgReview(parseFloat(avg.toFixed(1)));
-            } else {
-                setAvgReview(null);
-            }
+            try { AsyncStorage.setItem(`business_reviews_${id}`, JSON.stringify(mapped)); } catch (_) {}
             setReviewCount(mapped.length);
+            setAvgReview(mapped.length > 0 ? parseFloat((mapped.reduce((s, r) => s + r.rating, 0) / mapped.length).toFixed(1)) : null);
         } catch (err) {
             console.error('Error fetching reviews:', err);
         } finally {
