@@ -120,7 +120,7 @@ export const createOffer = async (
 
     const { data, error } = await offersApi.createOffer(offerData.business_id, offerData as any);
     if (error) throw new Error(error.error);
-    return { data: data as Offer, error: null };
+    return { data: data as any as Offer, error: null };
   } catch (error) {
     return { data: null, error: error as Error };
   }
@@ -131,7 +131,7 @@ export const getOffers = async (
 ): Promise<{ data: Offer[] | null; error: Error | null }> => {
   const { data, error } = await offersApi.getOffers(businessId);
   if (error) return { data: null, error: new Error(error.error) };
-  return { data: (data || []) as Offer[], error: null };
+  return { data: (data || []) as any as Offer[], error: null };
 };
 
 export const updateOffer = async (
@@ -150,7 +150,7 @@ export const updateOffer = async (
     }
     const { data, error } = await offersApi.updateOffer(offerId, offerData as any);
     if (error) throw new Error(error.error);
-    return { data: data as Offer, error: null };
+    return { data: data as any as Offer, error: null };
   } catch (error) {
     return { data: null, error: error as Error };
   }
@@ -209,6 +209,52 @@ export const uploadBusinessImage = async (
         image_base64: null,
         display_order: result.data.display_order ?? 0,
         created_at: result.data.created_at,
+        image_type: result.data.image_type || 'gallery',
+      },
+      error: null,
+    };
+  } catch (error) {
+    return { data: null, error: error as Error };
+  }
+};
+
+export const uploadBusinessVideo = async (
+  businessId: string,
+  videoUri: string
+): Promise<{ data: PortfolioImage | null; error: Error | null }> => {
+  try {
+    const { data: existingMedia } = await getBusinessImages(businessId);
+    
+    // Check video limit
+    const existingVideos = existingMedia?.filter(img => img.image_type === 'video') || [];
+    if (existingVideos.length >= MAX_VIDEOS_PER_BUSINESS) {
+      throw new Error(`Maximum ${MAX_VIDEOS_PER_BUSINESS} videos allowed per business`);
+    }
+
+    // Prepare form data
+    const fileExt = videoUri.split('.').pop()?.toLowerCase() || 'mp4';
+    const formData = new FormData();
+    formData.append('image', {
+      uri: videoUri,
+      name: `business-video-${businessId}-${Date.now()}.${fileExt}`,
+      type: `video/${fileExt === 'mov' ? 'quicktime' : fileExt}`,
+    } as any);
+
+    // Use the same media upload API
+    const result = await mediaApi.uploadBusinessImage(businessId, formData);
+    
+    if (result.error) throw new Error(result.error.error);
+    if (!result.data) throw new Error('Upload failed');
+
+    return {
+      data: {
+        id: result.data.id,
+        business_id: businessId,
+        image_url: result.data.image_url ?? null,
+        image_base64: null,
+        display_order: result.data.display_order ?? 0,
+        created_at: result.data.created_at,
+        image_type: result.data.image_type || 'video',
       },
       error: null,
     };
@@ -313,14 +359,15 @@ export const setCoverImage = async (
 ): Promise<{ data: PortfolioImage | null; error: Error | null }> => {
   const { data, error } = await mediaApi.setCoverImage(businessId, imageId);
   if (error) return { data: null, error: new Error(error.error) };
+  const d = data as any;
   return {
-    data: data ? {
-      id: data.id,
+    data: d ? {
+      id: d.id,
       business_id: businessId,
-      image_url: data.image_url ?? null,
+      image_url: d.image_url ?? null,
       image_base64: null,
-      display_order: data.display_order ?? 0,
-      created_at: data.created_at,
+      display_order: d.display_order ?? 0,
+      created_at: d.created_at,
       image_type: 'cover',
     } : null,
     error: null,
@@ -438,7 +485,7 @@ export const uploadVerificationDocument = async (
   formData.append('file', { uri: file.uri, name: file.name || 'document', type: mimeType } as any);
   const result = await verificationApi.uploadVerificationDocument(businessId, formData);
   if (result.error) return { data: null, error: new Error(result.error.error) };
-  return { data: result.data ?? null, error: null };
+  return { data: (result.data as any) ?? null, error: null };
 };
 
 /**

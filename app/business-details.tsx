@@ -513,37 +513,18 @@ export default function BusinessDetailsScreen() {
         } else if (cat?.category_type === 'event') {
           eventCategoryIds.push(cid);
         }
+      });
 
-        // Separate business and event categories
-        const businessCategoryIds: string[] = [];
-        const eventCategoryIds: string[] = [];
+      setBusinessType(determinedBusinessType);
+      setEditData((prev: any) => ({ ...prev, businessType: determinedBusinessType }));
+      setSelectedCategoryIds(businessCategoryIds);
+      setSelectedEventIds(eventCategoryIds);
 
-        categories?.forEach((cat) => {
-          if (cat.category_type === 'business') {
-            businessCategoryIds.push(cat.id);
-            // Dynamic logic: if ANY category is rental, business type is rental
-            if (cat.business_model === 'rental') {
-              determinedBusinessType = 'rental';
-            }
-          } else if (cat.category_type === 'event') {
-            eventCategoryIds.push(cat.id);
-          }
-        });
-
-        setBusinessType(determinedBusinessType);
-        setEditData((prev: any) => ({ ...prev, businessType: determinedBusinessType }));
-        setSelectedCategoryIds(businessCategoryIds);
-        setSelectedEventIds(eventCategoryIds);
-
-        return {
-          businessIds: businessCategoryIds,
-          eventIds: eventCategoryIds,
-          businessType: determinedBusinessType
-        };
-      }
-
-      setBusinessType('services');
-      return { businessIds: [], eventIds: [], businessType: 'services' };
+      return {
+        businessIds: businessCategoryIds,
+        eventIds: eventCategoryIds,
+        businessType: determinedBusinessType
+      };
     } catch (error) {
       console.error('Error loading category mappings:', error);
       return { businessIds: [], eventIds: [], businessType: 'services' };
@@ -553,12 +534,13 @@ export default function BusinessDetailsScreen() {
 
 
   const loadCategories = async (type?: 'services' | 'rental') => {
+    let businessCatsResult: any[] = [];
     try {
       setLoadingCategories(true);
       const businessParams: any = { category_type: 'business', visible: true };
       if (type === 'rental') businessParams.business_model = 'rental';
       const { data: businessCats } = await getCategories(businessParams);
-      const businessCatsResult = businessCats || [];
+      businessCatsResult = businessCats || [];
       setAllBusinessCategories(businessCatsResult);
 
       const { data: eventCats, error: eventError } = await getCategories({ category_type: 'event', visible: true });
@@ -738,17 +720,17 @@ export default function BusinessDetailsScreen() {
   const getRootCategoryId = (categoryId: string, categories: any[]): string => {
     const categoryMap = new Map<string, any>();
     categories.forEach((cat) => categoryMap.set(cat.id, cat));
-    
+
     let currentId: string | null = categoryId;
     let rootId = categoryId;
-    
+
     while (currentId) {
       const cat = categoryMap.get(currentId);
       if (!cat) break;
       rootId = cat.id;
       currentId = cat.parent_category_id;
     }
-    
+
     return rootId;
   };
 
@@ -1325,12 +1307,12 @@ export default function BusinessDetailsScreen() {
   const filteredPrimaryResults = React.useMemo(() => {
     if (!primarySearchQuery.trim()) return rootCategoriesForDropdown;
     const lowerQuery = primarySearchQuery.toLowerCase();
-    
+
     // 1. Root categories matching the query
-    const directMatches = rootCategoriesForDropdown.filter((cat: any) => 
+    const directMatches = rootCategoriesForDropdown.filter((cat: any) =>
       cat.name.toLowerCase().includes(lowerQuery)
     );
-    
+
     // 2. Root categories that have matching children
     const parentMatches: any[] = [];
     const subCategories = allBusinessCategories.filter(cat => cat.parent_category_id !== null);
@@ -1353,10 +1335,10 @@ export default function BusinessDetailsScreen() {
 
   const filteredSpecializationResults = React.useMemo(() => {
     if (!primarySearchQuery.trim()) return [];
-    
+
     // Get all sub-categories (non-roots)
     const subCategories = allBusinessCategories.filter(cat => cat.parent_category_id !== null);
-    
+
     return subCategories
       .filter(cat => cat.name.toLowerCase().includes(primarySearchQuery.toLowerCase()))
       .map(cat => ({
@@ -1379,10 +1361,10 @@ export default function BusinessDetailsScreen() {
     } else {
       // Same root, toggle selection
       const isSelected = selectedCategoryIds.includes(catId);
-      const nextIds = isSelected 
+      const nextIds = isSelected
         ? selectedCategoryIds.filter(id => id !== catId)
         : [...selectedCategoryIds, catId];
-      
+
       setSelectedCategoryIds(nextIds);
       setEditData((prev: any) => ({
         ...prev,
@@ -1393,7 +1375,7 @@ export default function BusinessDetailsScreen() {
 
   const handleSelectAllFilteredSpecializations = () => {
     if (filteredSpecializationResults.length === 0) return;
-    
+
     const targetRootId = filteredSpecializationResults[0].rootCategoryId;
     if (!targetRootId) return;
 
@@ -1410,10 +1392,10 @@ export default function BusinessDetailsScreen() {
       }));
     } else {
       const allSelected = newIds.every(id => selectedCategoryIds.includes(id));
-      const nextIds = allSelected 
+      const nextIds = allSelected
         ? selectedCategoryIds.filter(id => !newIds.includes(id))
         : Array.from(new Set([...selectedCategoryIds, ...newIds]));
-      
+
       setSelectedCategoryIds(nextIds);
       setEditData((prev: any) => ({
         ...prev,
@@ -2123,7 +2105,7 @@ export default function BusinessDetailsScreen() {
         >
           {isVideo ? (
             <View style={styles.galleryImage}>
-              <ExpoVideo 
+              <ExpoVideo
                 source={{ uri: imageSource ?? '' }}
                 style={styles.galleryImage}
                 resizeMode={ResizeMode.COVER}
@@ -2138,7 +2120,7 @@ export default function BusinessDetailsScreen() {
           ) : (
             <Image source={{ uri: imageSource ?? '' }} style={styles.galleryImage} resizeMode="cover" />
           )}
-          
+
           {isCover && (
             <View style={styles.coverBadge}>
               <Text style={styles.coverBadgeText}>Cover</Text>
@@ -2642,7 +2624,7 @@ export default function BusinessDetailsScreen() {
                     activeOpacity={0.7}
                   >
                     <Text style={[styles.dropdownText, !selectedRootCategoryId && styles.placeholder]}>
-                      {selectedRootCategoryId 
+                      {selectedRootCategoryId
                         ? rootCategoriesForDropdown.find((c: any) => c.id === selectedRootCategoryId)?.name || 'Select a category'
                         : 'Select a category'}
                     </Text>
@@ -3783,8 +3765,8 @@ export default function BusinessDetailsScreen() {
               <X size={32} color="#fff" />
             </TouchableOpacity>
 
-            <PagerView 
-              style={styles.previewPager} 
+            <PagerView
+              style={styles.previewPager}
               initialPage={previewInitialIndex}
               pageMargin={10}
               onPageSelected={(e) => setCurrentPreviewIndex(e.nativeEvent.position)}
@@ -3792,7 +3774,7 @@ export default function BusinessDetailsScreen() {
               {images.map((item, index) => {
                 const imageSource = item.image_base64 || item.image_url;
                 const isVideo = item.image_type === 'video';
-                
+
                 return (
                   <View key={`${item.id}-${index}`} style={styles.previewSlide}>
                     {isVideo ? (
@@ -3815,7 +3797,7 @@ export default function BusinessDetailsScreen() {
                 );
               })}
             </PagerView>
-            
+
             <View style={styles.previewFooter}>
               <Text style={styles.previewCounterText}>
                 {currentPreviewIndex + 1} / {images.length}

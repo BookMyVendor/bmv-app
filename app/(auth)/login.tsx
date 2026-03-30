@@ -213,123 +213,123 @@ export default function LoginScreen() {
                 </TouchableWithoutFeedback>
 
                 <View style={styles.formCard}>
-                    {/* Step Indicator */}
-                    <View style={styles.stepIndicatorContainer}>
-                      <View style={[styles.stepDot, step === 'phone' ? styles.stepDotActive : styles.stepDotInactive]} />
-                      <View style={[styles.stepDot, step === 'otp' ? styles.stepDotActive : styles.stepDotInactive]} />
-                    </View>
-
-                    {step === 'phone' ? (
-                      <>
-                        <Text style={styles.formTitle}>Enter Mobile Number</Text>
-                        <Text style={styles.formHint}>
-                          We'll send the OTP via WhatsApp—use a number that has it.
-                        </Text>
-                        <View style={styles.inputContainer}>
-                          <Smartphone size={20} color="#FFA500" />
-                          <TextInput
-                            style={styles.input}
-                            placeholder="Mobile number"
-                            placeholderTextColor="#1a1a1a"
-                            keyboardType="phone-pad"
-                            value={phone}
-                            onChangeText={(text) => {
-                              const digitsOnly = text.replace(/\D/g, '');
-                              if (digitsOnly.length <= 10) {
-                                setPhone(digitsOnly);
-                              }
-                            }}
-                            maxLength={10}
-                            returnKeyType="send"
-                            onSubmitEditing={handleSendOTP}
-                          />
-                        </View>
-
-                        <TouchableOpacity
-                          style={[styles.button, loading && styles.buttonDisabled]}
-                          onPress={handleSendOTP}
-                          disabled={loading}
-                        >
-                          <LinearGradient colors={['#FFA500', '#FF8C00']} style={styles.buttonGradient}>
-                            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Send OTP</Text>}
-                          </LinearGradient>
-                        </TouchableOpacity>
-                      </>
-                    ) : (
-                      <>
-                        <Text style={styles.formTitle}>Verify OTP</Text>
-                        <View style={styles.otpHeader}>
-                          <Text style={styles.otpLabel}>Enter the 6-digit OTP sent on WhatsApp to</Text>
-                          <Text style={styles.phoneNumberDisplay}>{phone}</Text>
-                        </View>
-                        <Text style={styles.otpHint}>Check your WhatsApp for the code.</Text>
-
-                        <TextInput
-                          style={styles.otpInput}
-                          keyboardType="number-pad"
-                          maxLength={6}
-                          value={otp}
-                          onChangeText={(val) => setOtp(val.replace(/\D/g, ''))}
-                          textAlign="center"
-                          autoFocus={true}
-                          returnKeyType="done"
-                          onSubmitEditing={handleVerifyOTP}
-                        />
-
-                        {otpAttemptsRemaining !== null && (
-                          <Text style={styles.attemptsText}>
-                            {otpAttemptsRemaining} attempt(s) remaining
-                          </Text>
-                        )}
-
-                        <TouchableOpacity
-                          style={[styles.button, loading && styles.buttonDisabled]}
-                          onPress={handleVerifyOTP}
-                          disabled={loading}
-                        >
-                          <LinearGradient colors={['#87CEEB', '#6BB6FF']} style={styles.buttonGradient}>
-                            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Verify OTP</Text>}
-                          </LinearGradient>
-                        </TouchableOpacity>
-
-                        <View style={styles.otpFooter}>
-                          <TouchableOpacity
-                            onPress={() => {
-                              setStep('phone');
-                              setOtp('');
-                              setError('');
-                            }}
-                            disabled={loading}
-                          >
-                            <Text style={[styles.footerLink, loading && styles.disabledLink]}>Change Business Contact Number</Text>
-                          </TouchableOpacity>
-
-                          <View>
-                            {resendCountdown > 0 ? (
-                              <Text style={styles.resendText}>
-                                Resend in <Text style={styles.countdownText}>{resendCountdown}s</Text>
-                              </Text>
-                            ) : (
-                              <TouchableOpacity onPress={handleResendOTP} disabled={loading}>
-                                <Text style={[styles.footerLink, loading && styles.disabledLink]}>Resend OTP</Text>
-                              </TouchableOpacity>
-                            )}
-                          </View>
-                        </View>
-                      </>
-                    )}
+                  {/* Step Indicator */}
+                  <View style={styles.stepIndicatorContainer}>
+                    <View style={[styles.stepDot, step === 'phone' ? styles.stepDotActive : styles.stepDotInactive]} />
+                    <View style={[styles.stepDot, step === 'otp' ? styles.stepDotActive : styles.stepDotInactive]} />
                   </View>
 
-                  {error ? (
-                    <View style={styles.errorContainer}>
-                      <Text style={styles.errorText}>{error}</Text>
-                    </View>
-                  ) : null}
+                  {step === 'phone' ? (
+                    <>
+                      <Text style={styles.formTitle}>Enter Mobile Number</Text>
+                      <Text style={styles.formHint}>
+                        We'll send the OTP via WhatsApp—use a number that has it.
+                      </Text>
+                      <View style={styles.inputContainer}>
+                        <Smartphone size={20} color="#FFA500" />
+                        <TextInput
+                          style={styles.input}
+                          placeholder="Mobile number"
+                          placeholderTextColor="#1a1a1a"
+                          keyboardType="phone-pad"
+                          value={phone}
+                          onChangeText={(text) => {
+                            const digitsOnly = text.replace(/\D/g, '');
+                            if (digitsOnly.length <= 10) {
+                              setPhone(digitsOnly);
+                            }
+                          }}
+                          maxLength={10}
+                          returnKeyType="send"
+                          onSubmitEditing={handleSendOTP}
+                        />
+                      </View>
 
-                  {/* Process Step Timeline */}
-                  {step === 'phone' && (
-                    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-                      <View>
+                      <TouchableOpacity
+                        style={[styles.button, loading && styles.buttonDisabled]}
+                        onPress={handleSendOTP}
+                        disabled={loading}
+                      >
+                        <LinearGradient colors={['#FFA500', '#FF8C00']} style={styles.buttonGradient}>
+                          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Send OTP</Text>}
+                        </LinearGradient>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.formTitle}>Verify OTP</Text>
+                      <View style={styles.otpHeader}>
+                        <Text style={styles.otpLabel}>Enter the 6-digit OTP sent on WhatsApp to</Text>
+                        <Text style={styles.phoneNumberDisplay}>{phone}</Text>
+                      </View>
+                      <Text style={styles.otpHint}>Check your WhatsApp for the code.</Text>
+
+                      <TextInput
+                        style={styles.otpInput}
+                        keyboardType="number-pad"
+                        maxLength={6}
+                        value={otp}
+                        onChangeText={(val) => setOtp(val.replace(/\D/g, ''))}
+                        textAlign="center"
+                        autoFocus={true}
+                        returnKeyType="done"
+                        onSubmitEditing={handleVerifyOTP}
+                      />
+
+                      {otpAttemptsRemaining !== null && (
+                        <Text style={styles.attemptsText}>
+                          {otpAttemptsRemaining} attempt(s) remaining
+                        </Text>
+                      )}
+
+                      <TouchableOpacity
+                        style={[styles.button, loading && styles.buttonDisabled]}
+                        onPress={handleVerifyOTP}
+                        disabled={loading}
+                      >
+                        <LinearGradient colors={['#87CEEB', '#6BB6FF']} style={styles.buttonGradient}>
+                          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Verify OTP</Text>}
+                        </LinearGradient>
+                      </TouchableOpacity>
+
+                      <View style={styles.otpFooter}>
+                        <TouchableOpacity
+                          onPress={() => {
+                            setStep('phone');
+                            setOtp('');
+                            setError('');
+                          }}
+                          disabled={loading}
+                        >
+                          <Text style={[styles.footerLink, loading && styles.disabledLink]}>Change Business Contact Number</Text>
+                        </TouchableOpacity>
+
+                        <View>
+                          {resendCountdown > 0 ? (
+                            <Text style={styles.resendText}>
+                              Resend in <Text style={styles.countdownText}>{resendCountdown}s</Text>
+                            </Text>
+                          ) : (
+                            <TouchableOpacity onPress={handleResendOTP} disabled={loading}>
+                              <Text style={[styles.footerLink, loading && styles.disabledLink]}>Resend OTP</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      </View>
+                    </>
+                  )}
+                </View>
+
+                {error ? (
+                  <View style={styles.errorContainer}>
+                    <Text style={styles.errorText}>{error}</Text>
+                  </View>
+                ) : null}
+
+                {/* Process Step Timeline */}
+                {step === 'phone' && (
+                  <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+                    <View>
                       <View style={styles.processContainer}>
                         <View style={styles.processLine} />
                         <View style={styles.processItem}>
@@ -368,14 +368,14 @@ export default function LoginScreen() {
                         <Text style={styles.trustText}>Building India's Largest Event Vendor Network</Text>
                       </View>
 
-                      {process.env.EXPO_PUBLIC_NODE_ENV === 'development' && (
+                      {process.env.NODE_ENV === 'development' && (
                         <Text style={styles.devTag}>DEVELOPMENT</Text>
                       )}
-                      </View>
-                    </TouchableWithoutFeedback>
-                  )}
-                </View>
+                    </View>
+                  </TouchableWithoutFeedback>
+                )}
               </View>
+            </View>
           </ScrollView>
         </View>
       </KeyboardAvoidingView>

@@ -254,6 +254,7 @@ export default function DashboardScreen() {
       AsyncStorage.setItem(`dashboard_businesses_${user.id}`, JSON.stringify(formattedBusinesses)).catch(() => { });
       setIsOffline(false);
 
+      const businessIds = formattedBusinesses.map(b => b.id);
       // 5. Fetch lead counts (doesn't affect percentage, so can run after)
       if (businessIds.length > 0) {
         fetchBusinessLeadCounts(businessIds);
@@ -354,7 +355,7 @@ export default function DashboardScreen() {
         <View style={styles.headerLeft}>
           <View>
             <Text style={styles.headerGreeting}>
-              {getGreeting(user?.user_metadata?.full_name || user?.user_metadata?.name)}
+              {getGreeting((user?.user_metadata?.full_name as string) || (user?.user_metadata?.name as string))}
             </Text>
             <Text style={styles.headerTitle}>Dashboard</Text>
           </View>
