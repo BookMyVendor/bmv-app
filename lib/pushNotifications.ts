@@ -128,6 +128,9 @@ export function handleNotificationNavigation(remoteMessage: any, router: any) {
     } else if (title.includes('lead') || body.includes('lead')) {
         console.log('[PUSH] Found "lead" in text. Navigating to leads screen...');
         router.push('/(tabs)/leads');
+    } else if (title.includes('review') || body.includes('review')) {
+        console.log('[PUSH] Found "review" in text. Navigating to reviews screen...');
+        router.push('/(tabs)/reviews');
     } else {
         console.log('[PUSH] No specific route found. Navigating to dashboard...');
         router.push('/(tabs)');

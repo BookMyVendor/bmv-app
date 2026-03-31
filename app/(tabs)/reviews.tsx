@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { useFocusEffect } from 'expo-router';
 import {
   View,
   Text,
@@ -83,17 +84,20 @@ export default function ReviewsScreen() {
   const [mediaLoadError, setMediaLoadError] = useState(false);
   const { user, isOffline: authIsOffline } = useAuth();
 
-  useEffect(() => {
-    if (user?.id) {
-      fetchReviews();
-    }
-  }, [user?.id]);
+  // Refresh reviews whenever the screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.id) {
+        fetchReviews();
+      }
+    }, [user?.id, fetchReviews])
+  );
 
   useEffect(() => {
     if (selectedMedia) setMediaLoadError(false);
   }, [selectedMedia]);
 
-  const fetchReviews = async () => {
+  const fetchReviews = useCallback(async () => {
     try {
       if (!user?.id) return;
 
@@ -310,7 +314,7 @@ export default function ReviewsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [user?.id, refreshing]);
 
   const onRefresh = () => {
     setRefreshing(true);
