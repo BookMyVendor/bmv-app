@@ -160,13 +160,19 @@ export function setupPushNotifications(router: any) {
         handleNotificationNavigation(remoteMessage, router);
     });
 
-    // Check if the app was opened from a quit state via a notification (FCM)
+    // Check if the app was opened from a quit state or background via a notification (FCM).
+    // We defer navigation with a timeout so the auth flow and navigation guards
+    // fully settle first — without this, notifications clicked after a long time
+    // can trigger a T&C redirect before the notification handler fires.
     messaging()
         .getInitialNotification()
         .then(remoteMessage => {
             if (remoteMessage) {
-                console.log('[PUSH] App opened from quit state by notification');
-                handleNotificationNavigation(remoteMessage, router);
+                console.log('[PUSH] App opened from quit/background state by notification — deferring navigation...');
+                // Delay to allow _layout auth guards to finish redirecting first
+                setTimeout(() => {
+                    handleNotificationNavigation(remoteMessage, router);
+                }, 1500);
             }
         });
 

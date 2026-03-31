@@ -444,14 +444,8 @@ export default function BusinessDetailsScreen() {
         }
       }
 
-      // Load verification documents
-      await loadVerificationDocuments();
-
-      // Load packages and extract price info
-      // We manually call getBusinessPackages here so we can use the result immediately
-      const { getBusinessPackages } = await import('../lib/packageApi');
-      const { data: packagesData } = await getBusinessPackages(id);
-
+      // Process packages result
+      const { data: packagesData } = packagesRes;
       const activePackages = (packagesData || []).filter((pkg: any) => pkg.is_active !== false);
       setPackages(activePackages);
 
