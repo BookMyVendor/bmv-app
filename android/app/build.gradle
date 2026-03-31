@@ -92,8 +92,8 @@ android {
         applicationId 'com.bnt.bookmyvendors'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 9
-        versionName "1.0.8"
+        versionCode 10
+        versionName "1.0.9"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -106,7 +106,7 @@ android {
         keyPassword 'android'
     }
 
-    // release {
+    release {
     //     storeFile file(RELEASE_STORE_FILE)
     //     storePassword RELEASE_STORE_PASSWORD
     //     keyAlias RELEASE_KEY_ALIAS
