@@ -27,3 +27,18 @@ export async function getCategories(params?: {
   if (params?.offset !== undefined) body.offset = params.offset;
   return functionsCall<Category[]>('categories-list', body, 'categories');
 }
+
+/** Spec: category-form-fields-list { category_id } */
+export async function getCategoryFormFields(categoryId: string) {
+  return functionsCall<unknown[]>('category-form-fields-list', { category_id: categoryId }, 'category_form_fields');
+}
+
+/** Spec: event-templates-list { limit, offset } */
+export async function getEventTemplates(params: { limit?: number; offset?: number } = {}) {
+  return functionsCall<unknown[]>('event-templates-list', params as any, 'event_templates');
+}
+
+/** Spec: event-sub-templates-list { template_id, limit, offset } */
+export async function getEventSubTemplates(params: { template_id?: string; limit?: number; offset?: number } = {}) {
+  return functionsCall<unknown[]>('event-sub-templates-list', params as any, 'event_sub_templates');
+}

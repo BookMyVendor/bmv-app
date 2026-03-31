@@ -31,11 +31,6 @@ export async function deletePackage(id: string) {
   return functionsCall<void>('package-delete', { package_id: id });
 }
 
-/** Spec: category-form-fields-list { category_id } */
-export async function getCategoryFormFields(categoryId: string) {
-  return functionsCall<unknown[]>('category-form-fields-list', { category_id: categoryId }, 'category_form_fields');
-}
-
 /** Spec: vendor-businesses-category-mappings-get { business_id } */
 export async function getBusinessCategoryMappings(businessId: string) {
   return functionsCall<{ category_id: string; categories?: { id: string; name: string; icon?: string; slug?: string; parent_category_id?: string } }[]>(

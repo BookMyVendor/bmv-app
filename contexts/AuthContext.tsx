@@ -2,7 +2,14 @@ import React, { createContext, useContext, useEffect, useState, useRef } from 'r
 import { AppState, AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { sendOTP, verifyOTP as verifyOTPApi, refreshAccessToken, devSignIn as devSignInApi, type VerifyOTPResponse } from '../lib/otpAuthApi';
+import { 
+  sendOTP, 
+  verifyOTP as verifyOTPApi, 
+  refreshAccessToken, 
+  devSignIn as devSignInApi, 
+  signOut as signOutApi,
+  type VerifyOTPResponse 
+} from '../lib/authApi';
 import {
   getAccessToken,
   getRefreshToken,
@@ -11,7 +18,6 @@ import {
   clearTokens,
   isTokenExpiredOrExpiringSoon,
 } from '../lib/tokenStorage';
-import { getAuthFunctionsBaseUrl } from '../lib/apiConfig';
 import { getMe } from '../lib/api/me';
 import { apiFetch } from '../lib/apiClient';
 import { setOnAuthFailure, triggerAuthFailure } from '../lib/authFailure';
@@ -367,15 +373,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     isLoggingOutRef.current = true;
     try {
-      await apiFetch(`${getAuthFunctionsBaseUrl()}/auth-sign-out`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-    } catch {
-      // ignore
+      await signOutApi();
+    } catch (e) {
+      console.warn('[AUTH] Sign out error:', e);
+      await clearTokens();
     }
-    await clearTokens();
+    
     if (userRef.current?.id) {
       await AsyncStorage.removeItem(`cached_profile_${userRef.current.id}`).catch(() => {});
     }

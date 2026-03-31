@@ -1,65 +1,14 @@
 import { getAuthFunctionsBaseUrl, getApiBaseUrl } from './apiConfig';
 import { getDeviceInfo } from './deviceInfo';
-import { storeTokens, getRefreshToken, clearTokens } from './tokenStorage';
+import { storeTokens, clearTokens } from './tokenStorage';
+import { apiFetch } from './apiClient';
+import { refreshAccessToken as coreRefreshAccessToken } from './refreshToken';
+import type { RefreshTokenResponse, AuthError } from './refreshToken';
 
-export interface SendOTPRequest {
-  phone: string;
-  deviceInfo: { deviceType: string; os: string; appVersion: string };
-}
+// RE-EXPORT TYPES FOR CONVENIENCE
+export type { RefreshTokenResponse, AuthError };
 
-export interface SendOTPResponse {
-  success: boolean;
-  expiresIn: number;
-  retryAfter?: number;
-}
-
-export interface ResendOTPResponse {
-  success: boolean;
-  expiresIn: number;
-  retryAfter?: number;
-}
-
-export interface VerifyOTPRequest {
-  phone: string;
-  otp: string;
-  deviceInfo: { deviceType: string; os: string; appVersion: string };
-}
-
-export interface VerifyOTPResponse {
-  success: boolean;
-  newUser: boolean;
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
-  user: {
-    id: string;
-    phone: string;
-    created_at?: string;
-    email?: string | null;
-    email_confirmed_at?: string;
-    phone_confirmed_at?: string;
-    app_metadata?: any;
-    user_metadata?: any;
-  };
-}
-
-export interface RefreshTokenRequest {
-  refreshToken: string;
-}
-
-export interface RefreshTokenResponse {
-  success: boolean;
-  accessToken: string;
-  expiresIn: number;
-  refreshToken?: string;
-}
-
-export interface AuthError {
-  code: string;
-  message: string;
-  retryAfter?: number;
-}
-
+// INTERNAL HELPERS
 function ensureFullPhone(phone: string): string {
   const digits = phone.replace(/\D/g, '');
   if (digits.length === 10) return `+91${digits}`;
@@ -79,6 +28,22 @@ function parseErrorResponse(data: any): AuthError {
   return { code, message, retryAfter };
 }
 
+// ENDPOINTS
+
+/**
+ * 1. Refresh Access Token
+ * Proxies to the low-level refresh logic in refreshToken.ts.
+ * Requirement: { refreshToken: string } -> { accessToken: string; refreshToken?: string; expiresIn: number }
+ */
+export const refreshAccessToken = coreRefreshAccessToken;
+
+export interface SendOTPResponse {
+  success: boolean;
+  expiresIn: number;
+  retryAfter?: number;
+}
+
+/** Sends OTP to the provided phone number. */
 export async function sendOTP(phone: string): Promise<{ data?: SendOTPResponse; error?: AuthError }> {
   try {
     const url = `${getAuthFunctionsBaseUrl()}/auth-vendor-send-otp`;
@@ -88,7 +53,7 @@ export async function sendOTP(phone: string): Promise<{ data?: SendOTPResponse; 
       body: JSON.stringify({
         phone: ensureFullPhone(phone),
         deviceInfo: getDeviceInfo(),
-      } as SendOTPRequest),
+      }),
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) return { error: parseErrorResponse(data) };
@@ -103,7 +68,8 @@ export async function sendOTP(phone: string): Promise<{ data?: SendOTPResponse; 
   }
 }
 
-export async function resendOTP(phone: string): Promise<{ data?: ResendOTPResponse; error?: AuthError }> {
+/** Resends OTP to the provided phone number. */
+export async function resendOTP(phone: string): Promise<{ data?: SendOTPResponse; error?: AuthError }> {
   try {
     const url = `${getAuthFunctionsBaseUrl()}/auth-vendor-resend-otp`;
     const response = await fetch(url, {
@@ -113,7 +79,7 @@ export async function resendOTP(phone: string): Promise<{ data?: ResendOTPRespon
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) return { error: parseErrorResponse(data) };
-    return { data: data as ResendOTPResponse };
+    return { data: data as SendOTPResponse };
   } catch (err: any) {
     return {
       error: {
@@ -124,6 +90,23 @@ export async function resendOTP(phone: string): Promise<{ data?: ResendOTPRespon
   }
 }
 
+export interface VerifyOTPResponse {
+  success: boolean;
+  newUser: boolean;
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+  user: {
+    id: string;
+    phone: string;
+    created_at?: string;
+    email?: string | null;
+    app_metadata?: any;
+    user_metadata?: any;
+  };
+}
+
+/** Verifies OTP and stores tokens on success. */
 export async function verifyOTP(
   phone: string,
   otp: string
@@ -137,7 +120,7 @@ export async function verifyOTP(
         phone: ensureFullPhone(phone),
         otp,
         deviceInfo: getDeviceInfo(),
-      } as VerifyOTPRequest),
+      }),
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) return { error: parseErrorResponse(data) };
@@ -158,62 +141,74 @@ export async function verifyOTP(
   }
 }
 
-let isRefreshing = false;
-let refreshPromise: Promise<{ data?: RefreshTokenResponse; error?: AuthError }> | null = null;
-
-export async function refreshAccessToken(): Promise<{ data?: RefreshTokenResponse; error?: AuthError }> {
-  if (isRefreshing && refreshPromise) return refreshPromise;
-  isRefreshing = true;
-  refreshPromise = (async () => {
-    try {
-      const refreshToken = await getRefreshToken();
-      if (!refreshToken) {
-        return { error: { code: 'NO_REFRESH_TOKEN', message: 'No refresh token available' } };
-      }
-      const url = `${getAuthFunctionsBaseUrl()}/auth-refresh-token`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken } as RefreshTokenRequest),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        if (response.status >= 400 && response.status < 500) await clearTokens();
-        return { error: parseErrorResponse(data) };
-      }
-      const responseData = data as RefreshTokenResponse;
-      const newRefreshToken = responseData.refreshToken || refreshToken;
-      await storeTokens({
-        accessToken: responseData.accessToken,
-        refreshToken: newRefreshToken,
-        expiresIn: responseData.expiresIn,
-      });
-      return { data: responseData };
-    } catch (err: any) {
-      return {
-        error: {
-          code: 'NETWORK_ERROR',
-          message: err?.message || 'Network error. Please check your connection.',
-        },
-      };
-    } finally {
-      isRefreshing = false;
-      refreshPromise = null;
+/** 
+ * 2. Sign Out
+ * Requirement: auth-sign-out | Bearer (optional) | {} | 204 or 200
+ */
+export async function signOut(): Promise<{ success: boolean; error?: AuthError }> {
+  try {
+    // We use apiFetch so it automatically includes the Bearer token if available
+    const response = await apiFetch(`${getAuthFunctionsBaseUrl()}/auth-sign-out`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    
+    // Always clear tokens locally regardless of server response
+    await clearTokens();
+    
+    if (!response.ok && response.status !== 401) {
+       const data = await response.json().catch(() => ({}));
+       return { success: false, error: parseErrorResponse(data) };
     }
-  })();
-  return refreshPromise;
+    
+    return { success: true };
+  } catch (err: any) {
+    // If sign-out fails due to network, we still clear local session
+    await clearTokens();
+    return { success: true }; 
+  }
 }
 
-export interface DevSignInResponse {
+export interface AccountDeletionResponse {
   success: boolean;
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
-  user: VerifyOTPResponse['user'];
+  message?: string;
 }
 
-/** Dev-only: not in API spec; uses backend route if available. */
-export async function devSignIn(phone: string): Promise<{ data?: DevSignInResponse; error?: AuthError }> {
+/** 
+ * 3. Delete Account
+ * Requirement: auth-vendor-delete-account | Bearer (vendor) | {} | { success: true, message?: string }
+ */
+export async function deleteAccount(): Promise<{ data?: AccountDeletionResponse; error?: AuthError }> {
+  try {
+    const response = await apiFetch(`${getAuthFunctionsBaseUrl()}/auth-vendor-delete-account`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    
+    const data = await response.json().catch(() => ({}));
+    
+    if (!response.ok) {
+      return { error: parseErrorResponse(data) };
+    }
+    
+    // Clear tokens after successful deletion
+    await clearTokens();
+    
+    return { data: data as AccountDeletionResponse };
+  } catch (err: any) {
+    return {
+      error: {
+        code: 'NETWORK_ERROR',
+        message: err?.message || 'Network error. Please try again.',
+      },
+    };
+  }
+}
+
+/** Dev-only sign in helper (not for production). */
+export async function devSignIn(phone: string): Promise<{ data?: VerifyOTPResponse; error?: AuthError }> {
   try {
     const url = `${getApiBaseUrl()}/auth/dev-sign-in`;
     const response = await fetch(url, {
@@ -223,7 +218,7 @@ export async function devSignIn(phone: string): Promise<{ data?: DevSignInRespon
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) return { error: parseErrorResponse(data) };
-    const responseData = data as DevSignInResponse;
+    const responseData = data as VerifyOTPResponse;
     await storeTokens({
       accessToken: responseData.accessToken,
       refreshToken: responseData.refreshToken,

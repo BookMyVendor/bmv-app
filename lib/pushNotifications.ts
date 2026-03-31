@@ -51,6 +51,8 @@ export async function checkNotificationPermission(): Promise<boolean> {
     return false;
 }
 
+import { registerPushToken } from './api/notifications';
+
 /**
  * Register the device's push token with the backend
  */
@@ -73,40 +75,14 @@ export async function registerPushTokenFromDevice() {
         console.log('🚀 [FCM TOKEN]:', token);
         console.log('--------------------------------------------------');
 
-        await registerPushToken(token, platform);
+        const { error } = await registerPushToken(token, platform);
+        if (error) {
+            console.warn(`[PUSH] Server failed to register token: ${error.error}`);
+        } else {
+            console.log('[PUSH] ✅ Token registered successfully with backend');
+        }
     } catch (error) {
         console.error('[PUSH] Failed to register push token:', error);
-    }
-}
-
-/**
- * API call to register the token
- */
-export async function registerPushToken(pushToken: string, platform: 'ios' | 'android') {
-    const url = `${supabaseUrl}/functions/v1/push-register-token`;
-
-    console.log(`[PUSH] Registering token for ${platform}...`);
-    try {
-        const response = await apiFetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                pushToken,
-                platform
-            })
-        });
-
-        if (!response.ok) {
-            const text = await response.text();
-            console.warn(`[PUSH] Server returned ${response.status}: ${text}`);
-            return;
-        }
-
-        console.log('[PUSH] ✅ Token registered successfully with backend');
-    } catch (err) {
-        console.error('[PUSH] ❌ Error in registerPushToken API call:', err);
     }
 }
 

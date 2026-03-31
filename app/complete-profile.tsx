@@ -210,7 +210,7 @@ export default function CompleteProfileScreen() {
       await refreshProfile();
       console.log('✅ Profile refreshed');
 
-      const { data: businessList } = await getVendorBusinesses(user.id);
+      const { data: businessList } = await getVendorBusinesses();
       if (businessList && businessList.length > 0) {
         router.replace('/(tabs)');
       } else {

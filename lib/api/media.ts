@@ -56,17 +56,40 @@ export async function deleteBusinessImage(businessId: string, mediaId: string) {
   return functionsCall<void>('vendor-businesses-media-delete', { business_id: businessId, media_id: mediaId });
 }
 
+export interface CreateMediaRequest {
+  business_id: string;
+  file_id: string;
+  sort_order?: number;
+}
+
+/** Spec: vendor-businesses-media-create { business_id, file_id, sort_order? } */
+export async function createBusinessMedia(body: CreateMediaRequest) {
+  return functionsCall<PortfolioImage>('vendor-businesses-media-create', body as any, 'media');
+}
+
+/** Spec: file-storage-url { file_id or id } -> { success, file_id, url } */
+export async function getFileStorageUrl(fileId: string) {
+  return functionsCall<{ file_id: string; url: string }>('file-storage-url', { file_id: fileId }, 'file_id');
+}
+
 /** Spec: upload-profile-photo — multipart/form-data field `image` (file). */
-export async function uploadProfilePhoto(formData: FormData): Promise<{ data?: { file_id: string; url: string }; error?: { success: false; error: string } }> {
+export async function uploadProfilePhoto(imageUri: string, fileName?: string): Promise<{ data?: { file_id: string; url: string }; error?: { success: false; error: string } }> {
   try {
     const url = `${getAuthFunctionsBaseUrl()}/upload-profile-photo`;
+    const formData = new FormData();
+    const fileExt = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
+    
+    // In React Native, we pass an object as 'any' for multipart upload
+    formData.append('image', {
+      uri: imageUri,
+      name: fileName || `profile-${Date.now()}.${fileExt}`,
+      type: `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`,
+    } as any);
+
     const response = await apiFetch(url, { method: 'POST', body: formData });
     const data = await response.json().catch(() => ({}));
+    
     if (!response.ok) {
-      if (response.status === 404) {
-        console.warn('[API] 404 Not Found (non-blocking): upload-profile-photo', url);
-        return {};
-      }
       return {
         error: {
           success: false,
@@ -74,8 +97,8 @@ export async function uploadProfilePhoto(formData: FormData): Promise<{ data?: {
         },
       };
     }
-    const payload = data?.file_id != null ? { file_id: data.file_id, url: data?.url ?? '' } : undefined;
-    return { data: payload };
+    
+    return { data: { file_id: data.file_id || data.id, url: data.url } };
   } catch (e: any) {
     return { error: { success: false, error: e?.message || 'Upload failed' } };
   }

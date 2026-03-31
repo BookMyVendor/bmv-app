@@ -3,39 +3,76 @@ import { functionsCall } from '../apiClient';
 export interface VendorBusiness {
   id: string;
   vendor_id: string;
-  business_name: string;
-  description?: string | null;
-  cover_photo_url?: string | null;
-  [key: string]: unknown;
+  name: string;
+  business_name?: string; // Alias for compatibility with older components
+  slug?: string;
+  description?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  phone?: string;
+  email?: string;
+  status?: string;
+  cover_image_file_id?: string;
+  logo_file_id?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
-export interface VendorBusinessWithCategory extends VendorBusiness {
-  vendor_business_category_mappings?: { categories?: { name: string } }[];
-  business_description?: string;
-  business_category?: string;
+export interface ListBusinessesRequest {
+  limit?: number;
+  offset?: number;
 }
 
-export async function getVendorBusinesses(_vendorId?: string) {
-  const res = await functionsCall<VendorBusinessWithCategory[]>('vendor-businesses-list', { limit: 100 }, 'vendor_businesses');
-  return res;
+/** Lists vendor businesses — wraps vendor-businesses-list. */
+export async function getVendorBusinesses(paramsOrVendorId?: ListBusinessesRequest | string) {
+  // Spec now relies on Bearer (vendor), so vendorId passed as string is ignored.
+  const params = typeof paramsOrVendorId === 'object' ? paramsOrVendorId : { limit: 50 };
+  return functionsCall<VendorBusiness[]>('vendor-businesses-list', params as any, 'vendor_businesses');
 }
 
-export async function getVendorBusiness(id: string) {
-  const res = await functionsCall<VendorBusiness>('vendor-businesses-get', { business_id: id }, 'vendor_business');
-  return res;
+/** Gets a single business — wraps vendor-businesses-get. */
+export async function getVendorBusiness(businessId: string) {
+  return functionsCall<VendorBusiness>('vendor-businesses-get', { business_id: businessId }, 'vendor_business');
 }
 
-/** Spec uses "name"; we accept business_name and map. */
-export async function createVendorBusiness(body: Record<string, unknown>) {
+export interface CreateBusinessRequest {
+  name?: string;
+  business_name?: string; // Compatibility
+  slug?: string;
+  description?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  phone?: string;
+  email?: string;
+  status?: string;
+}
+
+/** Creates a business — wraps vendor-businesses-create. Adds compatibility for business_name. */
+export async function createVendorBusiness(body: CreateBusinessRequest | Record<string, any>) {
   const payload = { ...body };
-  if (payload.business_name !== undefined && payload.name === undefined) {
+  if (payload.business_name && !payload.name) {
     payload.name = payload.business_name;
   }
-  const res = await functionsCall<VendorBusiness>('vendor-businesses-create', payload as Record<string, unknown>, 'vendor_business');
-  return res;
+  return functionsCall<VendorBusiness>('vendor-businesses-create', payload as any, 'vendor_business');
 }
 
-export async function updateVendorBusiness(id: string, body: Record<string, unknown>) {
-  const res = await functionsCall<VendorBusiness>('vendor-businesses-update', { business_id: id, ...body } as Record<string, unknown>, 'vendor_business');
-  return res;
+export interface UpdateBusinessRequest extends Partial<CreateBusinessRequest> {
+  business_id?: string;
+  cover_image_file_id?: string;
+  logo_file_id?: string;
+}
+
+/** Updates a business — wraps vendor-businesses-update. Handles both (body) and (id, body) signatures. */
+export async function updateVendorBusiness(bodyOrId: UpdateBusinessRequest | string, maybeBody?: Partial<UpdateBusinessRequest>) {
+  let payload: any;
+  if (typeof bodyOrId === 'string') {
+    payload = { business_id: bodyOrId, ...maybeBody };
+  } else {
+    payload = bodyOrId;
+  }
+  return functionsCall<VendorBusiness>('vendor-businesses-update', payload as any, 'vendor_business');
 }

@@ -239,7 +239,7 @@ export default function DashboardScreen() {
     }
 
     try {
-      const { data, error } = await getVendorBusinesses(user.id);
+      const { data, error } = await getVendorBusinesses();
       if (error) throw new Error(error.error);
 
       const formattedBusinesses = (data || []).map((business: any) => ({

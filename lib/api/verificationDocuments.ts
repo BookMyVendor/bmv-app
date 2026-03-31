@@ -52,3 +52,15 @@ export async function uploadVerificationDocument(
 export async function deleteVerificationDocument(id: string) {
   return functionsCall<void>('verification-document-delete', { document_id: id });
 }
+
+export interface CreateVerificationDocumentRequest {
+  business_id: string;
+  file_id: string;
+  document_type_id?: string;
+  document_type_code?: string;
+}
+
+/** Spec: vendor-businesses-verification-documents-create { business_id, file_id, ... } */
+export async function createVerificationDocument(body: CreateVerificationDocumentRequest) {
+  return functionsCall<VerificationDocument>('vendor-businesses-verification-documents-create', body as any, 'verification_document');
+}

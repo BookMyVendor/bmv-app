@@ -386,7 +386,7 @@ export const updateBusinessDetails = async (
   businessId: string,
   businessData: any
 ): Promise<{ data: any | null; error: Error | null }> => {
-  const { data, error } = await vendorBusinessApi.updateVendorBusiness(businessId, businessData);
+  const { data, error } = await vendorBusinessApi.updateVendorBusiness({ business_id: businessId, ...businessData });
   if (error) return { data: null, error: new Error(error.error) };
   return { data: data ?? null, error: null };
 };

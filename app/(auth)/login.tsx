@@ -22,7 +22,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
 import ExternalLogo from '../../components/ExternalLogo';
 import ScreenBackground from '../../components/ScreenBackground';
-import { sendOTP, resendOTP } from '../../lib/otpAuthApi';
+import { sendOTP, resendOTP } from '../../lib/authApi';
 
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -368,7 +368,7 @@ export default function LoginScreen() {
                         <Text style={styles.trustText}>Building India's Largest Event Vendor Network</Text>
                       </View>
 
-                      {process.env.NODE_ENV === 'development' && (
+                      {process.env.EXPO_PUBLIC_NODE_ENV === 'development' && (
                         <Text style={styles.devTag}>DEVELOPMENT</Text>
                       )}
                     </View>

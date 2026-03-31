@@ -22,46 +22,39 @@ export interface LeadStats {
   byStatus: Record<string, number>;
 }
 
-/** Spec: leads-list { business_id?, status?, limit?, offset? } -> { success: true, leads: [...] } */
-export async function getLeads(params: {
-  vendor_id?: string;
+export interface ListLeadsRequest {
   business_id?: string;
-  lead_status?: string | string[];
+  status?: string | string[];
+  lead_status?: string | string[]; // Compatibility
   limit?: number;
   offset?: number;
-  [key: string]: unknown;
-}) {
-  const body: Record<string, unknown> = {};
-  if (params?.business_id) body.business_id = params.business_id;
-  if (params?.lead_status !== undefined) body.status = Array.isArray(params.lead_status) ? params.lead_status[0] : params.lead_status;
-  if (params?.limit !== undefined) body.limit = params.limit;
-  if (params?.offset !== undefined) body.offset = params.offset;
+}
+
+/** Spec: leads-list { business_id?, status?, limit?, offset? } -> { success: true, leads: [...] } */
+export async function getLeads(params: ListLeadsRequest = {}) {
+  const body: Record<string, unknown> = { ...params };
+  
+  // Normalize lead_status -> status
+  if (params.lead_status && !params.status) {
+    body.status = params.lead_status;
+  }
+  
   return functionsCall<Lead[]>('leads-list', body, 'leads');
 }
 
-/** Not in spec; backend may implement lead-get with { lead_id }. */
+/** Helper to fetch a single lead by ID. */
 export async function getLead(id: string) {
-  const res = await functionsCall<Lead>('lead-get', { lead_id: id }, 'lead');
-  if (res.data) return res;
-  const list = await functionsCall<Lead[]>('leads-list', { limit: 500 }, 'leads');
-  if (list.data) {
-    const found = list.data.find((l) => l.id === id);
-    if (found) return { data: found };
-  }
-  return res;
+  return functionsCall<Lead>('lead-get', { lead_id: id }, 'lead');
 }
 
-/** Spec: submit-customer-lead returns { success: true, leadId: string }. */
-export async function createLead(body: Record<string, unknown>) {
-  const res = await functionsCall<{ leadId: string }>('submit-customer-lead', body as Record<string, unknown>);
-  const leadId = res.data && typeof res.data === 'object' && 'leadId' in res.data ? (res.data as any).leadId : undefined;
-  if (leadId) return { data: { id: leadId, ...body } as Lead, error: res.error };
-  return { data: undefined, error: res.error };
+/** Spec: submit-customer-lead { business_id, customer_name, ... } -> { success: true, leadId: string } */
+export async function submitLead(body: Record<string, unknown>) {
+  return functionsCall<{ leadId: string }>('submit-customer-lead', body);
 }
 
-/** Spec: lead-update { lead_id, status?, ... } */
-export async function updateLead(id: string, body: Record<string, unknown>) {
-  return functionsCall<Lead>('lead-update', { lead_id: id, ...body } as Record<string, unknown>, 'lead');
+/** Spec: lead-update { lead_id: string; status?; ... } */
+export async function updateLead(leadId: string, body: Partial<Lead> & Record<string, unknown>) {
+  return functionsCall<Lead>('lead-update', { lead_id: leadId, ...body }, 'lead');
 }
 
 /** Spec: lead-communications-list { lead_id } */
@@ -70,8 +63,8 @@ export async function getLeadCommunications(leadId: string) {
 }
 
 /** Spec: lead-communication-create { lead_id, message, ... } */
-export async function createLeadCommunication(leadId: string, body: Record<string, unknown>) {
-  return functionsCall<LeadCommunication>('lead-communication-create', { lead_id: leadId, ...body } as Record<string, unknown>, 'communication');
+export async function createLeadCommunication(params: { lead_id: string; message: string; [key: string]: unknown }) {
+  return functionsCall<LeadCommunication>('lead-communication-create', params, 'communication');
 }
 
 /** Not in spec; call leads-list and compute, or backend may expose leads-stats. */

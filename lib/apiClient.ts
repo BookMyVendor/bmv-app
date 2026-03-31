@@ -1,5 +1,5 @@
 import { getAccessToken, isTokenExpiredOrExpiringSoon, clearTokens } from './tokenStorage';
-import { refreshAccessToken } from './otpAuthApi';
+import { refreshAccessToken } from './refreshToken';
 import { getApiBaseUrl, getAuthFunctionsBaseUrl } from './apiConfig';
 import { triggerAuthFailure } from './authFailure';
 
