@@ -17,6 +17,8 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import PagerView from 'react-native-pager-view';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -39,8 +41,11 @@ import {
   Package,
   MoreVertical,
   Search,
+  WifiOff,
+  Video,
 } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
+import { Video as ExpoVideo, ResizeMode } from 'expo-av';
 import { supabaseCore } from '../lib/supabase';
 import {
   getBusinessDetails,
@@ -56,6 +61,8 @@ import {
   pickImage,
   pickMultipleImages,
   uploadMultipleBusinessImages,
+  uploadBusinessVideo,
+  pickVideo,
   setCoverImage,
   getBusinessVerificationDocuments,
   uploadVerificationDocument,
@@ -68,10 +75,7 @@ import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '../lib/docu
 import { validatePincode } from '../lib/pincodeValidation';
 import { validateEmail, getEmailError } from '../lib/validation';
 import { stripCountryCode } from '../lib/formatters';
-import Logo from '../components/Logo';
 import Dropdown from '../components/Dropdown';
-import PackageList from '../components/packages/PackageList';
-import { Colors } from '../constants/theme';
 import ScreenBackground from '../components/ScreenBackground';
 
 const EXPERIENCE_OPTIONS = [
@@ -189,10 +193,12 @@ export default function BusinessDetailsScreen() {
   const [activeSection, setActiveSection] = useState<SectionType>('gallery');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
 
   const [showOfferModal, setShowOfferModal] = useState(false);
   const [showImagePreview, setShowImagePreview] = useState(false);
-  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [previewInitialIndex, setPreviewInitialIndex] = useState(0);
+  const [currentPreviewIndex, setCurrentPreviewIndex] = useState(0);
   const [editingOffer, setEditingOffer] = useState<Offer | null>(null);
 
   const [offerTitle, setOfferTitle] = useState('');
@@ -233,9 +239,10 @@ export default function BusinessDetailsScreen() {
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
   const [selectedEventIds, setSelectedEventIds] = useState<string[]>([]);
   const [expandedCategoryIds, setExpandedCategoryIds] = useState<Set<string>>(new Set());
-  const [expandedEventCategoryIds, setExpandedEventCategoryIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [eventSearchQuery, setEventSearchQuery] = useState('');
+  const [isPrimaryModalOpen, setIsPrimaryModalOpen] = useState(false);
+  const [primarySearchQuery, setPrimarySearchQuery] = useState('');
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isRootDropdownOpen, setIsRootDropdownOpen] = useState(false);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
@@ -243,6 +250,7 @@ export default function BusinessDetailsScreen() {
   const [loadingCategories, setLoadingCategories] = useState(false);
   const [isCategoriesExpanded, setIsCategoriesExpanded] = useState(false);
   const [isEventsExpanded, setIsEventsExpanded] = useState(false);
+  const [businessType, setBusinessType] = useState<'services' | 'rental'>('services');
 
   // Temporary modal state - only committed when Done is clicked
   const [tempSelectedRootCategoryId, setTempSelectedRootCategoryId] = useState<string | null>(null);
@@ -261,7 +269,6 @@ export default function BusinessDetailsScreen() {
 
   // Refs for keyboard navigation in edit form
   const contactPersonNameRef = useRef<TextInput>(null);
-  const contactPersonRoleRef = useRef<TextInput>(null);
   const businessEmailRef = useRef<TextInput>(null);
   const contactPersonPhoneRef = useRef<TextInput>(null);
   const businessDescriptionRef = useRef<TextInput>(null);
@@ -331,13 +338,35 @@ export default function BusinessDetailsScreen() {
     try {
       setLoading(true);
 
+      // Check cache first
+      try {
+        const cachedBusiness = await AsyncStorage.getItem(`business_details_${id}`);
+        if (cachedBusiness) {
+          const parsedBusiness = JSON.parse(cachedBusiness);
+          setBusiness(parsedBusiness);
+          const dataToEdit = parsedBusiness ? { ...parsedBusiness } : {};
+          if (dataToEdit.contact_person_phone) {
+            dataToEdit.contact_person_phone = stripCountryCode(dataToEdit.contact_person_phone);
+          }
+          setEditData(dataToEdit);
+          setLoading(false); // Stop loading so user sees cached data immediately
+        }
+      } catch (cacheError) {
+        console.error("Cache read error:", cacheError);
+      }
+
       // 1. Fetch core business details FIRST and render immediately
       const businessRes = await getBusinessDetails(id);
 
       if (businessRes.error) throw businessRes.error;
 
       setBusiness(businessRes.data);
-      const dataToEdit = { ...businessRes.data } || {};
+      setIsOffline(false);
+      try {
+        AsyncStorage.setItem(`business_details_${id}`, JSON.stringify(businessRes.data));
+      } catch (e) { }
+
+      const dataToEdit = businessRes.data ? { ...businessRes.data } : {};
       if (dataToEdit.contact_person_phone) {
         dataToEdit.contact_person_phone = stripCountryCode(dataToEdit.contact_person_phone);
       }
@@ -385,19 +414,11 @@ export default function BusinessDetailsScreen() {
 
       setImages(allImages);
 
-      // Run category chain and other independent fetches in parallel
-      const { getBusinessPackages } = await import('../lib/packageApi');
-      const [fetchedBusinessCategories, , packagesRes] = await Promise.all([
-        // Group A: categories (sequential chain handled inside)
-        loadCategories(),
-        // Group B: verification documents (independent)
-        loadVerificationDocuments(),
-        // Group C: packages (independent)
-        getBusinessPackages(id),
-      ]);
+      // Load existing category mappings (this will determine businessType)
+      const { businessIds, businessType: determinedType } = await loadCategoryMappings();
 
-      // Load existing category mappings after categories are ready
-      const { businessIds } = await loadCategoryMappings();
+      // Load categories using the determined businessType
+      const fetchedBusinessCategories = await loadCategories(determinedType);
 
       // After mappings are loaded, determine root category
       if (businessIds.length > 0) {
@@ -447,7 +468,8 @@ export default function BusinessDetailsScreen() {
       }
     } catch (error: any) {
       console.error('Error loading business data:', error);
-      // Only show alert if we haven't loaded the business yet, otherwise it's a minor error
+      setIsOffline(true);
+      // Only show alert if we haven't loaded the business yet (from cache), otherwise it's a minor error
       if (!business) {
         Alert.alert('Error', error.message || 'Failed to load business details');
       }
@@ -458,7 +480,7 @@ export default function BusinessDetailsScreen() {
     }
   };
 
-  const loadCategoryMappings = async (): Promise<{ businessIds: string[]; eventIds: string[] }> => {
+  const loadCategoryMappings = async (): Promise<{ businessIds: string[]; eventIds: string[]; businessType: 'services' | 'rental' }> => {
     try {
       const { data: mappings, error } = await supabaseCore
         .from('vendor_business_category_mappings')
@@ -467,21 +489,23 @@ export default function BusinessDetailsScreen() {
 
       if (error) {
         console.error('Error loading category mappings:', error);
-        return { businessIds: [], eventIds: [] };
+        return { businessIds: [], eventIds: [], businessType: 'services' };
       }
+
+      let determinedBusinessType: 'services' | 'rental' = 'services';
 
       if (mappings && mappings.length > 0) {
         const allCategoryIds = mappings.map((m) => m.category_id);
 
-        // Fetch categories to determine their types
+        // Fetch categories to determine their types and business model
         const { data: categories, error: catError } = await supabaseCore
           .from('categories')
-          .select('id, category_type, category_level, parent_category_id')
+          .select('id, category_type, category_level, parent_category_id, business_model')
           .in('id', allCategoryIds);
 
         if (catError) {
           console.error('Error loading categories:', catError);
-          return { businessIds: [], eventIds: [] };
+          return { businessIds: [], eventIds: [], businessType: 'services' };
         }
 
         // Separate business and event categories
@@ -491,37 +515,58 @@ export default function BusinessDetailsScreen() {
         categories?.forEach((cat) => {
           if (cat.category_type === 'business') {
             businessCategoryIds.push(cat.id);
+            // Dynamic logic: if ANY category is rental, business type is rental
+            if (cat.business_model === 'rental') {
+              determinedBusinessType = 'rental';
+            }
           } else if (cat.category_type === 'event') {
             eventCategoryIds.push(cat.id);
           }
         });
 
+        setBusinessType(determinedBusinessType);
+        setEditData((prev: any) => ({ ...prev, businessType: determinedBusinessType }));
         setSelectedCategoryIds(businessCategoryIds);
         setSelectedEventIds(eventCategoryIds);
 
-        return { businessIds: businessCategoryIds, eventIds: eventCategoryIds };
+        return {
+          businessIds: businessCategoryIds,
+          eventIds: eventCategoryIds,
+          businessType: determinedBusinessType
+        };
       }
 
-      return { businessIds: [], eventIds: [] };
+      setBusinessType('services');
+      return { businessIds: [], eventIds: [], businessType: 'services' };
     } catch (error) {
       console.error('Error loading category mappings:', error);
-      return { businessIds: [], eventIds: [] };
+      return { businessIds: [], eventIds: [], businessType: 'services' };
     }
   };
 
 
 
-  const loadCategories = async () => {
+  const loadCategories = async (type?: 'services' | 'rental') => {
     let businessCatsResult: any[] = [];
     try {
       setLoadingCategories(true);
 
       // Fetch all business categories with hierarchy info
-      const { data: businessCats, error: businessError } = await supabaseCore
+      let businessQuery = supabaseCore
         .from('categories')
         .select('id, name, icon, parent_category_id, category_level, sort_order')
         .eq('category_type', 'business')
-        .eq('visible', true)
+        .eq('visible', true);
+
+      // If rental type is selected, filter by business_model = 'rental'
+      if (type === 'rental') {
+        businessQuery = businessQuery.eq('business_model', 'rental');
+      } else {
+        // If service type is selected, filter by business_model != 'rental'
+        businessQuery = businessQuery.neq('business_model', 'rental');
+      }
+
+      const { data: businessCats, error: businessError } = await businessQuery
         .order('sort_order', { ascending: true });
 
       if (businessError) {
@@ -550,6 +595,19 @@ export default function BusinessDetailsScreen() {
       setLoadingCategories(false);
     }
     return businessCatsResult;
+  };
+
+  const handleBusinessTypeChange = (type: 'services' | 'rental') => {
+    setBusinessType(type);
+    setEditData((prev: any) => ({ ...prev, businessType: type }));
+    // Reset category selections when type changes
+    setSelectedRootCategoryId(null);
+    setSelectedCategoryIds([]);
+    setExpandedCategoryIds(new Set());
+    setSelectedEventIds([]);
+    setTempSelectedEventIds([]);
+    // Re-fetch categories with new filter
+    loadCategories(type);
   };
 
   const onRefresh = () => {
@@ -680,7 +738,7 @@ export default function BusinessDetailsScreen() {
     return rootCategories;
   };
 
-  // Get full path for a category (excluding root/parent category)
+  // Get full path for a category
   const getCategoryPath = (categoryId: string, categories: any[]): string => {
     const categoryMap = new Map<string, any>();
     categories.forEach((cat) => categoryMap.set(cat.id, cat));
@@ -695,12 +753,24 @@ export default function BusinessDetailsScreen() {
       currentId = cat.parent_category_id;
     }
 
-    // Remove the root category (first element) if there are multiple levels
-    if (path.length > 1) {
-      path.shift(); // Remove the first element (root category)
-    }
-
     return path.join(' > ');
+  };
+
+  const getRootCategoryId = (categoryId: string, categories: any[]): string => {
+    const categoryMap = new Map<string, any>();
+    categories.forEach((cat) => categoryMap.set(cat.id, cat));
+    
+    let currentId: string | null = categoryId;
+    let rootId = categoryId;
+    
+    while (currentId) {
+      const cat = categoryMap.get(currentId);
+      if (!cat) break;
+      rootId = cat.id;
+      currentId = cat.parent_category_id;
+    }
+    
+    return rootId;
   };
 
   // Filter categories based on search query
@@ -775,6 +845,8 @@ export default function BusinessDetailsScreen() {
       setIsCategoryModalOpen(false);
       setTempSelectedCategoryIds([]);
     }
+    setIsPrimaryModalOpen(false);
+    setPrimarySearchQuery('');
   };
 
   // Handle child category selection
@@ -798,7 +870,7 @@ export default function BusinessDetailsScreen() {
             (c) => c.parent_category_id === categoryId
           );
           if (hasChildren) {
-            setExpandedCategoryIds((expanded) => new Set([...expanded, categoryId]));
+            setExpandedCategoryIds((expanded) => new Set([...Array.from(expanded), categoryId]));
           }
         }
         return [...prev, categoryId];
@@ -877,7 +949,7 @@ export default function BusinessDetailsScreen() {
             {!hasChildren && <View style={styles.expandButton} />}
 
             {isRoot ? (
-              <View style={styles.radioButton}>
+              <View style={styles.categoryRadioButton}>
                 {isRootSelected ? (
                   <View style={styles.radioButtonSelected}>
                     <View style={styles.radioButtonInner} />
@@ -960,7 +1032,6 @@ export default function BusinessDetailsScreen() {
               )}
             </View>
 
-            {node.icon && <Text style={styles.categoryIcon}>{node.icon}</Text>}
             <Text style={[styles.categoryName, isSelected && styles.categoryNameSelected]}>
               {node.name}
             </Text>
@@ -1032,176 +1103,57 @@ export default function BusinessDetailsScreen() {
     return DEFAULT_PRICING_UNITS;
   }, [selectedCategoriesWithPaths, allBusinessCategories, selectedRootCategoryId]);
 
-  // Build hierarchical tree structure for event categories
-  const buildEventCategoryTree = (categories: any[]): any[] => {
-    const categoryMap = new Map<string, any>();
-    const rootCategories: any[] = [];
 
-    // First pass: create all nodes
-    categories.forEach((cat) => {
-      categoryMap.set(cat.id, {
-        ...cat,
-        children: [],
-      });
-    });
 
-    // Second pass: build tree structure
-    categories.forEach((cat) => {
-      const node = categoryMap.get(cat.id)!;
-      if (cat.parent_category_id) {
-        const parent = categoryMap.get(cat.parent_category_id);
-        if (parent) {
-          parent.children.push(node);
-        }
-      } else {
-        rootCategories.push(node);
-      }
-    });
 
-    // Sort children by sort_order
-    const sortChildren = (nodes: any[]) => {
-      nodes.forEach((node) => {
-        node.children.sort((a: any, b: any) => {
-          const aOrder = allEventCategories.find((c) => c.id === a.id)?.sort_order ?? 0;
-          const bOrder = allEventCategories.find((c) => c.id === b.id)?.sort_order ?? 0;
-          return aOrder - bOrder;
-        });
-        sortChildren(node.children);
-      });
-    };
 
-    sortChildren(rootCategories);
-    return rootCategories;
-  };
+  // Get selected event names
+  const selectedEventNames = React.useMemo(() => {
+    return selectedEventIds
+      .map((id) => {
+        const cat = allEventCategories.find((c) => c.id === id);
+        return cat?.name || '';
+      })
+      .filter(Boolean);
+  }, [selectedEventIds, allEventCategories]);
 
-  // Build event category tree
-  const eventCategoryTree = React.useMemo(() => {
-    return buildEventCategoryTree(allEventCategories);
+  // Root event categories for the flat list
+  const rootEventCategories = React.useMemo(() => {
+    return allEventCategories.filter((cat) => cat.parent_category_id === null);
   }, [allEventCategories]);
 
-  // Filter event category tree based on search
-  const filterEventCategories = (nodes: any[], query: string): any[] => {
-    if (!query.trim()) return nodes;
-
-    const lowerQuery = query.toLowerCase();
-    const filtered: any[] = [];
-
-    const matchesQuery = (node: any): boolean => {
-      return node.name.toLowerCase().includes(lowerQuery);
-    };
-
-    const filterNode = (node: any): any | null => {
-      const filteredChildren = node.children
-        .map(filterNode)
-        .filter((n: any): n is any => n !== null);
-
-      if (matchesQuery(node) || filteredChildren.length > 0) {
-        return {
-          ...node,
-          children: filteredChildren,
-        };
-      }
-      return null;
-    };
-
-    nodes.forEach((node) => {
-      const filteredNode = filterNode(node);
-      if (filteredNode) {
-        filtered.push(filteredNode);
-      }
-    });
-
-    return filtered;
-  };
-
-  const filteredEventTree = React.useMemo(() => {
-    return filterEventCategories(eventCategoryTree, eventSearchQuery);
-  }, [eventCategoryTree, eventSearchQuery]);
-
-  // Get full path for an event category
-  const getEventCategoryPath = (categoryId: string, categories: any[]): string => {
-    const categoryMap = new Map<string, any>();
-    categories.forEach((cat) => categoryMap.set(cat.id, cat));
-
-    const path: string[] = [];
-    let currentId: string | null = categoryId;
-
-    while (currentId) {
-      const cat = categoryMap.get(currentId);
-      if (!cat) break;
-      path.unshift(cat.name);
-      currentId = cat.parent_category_id;
-    }
-
-    return path.join(' > ');
-  };
-
-  // Get selected event categories with full paths
-  const selectedEventsWithPaths = React.useMemo(() => {
-    // Only show child categories
-    const childIds = selectedEventIds.filter(id => {
-      const cat = allEventCategories.find(c => c.id === id);
-      return cat && cat.parent_category_id !== null;
-    });
-
-    return childIds.map((id) => ({
-      id,
-      path: getEventCategoryPath(id, allEventCategories),
-    }));
-  }, [selectedEventIds, allEventCategories]);
+  // Filter root events based on search
+  const filteredRootEvents = React.useMemo(() => {
+    if (!eventSearchQuery.trim()) return rootEventCategories;
+    const lowerQuery = eventSearchQuery.toLowerCase();
+    return rootEventCategories.filter((cat) =>
+      cat.name.toLowerCase().includes(lowerQuery)
+    );
+  }, [rootEventCategories, eventSearchQuery]);
 
   // Get display text for event dropdown
   const getEventDropdownDisplayText = (): string => {
-    if (selectedEventsWithPaths.length === 0) {
+    if (selectedEventNames.length === 0) {
       return 'Select event types';
     }
-    if (selectedEventsWithPaths.length === 1) {
-      return selectedEventsWithPaths[0].path;
+    if (selectedEventNames.length === 1) {
+      return selectedEventNames[0];
     }
-    return `${selectedEventsWithPaths.length} sub-categories selected`;
+    return `${selectedEventNames.length} events selected`;
   };
 
   // Toggle event selection
   const toggleEventSelection = (eventId: string) => {
     setSelectedEventIds((prev) => {
       if (prev.includes(eventId)) {
-        // Collapse when deselecting
-        setExpandedEventCategoryIds((expanded) => {
-          const newExpanded = new Set(expanded);
-          if (newExpanded.has(eventId)) {
-            newExpanded.delete(eventId);
-          }
-          return newExpanded;
-        });
         return prev.filter((id) => id !== eventId);
       } else {
-        // Find the category and expand it if it has children
-        const category = allEventCategories.find((c) => c.id === eventId);
-        if (category) {
-          const hasChildren = allEventCategories.some(
-            (c) => c.parent_category_id === eventId
-          );
-          if (hasChildren) {
-            setExpandedEventCategoryIds((expanded) => new Set([...expanded, eventId]));
-          }
-        }
         return [...prev, eventId];
       }
     });
   };
 
-  // Toggle event category expansion
-  const toggleEventExpansion = (categoryId: string) => {
-    setExpandedEventCategoryIds((expanded) => {
-      const newExpanded = new Set(expanded);
-      if (newExpanded.has(categoryId)) {
-        newExpanded.delete(categoryId);
-      } else {
-        newExpanded.add(categoryId);
-      }
-      return newExpanded;
-    });
-  };
+
 
   // Modal handlers for sub-categories only (root is chosen via dropdown)
   const handleCategoryModalOpen = () => {
@@ -1212,6 +1164,8 @@ export default function BusinessDetailsScreen() {
 
   const handleCategoryModalClose = () => {
     setIsCategoryModalOpen(false);
+    setSelectedCategoryIds([]);
+    setTempSelectedCategoryIds([]);
     setSearchQuery('');
   };
 
@@ -1229,6 +1183,58 @@ export default function BusinessDetailsScreen() {
     setSelectedCategoryIds([...tempSelectedCategoryIds]);
     setIsCategoryModalOpen(false);
     setSearchQuery('');
+  };
+
+  // Select All / Deselect All helpers for Services modal
+  const getAllSubtreeIds = (): string[] => {
+    if (!subtreeForSelectedRoot) return [];
+    const getAllIds = (nodes: any[]): string[] => {
+      let ids: string[] = [];
+      nodes.forEach((node) => {
+        ids.push(node.id);
+        if (node.children?.length > 0) ids = [...ids, ...getAllIds(node.children)];
+      });
+      return ids;
+    };
+    return getAllIds(subtreeForSelectedRoot.children || []);
+  };
+
+  const handleSelectAllServices = () => {
+    const allIds = getAllSubtreeIds();
+    const allSelected = allIds.every((id) => tempSelectedCategoryIds.includes(id));
+    if (allSelected) {
+      // Deselect all
+      setTempSelectedCategoryIds([]);
+    } else {
+      // Select all — also expand all nodes
+      setTempSelectedCategoryIds(allIds);
+      setExpandedCategoryIds((prev) => new Set([...Array.from(prev), ...allIds]));
+    }
+  };
+
+  const isAllServicesSelected = (): boolean => {
+    const allIds = getAllSubtreeIds();
+    return allIds.length > 0 && allIds.every((id) => tempSelectedCategoryIds.includes(id));
+  };
+
+  // Get all root event categories for Select All
+  const getAllRootEventIds = (): string[] => {
+    return allEventCategories.filter(c => c.parent_category_id === null).map((c) => c.id);
+  };
+
+  const handleSelectAllEvents = () => {
+    const allIds = getAllRootEventIds();
+    const allSelected = allIds.every((id) => tempSelectedEventIds.includes(id));
+    if (allSelected) {
+      setTempSelectedEventIds([]);
+    } else {
+      setTempSelectedEventIds(allIds);
+    }
+  };
+
+  const isAllEventsSelected = (): boolean => {
+    const allIds = getAllRootEventIds();
+    return allIds.length > 0 && allIds.every((id) => tempSelectedEventIds.includes(id));
   };
 
   const toggleTempCategorySelection = (categoryId: string) => {
@@ -1287,7 +1293,7 @@ export default function BusinessDetailsScreen() {
             currentParentId = parent?.parent_category_id || null;
           }
           if (parentChain.length > 0) {
-            setExpandedCategoryIds((expanded) => new Set([...expanded, ...parentChain]));
+            setExpandedCategoryIds((expanded) => new Set([...Array.from(expanded), ...parentChain]));
           }
         }
       }
@@ -1303,21 +1309,17 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleEventModalClose = () => {
-    // Discard temp changes when X is clicked
+    // Discard temp changes and clear all selections when X is clicked
     setIsEventModalOpen(false);
-    // Reset search
+    setSelectedEventIds([]);
+    setTempSelectedEventIds([]);
     setEventSearchQuery('');
   };
 
   const handleEventModalDone = () => {
-    // Validate: at least one event type (sub-category) must be selected
-    const hasSubEventType = tempSelectedEventIds.some(id => {
-      const cat = allEventCategories.find(c => c.id === id);
-      return cat && cat.parent_category_id !== null;
-    });
-
-    if (!hasSubEventType) {
-      Alert.alert('Validation Error', 'Please select at least one sub-category for event types');
+    // Root categories are now the primary selection
+    if (tempSelectedEventIds.length === 0) {
+      Alert.alert('Validation Error', 'Please select at least one event type');
       return;
     }
 
@@ -1328,132 +1330,173 @@ export default function BusinessDetailsScreen() {
     setEventSearchQuery('');
   };
 
+  const handleClearAllPrimary = () => {
+    setSelectedRootCategoryId('');
+    setSelectedCategoryIds([]);
+    setPrimarySearchQuery('');
+    setEditData((prev: any) => ({
+      ...prev,
+      selectedRootCategoryId: '',
+      selectedCategoryIds: []
+    }));
+    setIsPrimaryModalOpen(false);
+  };
+
+  // Unified Search Logic for Primary Modal (Business Details)
+  const filteredPrimaryResults = React.useMemo(() => {
+    if (!primarySearchQuery.trim()) return rootCategoriesForDropdown;
+    const lowerQuery = primarySearchQuery.toLowerCase();
+    
+    // 1. Root categories matching the query
+    const directMatches = rootCategoriesForDropdown.filter((cat: any) => 
+      cat.name.toLowerCase().includes(lowerQuery)
+    );
+    
+    // 2. Root categories that have matching children
+    const parentMatches: any[] = [];
+    const subCategories = allBusinessCategories.filter(cat => cat.parent_category_id !== null);
+    subCategories.forEach(cat => {
+      if (cat.name.toLowerCase().includes(lowerQuery)) {
+        // Find top level root for this cat
+        let current: any = cat;
+        while (current && current.parent_category_id) {
+          const parent = allBusinessCategories.find(c => c.id === current.parent_category_id);
+          current = parent;
+        }
+        if (current && !directMatches.find(dm => dm.id === current.id) && !parentMatches.find(pm => pm.id === current.id)) {
+          parentMatches.push(current);
+        }
+      }
+    });
+
+    return [...directMatches, ...parentMatches];
+  }, [rootCategoriesForDropdown, primarySearchQuery, allBusinessCategories]);
+
+  const filteredSpecializationResults = React.useMemo(() => {
+    if (!primarySearchQuery.trim()) return [];
+    
+    // Get all sub-categories (non-roots)
+    const subCategories = allBusinessCategories.filter(cat => cat.parent_category_id !== null);
+    
+    return subCategories
+      .filter(cat => cat.name.toLowerCase().includes(primarySearchQuery.toLowerCase()))
+      .map(cat => ({
+        ...cat,
+        path: getCategoryPath(cat.id, allBusinessCategories),
+        rootCategoryId: getRootCategoryId(cat.id, allBusinessCategories)
+      }));
+  }, [allBusinessCategories, primarySearchQuery]);
+
+  const handleSpecializationSearchSelection = (catId: string, rootId: string) => {
+    // If different root, reset selections and set new root
+    if (selectedRootCategoryId !== rootId) {
+      setSelectedRootCategoryId(rootId);
+      setSelectedCategoryIds([catId]);
+      setEditData((prev: any) => ({
+        ...prev,
+        selectedRootCategoryId: rootId,
+        selectedCategoryIds: [catId]
+      }));
+    } else {
+      // Same root, toggle selection
+      const isSelected = selectedCategoryIds.includes(catId);
+      const nextIds = isSelected 
+        ? selectedCategoryIds.filter(id => id !== catId)
+        : [...selectedCategoryIds, catId];
+      
+      setSelectedCategoryIds(nextIds);
+      setEditData((prev: any) => ({
+        ...prev,
+        selectedCategoryIds: nextIds
+      }));
+    }
+  };
+
+  const handleSelectAllFilteredSpecializations = () => {
+    if (filteredSpecializationResults.length === 0) return;
+    
+    const targetRootId = filteredSpecializationResults[0].rootCategoryId;
+    if (!targetRootId) return;
+
+    const sameRootResults = filteredSpecializationResults.filter(r => r.rootCategoryId === targetRootId);
+    const newIds = sameRootResults.map(r => r.id);
+
+    if (selectedRootCategoryId !== targetRootId) {
+      setSelectedRootCategoryId(targetRootId);
+      setSelectedCategoryIds(newIds);
+      setEditData((prev: any) => ({
+        ...prev,
+        selectedRootCategoryId: targetRootId,
+        selectedCategoryIds: newIds
+      }));
+    } else {
+      const allSelected = newIds.every(id => selectedCategoryIds.includes(id));
+      const nextIds = allSelected 
+        ? selectedCategoryIds.filter(id => !newIds.includes(id))
+        : Array.from(new Set([...selectedCategoryIds, ...newIds]));
+      
+      setSelectedCategoryIds(nextIds);
+      setEditData((prev: any) => ({
+        ...prev,
+        selectedCategoryIds: nextIds
+      }));
+    }
+  };
+
+  const isAllFilteredSpecializationsSelected = () => {
+    if (filteredSpecializationResults.length === 0) return false;
+    const targetRootId = filteredSpecializationResults[0].rootCategoryId;
+    const sameRootResults = filteredSpecializationResults.filter(r => r.rootCategoryId === targetRootId);
+    return sameRootResults.every(r => selectedCategoryIds.includes(r.id));
+  };
+
   // Temp handler for event selection in modal
   const toggleTempEventSelection = (eventId: string) => {
     setTempSelectedEventIds((prev) => {
-      let newIds = [...prev];
       const isSelected = prev.includes(eventId);
-
       if (isSelected) {
-        // Deselecting
-        newIds = newIds.filter((id) => id !== eventId);
-
-        // Also deselect all children if this is a parent category
-        const childCategories = allEventCategories.filter(c => c.parent_category_id === eventId);
-        if (childCategories.length > 0) {
-          const childIds = childCategories.map(c => c.id);
-          newIds = newIds.filter(id => !childIds.includes(id));
-        }
-
-        // Collapse when deselecting
-        setExpandedEventCategoryIds((expanded) => {
-          const newExpanded = new Set(expanded);
-          if (newExpanded.has(eventId)) {
-            newExpanded.delete(eventId);
-          }
-          return newExpanded;
-        });
+        return prev.filter((id) => id !== eventId);
       } else {
-        // Selecting
-        newIds.push(eventId);
-
-        // Also select all children if this is a parent category
-        const childCategories = allEventCategories.filter(c => c.parent_category_id === eventId);
-        if (childCategories.length > 0) {
-          childCategories.forEach(child => {
-            if (!newIds.includes(child.id)) {
-              newIds.push(child.id);
-            }
-          });
-
-          // Auto-expand the parent category to show selected children
-          setExpandedEventCategoryIds((expanded) => {
-            const newExpanded = new Set(expanded);
-            newExpanded.add(eventId);
-            return newExpanded;
-          });
-        }
+        return [...prev, eventId];
       }
-      return newIds;
     });
   };
 
-  // Auto-expand selected event categories with children
-  React.useEffect(() => {
-    setExpandedEventCategoryIds((currentExpanded) => {
-      const newExpanded = new Set(currentExpanded);
-      let changed = false;
-      selectedEventIds.forEach((categoryId) => {
-        const hasChildren = allEventCategories.some(
-          (c) => c.parent_category_id === categoryId
-        );
-        if (hasChildren && !newExpanded.has(categoryId)) {
-          newExpanded.add(categoryId);
-          changed = true;
-        }
-      });
-      return changed ? newExpanded : currentExpanded;
-    });
-  }, [selectedEventIds, allEventCategories]);
 
-  // Render event category tree for modal (uses temp state)
-  const renderEventCategoryTreeForModal = (nodes: any[], level: number = 0): React.ReactNode => {
-    return nodes.map((node) => {
-      const isSelected = tempSelectedEventIds.includes(node.id);
-      const isExpanded = expandedEventCategoryIds.has(node.id);
-      const hasChildren = node.children.length > 0;
+
+  // Render event category list for modal (flat)
+  const renderEventListForModal = (categories: any[]): React.ReactNode => {
+    return categories.map((cat) => {
+      const isSelected = tempSelectedEventIds.includes(cat.id);
 
       return (
-        <View key={node.id} style={styles.categoryItem}>
-          <TouchableOpacity
-            style={[styles.categoryRow, { paddingLeft: level * 20 + 12 }]}
-            onPress={() => toggleTempEventSelection(node.id)}
-            activeOpacity={0.7}
-          >
-            {hasChildren && (
-              <TouchableOpacity
-                style={styles.expandButton}
-                onPress={(e) => {
-                  e.stopPropagation();
-                  toggleEventExpansion(node.id);
-                }}
-              >
-                {isExpanded ? (
-                  <ChevronDown size={16} color="#666" />
-                ) : (
-                  <ChevronRight size={16} color="#666" />
-                )}
-              </TouchableOpacity>
+        <TouchableOpacity
+          key={cat.id}
+          style={styles.categoryRow}
+          onPress={() => toggleTempEventSelection(cat.id)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.expandButton} />
+
+          <View style={styles.checkbox}>
+            {isSelected ? (
+              <View style={styles.checkboxSelected}>
+                <Check size={14} color="#fff" strokeWidth={3} />
+              </View>
+            ) : (
+              <View style={styles.checkboxUnselected} />
             )}
-            {!hasChildren && <View style={styles.expandButton} />}
+          </View>
 
-            <View style={styles.checkbox}>
-              {isSelected ? (
-                <View style={styles.checkboxSelected}>
-                  <Check size={14} color="#fff" strokeWidth={3} />
-                </View>
-              ) : (
-                <View style={styles.checkboxUnselected} />
-              )}
-            </View>
-
-            {node.icon && <Text style={styles.categoryIcon}>{node.icon}</Text>}
-            <Text
-              style={[
-                styles.categoryName,
-                isSelected && styles.categoryNameSelected,
-              ]}
-            >
-              {node.name}
-            </Text>
-          </TouchableOpacity>
-
-          {hasChildren && isExpanded && (
-            <View style={styles.childrenContainer}>
-              {renderEventCategoryTreeForModal(node.children, level + 1)}
-            </View>
-          )}
-        </View>
+          <Text
+            style={[
+              styles.categoryName,
+              isSelected && styles.categoryNameSelected,
+            ]}
+          >
+            {cat.name}
+          </Text>
+        </TouchableOpacity>
       );
     });
   };
@@ -1666,8 +1709,9 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleUploadImage = async () => {
-    if (images.length >= 20) {
-      Alert.alert('Limit Reached', 'Maximum 20 images allowed per business');
+    const imagesOnly = images.filter(img => img.image_type !== 'video');
+    if (imagesOnly.length >= 10) {
+      Alert.alert('Limit Reached', 'Maximum 10 images allowed per business');
       return;
     }
 
@@ -1688,7 +1732,7 @@ export default function BusinessDetailsScreen() {
         }
         console.log('Upload successful, data:', data);
 
-        // Reload images to get the persisted data
+        // Reload data to refresh calculations
         await loadData();
 
         Alert.alert('Success', 'Image uploaded successfully');
@@ -1701,10 +1745,48 @@ export default function BusinessDetailsScreen() {
     }
   };
 
+  const handleUploadVideo = async () => {
+    const videosOnly = images.filter(img => img.image_type === 'video');
+    if (videosOnly.length >= 5) {
+      Alert.alert('Limit Reached', 'Maximum 5 videos allowed per business');
+      return;
+    }
+
+    const { uri, error } = await pickVideo();
+    if (error) {
+      Alert.alert('Error', error.message);
+      return;
+    }
+
+    if (uri) {
+      try {
+        setUploading(true);
+        console.log('Starting video upload, URI:', uri);
+        const { data, error: uploadError } = await uploadBusinessVideo(id, uri);
+        if (uploadError) {
+          console.error('Upload error:', uploadError);
+          throw uploadError;
+        }
+        console.log('Upload successful, data:', data);
+
+        // Reload data
+        await loadData();
+
+        Alert.alert('Success', 'Video uploaded successfully');
+      } catch (error: any) {
+        console.error('Upload failed:', error);
+        Alert.alert('Error', error.message || 'Failed to upload video');
+      } finally {
+        setUploading(false);
+      }
+    }
+  };
+
   const handleUploadMultipleImages = async () => {
-    const availableSlots = 20 - images.length;
-    if (availableSlots === 0) {
-      Alert.alert('Limit Reached', 'Maximum 20 images allowed per business');
+    const imagesOnly = images.filter(img => img.image_type !== 'video');
+    const availableSlots = 10 - imagesOnly.length;
+    if (availableSlots <= 0) {
+      Alert.alert('Limit Reached', 'Maximum 10 images allowed per business');
       return;
     }
 
@@ -1721,7 +1803,7 @@ export default function BusinessDetailsScreen() {
     if (uris.length > availableSlots) {
       Alert.alert(
         'Too Many Images',
-        `You can only upload ${availableSlots} more image(s). Currently at ${images.length}/20.`
+        `You can only upload ${availableSlots} more image(s). Currently at ${imagesOnly.length}/10.`
       );
       return;
     }
@@ -1762,9 +1844,10 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleDeleteImage = (image: PortfolioImage) => {
+    const isVideo = image.image_type === 'video';
     Alert.alert(
-      'Delete Image',
-      'Are you sure you want to delete this image?',
+      `Delete ${isVideo ? 'Video' : 'Image'}`,
+      `Are you sure you want to delete this ${isVideo ? 'video' : 'image'}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -1775,9 +1858,9 @@ export default function BusinessDetailsScreen() {
               const { error } = await deleteBusinessImage(image.id);
               if (error) throw error;
               await loadData(); // Reload to get updated list
-              Alert.alert('Success', 'Image deleted successfully');
+              Alert.alert('Success', `${isVideo ? 'Video' : 'Image'} deleted successfully`);
             } catch (error: any) {
-              Alert.alert('Error', error.message || 'Failed to delete image');
+              Alert.alert('Error', error.message || `Failed to delete ${isVideo ? 'video' : 'image'}`);
             }
           },
         },
@@ -1786,6 +1869,10 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleSetCoverImage = async (image: PortfolioImage) => {
+    if (image.image_type === 'video') {
+      Alert.alert('Error', 'Videos cannot be set as cover image.');
+      return;
+    }
     try {
       const { error } = await setCoverImage(id, image.id);
       if (error) throw error;
@@ -1829,9 +1916,7 @@ export default function BusinessDetailsScreen() {
     if (!editData.contact_person_name || !editData.contact_person_name.trim()) {
       errors.contact_person_name = 'Contact person name is required';
     }
-    if (!editData.business_email || !editData.business_email.trim()) {
-      errors.business_email = 'Email is required';
-    } else {
+    if (editData.business_email && editData.business_email.trim()) {
       const emailErr = getEmailError(editData.business_email);
       if (emailErr) {
         errors.business_email = emailErr;
@@ -1870,10 +1955,8 @@ export default function BusinessDetailsScreen() {
       errors.operating_locations = 'At least one operating location is required';
     }
 
-    // 2. Validate PAN (Required and format)
-    if (!editData.business_registration_number || !editData.business_registration_number.trim()) {
-      errors.business_registration_number = 'PAN number is required';
-    } else {
+    // 2. Validate PAN (Optional but format if provided)
+    if (editData.business_registration_number && editData.business_registration_number.trim()) {
       const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
       if (!panRegex.test(editData.business_registration_number.toUpperCase())) {
         errors.business_registration_number = 'Please enter a valid PAN (e.g., ABCDE1234F)';
@@ -1882,17 +1965,13 @@ export default function BusinessDetailsScreen() {
 
     // 3. Validate GST (format if provided)
     if (editData.gst_number && editData.gst_number.trim()) {
-      const gstRegex = /^\d{2}[A-Z]{5}\d{4}[A-Z]{1}\d{1}Z\d{1}$/;
+      const gstRegex = /^[A-Z0-9]{15}$/;
       if (!gstRegex.test(editData.gst_number.toUpperCase())) {
-        errors.gst_number = 'Please enter a valid GST number';
+        errors.gst_number = 'GST number must be exactly 15 alphanumeric characters';
       }
     }
 
-    // 4. Validate PAN document is uploaded
-    const panDocs = documentsByType['pan'] || [];
-    if (panDocs.length === 0) {
-      errors.panDocument = 'PAN card document is required';
-    }
+
 
     // 5. Validate at least one service category ONLY if categories are loaded
     if (allBusinessCategories.length > 0) {
@@ -1905,16 +1984,6 @@ export default function BusinessDetailsScreen() {
       }
     }
 
-    // 6. Validate at least one event type ONLY if categories are loaded
-    if (allEventCategories.length > 0) {
-      const hasSubEventType = selectedEventIds.some(id => {
-        const cat = allEventCategories.find(c => c.id === id);
-        return cat && cat.parent_category_id !== null;
-      });
-      if (!hasSubEventType) {
-        errors.selectedEventIds = 'At least one event type must be selected';
-      }
-    }
 
     // If there are any validation errors, set them to highlight fields
     if (Object.keys(errors).length > 0) {
@@ -1929,7 +1998,7 @@ export default function BusinessDetailsScreen() {
       setSavingDetails(true);
 
       // Extract base_price and pricing_unit from editData as they are not columns on vendor_businesses
-      const { base_price, pricing_unit, ...businessUpdateData } = editData;
+      const { base_price, pricing_unit, businessType: editDataBusinessType, ...businessUpdateData } = editData;
 
       // Update business details
       const finalUpdateData = {
@@ -1941,6 +2010,8 @@ export default function BusinessDetailsScreen() {
       const { data, error } = await updateBusinessDetails(id, finalUpdateData);
       if (error) throw error;
       setBusiness(data);
+
+
 
       // Handle Package Update/Creation using the extracted price fields
       if (base_price && pricing_unit) {
@@ -2015,7 +2086,11 @@ export default function BusinessDetailsScreen() {
         }
       }
 
-      Alert.alert('Success', 'Business details updated successfully');
+      Alert.alert(
+        'Success',
+        'Business details updated successfully',
+        [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
+      );
       await loadData(); // Reload to refresh the display
       await loadVerificationDocuments(); // Reload documents
     } catch (error: any) {
@@ -2087,9 +2162,10 @@ export default function BusinessDetailsScreen() {
     </View>
   );
 
-  const renderImageItem = ({ item }: { item: PortfolioImage }) => {
+  const renderImageItem = ({ item, index }: { item: PortfolioImage; index: number }) => {
     const imageSource = item.image_base64 || item.image_url;
     const isCover = item.image_type === 'cover';
+    const isVideo = item.image_type === 'video';
     const isMenuOpen = activeMenuImageId === item.id;
 
     return (
@@ -2101,12 +2177,30 @@ export default function BusinessDetailsScreen() {
             if (activeMenuImageId) {
               setActiveMenuImageId(null);
             } else {
-              setPreviewImageUrl(imageSource);
+              setPreviewInitialIndex(index);
+              setCurrentPreviewIndex(index);
               setShowImagePreview(true);
             }
           }}
         >
-          <Image source={{ uri: imageSource || undefined }} style={styles.galleryImage} resizeMode="cover" />
+          {isVideo ? (
+            <View style={styles.galleryImage}>
+              <ExpoVideo 
+                source={{ uri: imageSource ?? '' }}
+                style={styles.galleryImage}
+                resizeMode={ResizeMode.COVER}
+                shouldPlay={false}
+                useNativeControls={false}
+                isMuted={true}
+              />
+              <View style={styles.videoBadge}>
+                <Video size={16} color="#fff" />
+              </View>
+            </View>
+          ) : (
+            <Image source={{ uri: imageSource ?? '' }} style={styles.galleryImage} resizeMode="cover" />
+          )}
+          
           {isCover && (
             <View style={styles.coverBadge}>
               <Text style={styles.coverBadgeText}>Cover</Text>
@@ -2172,7 +2266,8 @@ export default function BusinessDetailsScreen() {
 
   return (
     <ScreenBackground style={styles.container}>
-      <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
+      {/* ── Top Bar ── */}
+      <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity
           style={styles.backBtn}
           onPress={() => {
@@ -2183,99 +2278,55 @@ export default function BusinessDetailsScreen() {
             }
           }}
         >
-          <ArrowLeft size={24} color="#007AFF" strokeWidth={2} />
+          <ArrowLeft size={22} color="#007AFF" strokeWidth={2.2} />
         </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Logo size={38} style={styles.headerLogo} />
-          <View style={styles.headerTitleContainer}>
-            <Text style={styles.headerTitle} numberOfLines={1}>
-              {business.business_name}
+        <View style={styles.topBarCenter}>
+          <Text style={styles.topBarTitle} numberOfLines={1}>
+            {business.business_name}
+          </Text>
+          {business.vendor_service_category ? (
+            <Text style={styles.topBarSubtitle} numberOfLines={1}>
+              {business.vendor_service_category}
             </Text>
-            {business.vendor_service_category ? (
-              <Text style={styles.headerSubtitle} numberOfLines={1}>
-                {business.vendor_service_category}
-              </Text>
-            ) : null}
-          </View>
+          ) : null}
         </View>
+        {/* Right placeholder to balance the back button */}
+        <View style={{ width: 36 }} />
       </View>
+
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <WifiOff size={16} color="#B45309" />
+          <Text style={styles.offlineText}>You're currently offline. Viewing cached data.</Text>
+        </View>
+      )}
+
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
         keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 60 : 0}
       >
-        <View style={styles.tabContainer}>
-          {/*
+        {/* ── Modern Tab Bar ── */}
+        <View style={styles.tabsContainer}>
           <TouchableOpacity
-            style={[
-              styles.tab,
-              activeSection === 'offers' && styles.activeTab,
-            ]}
-            onPress={() => setActiveSection('offers')}
-          >
-            <Tag size={20} color={activeSection === 'offers' ? '#fff' : 'rgba(255,255,255,0.7)'} />
-            <Text
-              style={[
-                styles.tabText,
-                activeSection === 'offers' && styles.activeTabText,
-              ]}
-            >
-              Offers
-            </Text>
-          </TouchableOpacity>
-          */}
-
-          <TouchableOpacity
-            style={[
-              styles.tab,
-              activeSection === 'gallery' && styles.activeTab,
-            ]}
+            style={[styles.tab, activeSection === 'gallery' && styles.tabActive]}
             onPress={() => setActiveSection('gallery')}
+            activeOpacity={0.75}
           >
-            <ImageIcon size={20} color={activeSection === 'gallery' ? '#fff' : 'rgba(255,255,255,0.7)'} />
-            <Text
-              style={[
-                styles.tabText,
-                activeSection === 'gallery' && styles.activeTabText,
-              ]}
+            <ImageIcon size={16} color={activeSection === 'gallery' ? '#1a1a1a' : '#999'} strokeWidth={2} />
+            <Text style={[styles.tabText, activeSection === 'gallery' && styles.tabTextActive]}
               numberOfLines={1}
             >
               Gallery
             </Text>
           </TouchableOpacity>
-          {/*
-        <TouchableOpacity
-          style={[
-            styles.tab,
-            activeSection === 'packages' && styles.activeTab,
-          ]}
-          onPress={() => setActiveSection('packages')}
-        >
-          <Package size={20} color={activeSection === 'packages' ? '#fff' : 'rgba(255,255,255,0.7)'} />
-          <Text
-            style={[
-              styles.tabText,
-              activeSection === 'packages' && styles.activeTabText,
-            ]}
-            numberOfLines={1}
-          >
-            Packages
-          </Text>
-        </TouchableOpacity>
-        */}
           <TouchableOpacity
-            style={[
-              styles.tab,
-              activeSection === 'edit' && styles.activeTab,
-            ]}
+            style={[styles.tab, activeSection === 'edit' && styles.tabActive]}
             onPress={() => setActiveSection('edit')}
+            activeOpacity={0.75}
           >
-            <Edit size={20} color={activeSection === 'edit' ? '#fff' : 'rgba(255,255,255,0.7)'} />
-            <Text
-              style={[
-                styles.tabText,
-                activeSection === 'edit' && styles.activeTabText,
-              ]}
+            <Edit size={16} color={activeSection === 'edit' ? '#1a1a1a' : '#999'} strokeWidth={2} />
+            <Text style={[styles.tabText, activeSection === 'edit' && styles.tabTextActive]}
               numberOfLines={1}
             >
               Edit Details
@@ -2329,34 +2380,62 @@ export default function BusinessDetailsScreen() {
 
           {activeSection === 'gallery' && (
             <View style={styles.section}>
+              {/* Gallery header */}
               <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Business Gallery</Text>
-                <View style={styles.buttonGroup}>
+                <View>
+                  <Text style={styles.sectionTitle}>Business Gallery</Text>
+                  <View style={styles.sectionSubtitleContainer}>
+                    <Text style={styles.sectionSubtitle}>
+                      {images.filter(img => img.image_type !== 'video').length}/10 images
+                    </Text>
+                    <Text style={[styles.sectionSubtitle, { marginLeft: 10 }]}>
+                      {images.filter(img => img.image_type === 'video').length}/5 videos
+                    </Text>
+                  </View>
+                </View>
+                <View style={[styles.buttonGroup, { flexWrap: 'wrap', justifyContent: 'flex-end', gap: 6 }]}>
                   <TouchableOpacity
-                    style={[styles.addButton, styles.smallButton]}
+                    style={[styles.addButton, styles.smallButton,
+                    (uploading || uploadingMultiple || images.filter(img => img.image_type !== 'video').length >= 10) && styles.addButtonDisabled]}
                     onPress={handleUploadImage}
-                    disabled={uploading || uploadingMultiple || images.length >= 20}
+                    disabled={uploading || uploadingMultiple || images.filter(img => img.image_type !== 'video').length >= 10}
                   >
                     {uploading ? (
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
                       <>
-                        <Plus size={18} color="#fff" />
-                        <Text style={styles.smallButtonText}>Single</Text>
+                        <Plus size={16} color="#fff" />
+                        <Text style={styles.smallButtonText}>Image</Text>
                       </>
                     )}
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.addButton, styles.smallButton]}
+                    style={[styles.addButton, styles.smallButton,
+                    (uploading || uploadingMultiple || images.filter(img => img.image_type !== 'video').length >= 10) && styles.addButtonDisabled]}
                     onPress={handleUploadMultipleImages}
-                    disabled={uploading || uploadingMultiple || images.length >= 20}
+                    disabled={uploading || uploadingMultiple || images.filter(img => img.image_type !== 'video').length >= 10}
                   >
                     {uploadingMultiple ? (
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
                       <>
-                        <ImageIcon size={18} color="#fff" />
-                        <Text style={styles.smallButtonText}>Multiple</Text>
+                        <ImageIcon size={16} color="#fff" />
+                        <Text style={styles.smallButtonText}>Bulk</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.addButton, styles.smallButton, { backgroundColor: '#6c7ef7' },
+                    (uploading || images.filter(img => img.image_type === 'video').length >= 5) && styles.addButtonDisabled]}
+                    onPress={handleUploadVideo}
+                    disabled={uploading || images.filter(img => img.image_type === 'video').length >= 5}
+                  >
+                    {uploading ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Video size={16} color="#fff" />
+                        <Text style={styles.smallButtonText}>Video</Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -2380,10 +2459,6 @@ export default function BusinessDetailsScreen() {
                   </View>
                 </View>
               )}
-
-              <Text style={styles.imageCounter}>
-                {images.length}/20 images uploaded
-              </Text>
 
               {images.length === 0 ? (
                 <View style={styles.emptyState}>
@@ -2492,13 +2567,18 @@ export default function BusinessDetailsScreen() {
 
           {activeSection === 'edit' && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Edit Business Details</Text>
+              <View style={styles.editPageHeader}>
+                <Text style={styles.sectionTitle}>Edit Business Details</Text>
+                <Text style={styles.sectionSubtitle}>Update your business information</Text>
+              </View>
 
               <View style={styles.editSection}>
                 <Text style={styles.editSectionTitle}>Basic Information</Text>
 
+
+
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.business_name && styles.editLabelError]}>Business Name *</Text>
+                  <Text style={styles.editLabel}>Business Name *</Text>
                   <TextInput
                     style={[styles.editInput, validationErrors.business_name && styles.validationInputInvalid]}
                     value={editData.business_name || ''}
@@ -2516,7 +2596,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.contact_person_name && styles.editLabelError]}>Contact Person Name *</Text>
+                  <Text style={styles.editLabel}>Contact Person Name *</Text>
                   <TextInput
                     ref={contactPersonNameRef}
                     style={[styles.editInput, validationErrors.contact_person_name && styles.validationInputInvalid]}
@@ -2529,28 +2609,13 @@ export default function BusinessDetailsScreen() {
                     placeholderTextColor="#999"
                     returnKeyType="next"
                     onFocus={handleFieldFocus}
-                    onSubmitEditing={() => contactPersonRoleRef.current?.focus()}
+                    onSubmitEditing={() => businessEmailRef.current?.focus()}
                   />
                   {validationErrors.contact_person_name && <Text style={styles.validationErrorText}>{validationErrors.contact_person_name}</Text>}
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Contact Person Role</Text>
-                  <TextInput
-                    ref={contactPersonRoleRef}
-                    style={styles.editInput}
-                    value={editData.contact_person_role || ''}
-                    onChangeText={(text) => setEditData({ ...editData, contact_person_role: text })}
-                    placeholder="e.g., Owner, Manager, Director"
-                    placeholderTextColor="#999"
-                    returnKeyType="next"
-                    onFocus={handleFieldFocus}
-                    onSubmitEditing={() => businessEmailRef.current?.focus()}
-                  />
-                </View>
-
-                <View style={styles.editField}>
-                  <Text style={[styles.editLabel, (validationErrors.business_email || emailError) && styles.editLabelError]}>Email *</Text>
+                  <Text style={styles.editLabel}>Email</Text>
                   <TextInput
                     ref={businessEmailRef}
                     style={[styles.editInput, (emailError || validationErrors.business_email) && styles.validationInputInvalid]}
@@ -2577,7 +2642,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.contact_person_phone && styles.editLabelError]}>Business Contact Number *</Text>
+                  <Text style={styles.editLabel}>Business Contact Number *</Text>
                   <TextInput
                     ref={contactPersonPhoneRef}
                     style={[styles.editInput, validationErrors.contact_person_phone && styles.validationInputInvalid]}
@@ -2603,26 +2668,167 @@ export default function BusinessDetailsScreen() {
                 <Text style={styles.editSectionTitle}>Services & Experience</Text>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, (validationErrors.selectedCategoryIds || validationErrors.selectedRootCategoryId) && styles.editLabelError]}>Business Category *</Text>
-                  <Dropdown
-                    options={rootCategoriesForDropdown.map((n: any) => ({
-                      label: n.icon ? `${n.icon} ${n.name}` : n.name,
-                      value: n.id,
-                    }))}
-                    value={selectedRootCategoryId || ''}
-                    placeholder="Select a category"
-                    onChange={(value: string) => {
-                      handleRootSelection(value);
-                      if (validationErrors.selectedCategoryIds) setValidationErrors(prev => { const { selectedCategoryIds, ...rest } = prev; return rest; });
-                    }}
-                    open={isRootDropdownOpen}
-                    onOpenChange={setIsRootDropdownOpen}
-                    error={validationErrors.selectedCategoryIds}
-                  />
+                  <Text style={styles.editLabel}>Business Type *</Text>
+                  <View style={styles.radioGroup}>
+                    <TouchableOpacity
+                      style={styles.radioButton}
+                      activeOpacity={0.7}
+                      onPress={() => handleBusinessTypeChange('services')}
+                    >
+                      <View style={[styles.radioOuter, businessType === 'services' && styles.radioOuterSelected]}>
+                        {businessType === 'services' && <View style={styles.radioInner} />}
+                      </View>
+                      <Text style={styles.radioText}>Service based</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.radioButton}
+                      activeOpacity={0.7}
+                      onPress={() => handleBusinessTypeChange('rental')}
+                    >
+                      <View style={[styles.radioOuter, businessType === 'rental' && styles.radioOuterSelected]}>
+                        {businessType === 'rental' && <View style={styles.radioInner} />}
+                      </View>
+                      <Text style={styles.radioText}>Rental based</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.selectedCategoryIds && styles.editLabelError]}>Services Offered *</Text>
+                  <Text style={styles.editLabel}>Primary Category *</Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.dropdownTrigger,
+                      (validationErrors.selectedRootCategoryId || validationErrors.selectedCategoryIds) && styles.validationInputInvalid,
+                    ]}
+                    onPress={() => setIsPrimaryModalOpen(true)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.dropdownText, !selectedRootCategoryId && styles.placeholder]}>
+                      {selectedRootCategoryId 
+                        ? rootCategoriesForDropdown.find((c: any) => c.id === selectedRootCategoryId)?.name || 'Select a category'
+                        : 'Select a category'}
+                    </Text>
+                    <ChevronDown size={20} color="#666" />
+                  </TouchableOpacity>
+
+                  <Modal
+                    visible={isPrimaryModalOpen}
+                    transparent
+                    animationType="fade"
+                    onRequestClose={() => {
+                      setIsPrimaryModalOpen(false);
+                      setPrimarySearchQuery('');
+                    }}
+                  >
+                    <Pressable
+                      style={styles.modalOverlay}
+                      onPress={() => {
+                        setIsPrimaryModalOpen(false);
+                        setPrimarySearchQuery('');
+                      }}
+                    >
+                      <Pressable
+                        style={styles.categoryModalContent}
+                        onPress={(e) => e.stopPropagation()}
+                      >
+                        <View style={styles.categoryModalHeader}>
+                          <Text style={styles.categoryModalTitle}>Select Category</Text>
+                          <TouchableOpacity
+                            onPress={handleClearAllPrimary}
+                            style={styles.closeButton}
+                          >
+                            <X size={24} color="#666" />
+                          </TouchableOpacity>
+                        </View>
+
+                        <TextInput
+                          style={styles.modalSearchInput}
+                          placeholder="Search Category or Specialization..."
+                          placeholderTextColor="#999"
+                          value={primarySearchQuery}
+                          onChangeText={setPrimarySearchQuery}
+                        />
+
+                        <ScrollView style={styles.modalCategoryTree}>
+                          <Text style={[styles.sectionTitleModal, { marginTop: 0, marginBottom: 4 }]}>Primary Categories</Text>
+                          {filteredPrimaryResults.length === 0 ? (
+                            <Text style={styles.emptyText}>No matching primary categories</Text>
+                          ) : (
+                            filteredPrimaryResults.map((cat: any) => (
+                              <TouchableOpacity
+                                key={cat.id}
+                                style={styles.categoryListItemCompact}
+                                onPress={() => {
+                                  handleRootSelection(cat.id);
+                                }}
+                              >
+                                <Text style={[
+                                  styles.categoryListItemText,
+                                  selectedRootCategoryId === cat.id && styles.categoryListItemTextSelected
+                                ]}>
+                                  {cat.name}
+                                </Text>
+                              </TouchableOpacity>
+                            ))
+                          )}
+
+                          {primarySearchQuery.trim().length > 0 && (
+                            <>
+                              <View style={[styles.sectionHeaderRow, { marginTop: 12, marginBottom: 4 }]}>
+                                <Text style={styles.sectionTitleModal}>Specializations</Text>
+                              </View>
+                              {filteredSpecializationResults.length === 0 ? (
+                                <Text style={styles.emptyText}>No matching specializations</Text>
+                              ) : (
+                                filteredSpecializationResults.map((cat: any) => (
+                                  <TouchableOpacity
+                                    key={cat.id}
+                                    style={styles.categoryListItemCompact}
+                                    onPress={() => handleSpecializationSearchSelection(cat.id, cat.rootCategoryId)}
+                                  >
+                                    <View style={styles.checkboxLeft}>
+                                      {selectedCategoryIds.includes(cat.id) ? (
+                                        <View style={styles.checkboxSelectedSmall}>
+                                          <Check size={12} color="#fff" strokeWidth={3} />
+                                        </View>
+                                      ) : (
+                                        <View style={styles.checkboxUnselectedSmall} />
+                                      )}
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                      <Text style={[
+                                        styles.categoryListItemText,
+                                        selectedCategoryIds.includes(cat.id) && styles.categoryListItemTextSelected
+                                      ]}>
+                                        {cat.path}
+                                      </Text>
+                                    </View>
+                                  </TouchableOpacity>
+                                ))
+                              )}
+                            </>
+                          )}
+                        </ScrollView>
+                        {primarySearchQuery.trim().length > 0 && (
+                          <View style={styles.modalFooter}>
+                            <TouchableOpacity
+                              style={styles.doneButton}
+                              onPress={() => {
+                                setIsPrimaryModalOpen(false);
+                                setPrimarySearchQuery('');
+                              }}
+                            >
+                              <Text style={styles.doneButtonText}>Done</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      </Pressable>
+                    </Pressable>
+                  </Modal>
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Specialization *</Text>
                   <TouchableOpacity
                     style={[
                       styles.dropdownTrigger,
@@ -2643,10 +2849,10 @@ export default function BusinessDetailsScreen() {
                       {!selectedRootCategoryId
                         ? 'Select a category first'
                         : selectedCategoriesWithPaths.length === 0
-                          ? 'Select services offered'
+                          ? 'Select Specialization'
                           : selectedCategoriesWithPaths.length === 1
                             ? selectedCategoriesWithPaths[0].path
-                            : `${selectedCategoriesWithPaths.length} services selected`}
+                            : `${selectedCategoriesWithPaths.length} Specialization selected`}
                     </Text>
                     <ChevronDown size={20} color={selectedRootCategoryId ? '#666' : '#ccc'} />
                   </TouchableOpacity>
@@ -2673,7 +2879,7 @@ export default function BusinessDetailsScreen() {
                           <TouchableOpacity
                             onPress={() => {
                               if (selectedCategoryIds.length <= 1) {
-                                Alert.alert('Validation Error', 'At least one service category must be selected.');
+                                Alert.alert('Validation Error', 'At least one Specialization must be selected.');
                                 return;
                               }
                               toggleCategorySelection(item.id);
@@ -2704,8 +2910,8 @@ export default function BusinessDetailsScreen() {
                         <View style={styles.categoryModalHeader}>
                           <Text style={styles.categoryModalTitle}>
                             {subtreeForSelectedRoot
-                              ? `Services offered under ${subtreeForSelectedRoot.name}`
-                              : 'Select Services offered'}
+                              ? `Specialization under ${subtreeForSelectedRoot.name}`
+                              : 'Select Specialization'}
                           </Text>
                           <TouchableOpacity
                             onPress={handleCategoryModalClose}
@@ -2717,11 +2923,25 @@ export default function BusinessDetailsScreen() {
 
                         <TextInput
                           style={styles.modalSearchInput}
-                          placeholder="Search services offered..."
+                          placeholder="Search Specialization..."
                           placeholderTextColor="#999"
                           value={searchQuery}
                           onChangeText={setSearchQuery}
                         />
+
+                        {/* Select All strip */}
+                        <TouchableOpacity
+                          style={styles.selectAllRow}
+                          onPress={handleSelectAllServices}
+                          activeOpacity={0.7}
+                        >
+                          <View style={[styles.selectAllCheck, isAllServicesSelected() && styles.selectAllCheckActive]}>
+                            {isAllServicesSelected() && <Check size={12} color="#fff" strokeWidth={3} />}
+                          </View>
+                          <Text style={[styles.selectAllText, isAllServicesSelected() && styles.selectAllTextActive]}>
+                            {isAllServicesSelected() ? 'Deselect All' : 'Select All'}
+                          </Text>
+                        </TouchableOpacity>
 
                         <ScrollView
                           style={styles.modalCategoryTree}
@@ -2731,8 +2951,8 @@ export default function BusinessDetailsScreen() {
                           {filteredSubtreeChildren.length === 0 ? (
                             <Text style={styles.emptyText}>
                               {subtreeForSelectedRoot?.children?.length === 0
-                                ? 'No services offered'
-                                : 'No matching services offered'}
+                                ? 'No Specialization'
+                                : 'No matching Specialization'}
                             </Text>
                           ) : (
                             renderSubCategoryTreeForModal(filteredSubtreeChildren)
@@ -2753,28 +2973,28 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.selectedEventIds && styles.editLabelError]}>Event Types *</Text>
+                  <Text style={styles.editLabel}>Events you serve</Text>
 
                   {/* Event Dropdown Trigger */}
                   <TouchableOpacity
-                    style={[styles.dropdownTrigger, validationErrors.selectedEventIds && styles.validationInputInvalid]}
+                    style={styles.dropdownTrigger}
                     onPress={handleEventModalOpen}
                     activeOpacity={0.7}
                   >
-                    <Text style={[styles.dropdownText, selectedEventsWithPaths.length === 0 && styles.placeholder]}>
+                    <Text style={[styles.dropdownText, selectedEventNames.length === 0 && styles.placeholder]}>
                       {getEventDropdownDisplayText()}
                     </Text>
                     <ChevronDown size={20} color="#666" />
                   </TouchableOpacity>
 
                   {/* Selected Events Display */}
-                  {selectedEventsWithPaths.length > 0 && (
+                  {selectedEventNames.length > 0 && (
                     <View style={styles.selectedContainer}>
                       <View style={styles.selectedHeader}>
                         <Text style={[styles.selectedLabel, { marginBottom: 0 }]}>
-                          Selected Events ({selectedEventsWithPaths.length}):
+                          Selected Events ({selectedEventNames.length}):
                         </Text>
-                        {selectedEventsWithPaths.length > 3 && (
+                        {selectedEventNames.length > 3 && (
                           <TouchableOpacity onPress={() => setIsEventsExpanded(!isEventsExpanded)}>
                             <ChevronDown
                               size={20}
@@ -2784,16 +3004,16 @@ export default function BusinessDetailsScreen() {
                           </TouchableOpacity>
                         )}
                       </View>
-                      {(isEventsExpanded ? selectedEventsWithPaths : selectedEventsWithPaths.slice(0, 3)).map((item) => {
-                        const eventCategory = allEventCategories.find((c) => c.id === item.id);
+                      {(isEventsExpanded ? selectedEventIds : selectedEventIds.slice(0, 3)).map((id) => {
+                        const eventCategory = allEventCategories.find((c) => c.id === id);
+                        if (!eventCategory) return null;
                         return (
-                          <View key={item.id} style={styles.selectedChip}>
+                          <View key={id} style={styles.selectedChip}>
                             <Text style={styles.selectedChipText}>
-                              {eventCategory?.icon ? `${eventCategory.icon} ` : ''}
-                              {item.path}
+                              {eventCategory.name}
                             </Text>
                             <TouchableOpacity
-                              onPress={() => toggleEventSelection(item.id)}
+                              onPress={() => toggleEventSelection(id)}
                               style={styles.removeButton}
                             >
                               <X size={16} color="#fff" />
@@ -2838,16 +3058,30 @@ export default function BusinessDetailsScreen() {
                           onChangeText={setEventSearchQuery}
                         />
 
-                        {/* Event Category Tree */}
+                        {/* Select All strip */}
+                        <TouchableOpacity
+                          style={styles.selectAllRow}
+                          onPress={handleSelectAllEvents}
+                          activeOpacity={0.7}
+                        >
+                          <View style={[styles.selectAllCheck, isAllEventsSelected() && styles.selectAllCheckActive]}>
+                            {isAllEventsSelected() && <Check size={12} color="#fff" strokeWidth={3} />}
+                          </View>
+                          <Text style={[styles.selectAllText, isAllEventsSelected() && styles.selectAllTextActive]}>
+                            {isAllEventsSelected() ? 'Deselect All' : 'Select All'}
+                          </Text>
+                        </TouchableOpacity>
+
+                        {/* Event List */}
                         <ScrollView
                           style={styles.modalCategoryTree}
                           nestedScrollEnabled={true}
                           showsVerticalScrollIndicator={true}
                         >
-                          {filteredEventTree.length === 0 ? (
+                          {filteredRootEvents.length === 0 ? (
                             <Text style={styles.emptyText}>No events found</Text>
                           ) : (
-                            renderEventCategoryTreeForModal(filteredEventTree)
+                            renderEventListForModal(filteredRootEvents)
                           )}
                         </ScrollView>
 
@@ -2865,7 +3099,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.description && styles.editLabelError]}>Business Description *</Text>
+                  <Text style={styles.editLabel}>Business Description *</Text>
                   <TextInput
                     ref={businessDescriptionRef}
                     style={[styles.editInput, styles.textArea, validationErrors.description && styles.validationInputInvalid]}
@@ -2886,7 +3120,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.years_experience && styles.editLabelError]}>Years of Experience *</Text>
+                  <Text style={styles.editLabel}>Years of Experience *</Text>
                   <Dropdown
                     options={EXPERIENCE_OPTIONS.map((exp) => ({
                       label: exp,
@@ -2903,7 +3137,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.base_price && styles.editLabelError]}>Base Price (₹) *</Text>
+                  <Text style={styles.editLabel}>Base Price (₹) *</Text>
                   <TextInput
                     style={[styles.editInput, validationErrors.base_price && styles.validationInputInvalid]}
                     value={editData.base_price ? String(editData.base_price) : ''}
@@ -2922,7 +3156,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.pricing_unit && styles.editLabelError]}>Pricing Unit *</Text>
+                  <Text style={styles.editLabel}>Pricing Unit *</Text>
                   <Dropdown
                     options={pricingUnitOptions.map((unit) => ({
                       label: unit,
@@ -2951,7 +3185,7 @@ export default function BusinessDetailsScreen() {
                 <Text style={styles.editSectionTitle}>Location</Text>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.address && styles.editLabelError]}>Business Address *</Text>
+                  <Text style={styles.editLabel}>Business Address *</Text>
                   <TextInput
                     ref={addressRef}
                     style={[styles.editInput, validationErrors.address && styles.validationInputInvalid]}
@@ -2970,7 +3204,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.pincode && styles.editLabelError]}>Pincode *</Text>
+                  <Text style={styles.editLabel}>Pincode *</Text>
                   <View style={styles.inputWithStatus}>
                     <TextInput
                       ref={pincodeRef}
@@ -3139,7 +3373,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.operating_locations && styles.editLabelError]}>Operating Locations *</Text>
+                  <Text style={styles.editLabel}>Operating Locations *</Text>
                   <TouchableOpacity
                     style={[styles.dropdownTrigger, validationErrors.operating_locations && styles.validationInputInvalid]}
                     onPress={() => setIsCityModalOpen(true)}
@@ -3175,11 +3409,81 @@ export default function BusinessDetailsScreen() {
               </View>
 
               <View style={styles.editSection}>
-                <Text style={styles.editSectionTitle}>Verification</Text>
+                <Text style={styles.editSectionTitle}>Social Media (Optional)</Text>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, (validationErrors.business_registration_number || validationErrors.panDocument) && styles.editLabelError]}>PAN *</Text>
-                  <Text style={styles.editHint}>Required - Permanent Account Number</Text>
+                  <Text style={styles.editLabel}>Website</Text>
+                  <TextInput
+                    ref={websiteUrlRef}
+                    style={styles.editInput}
+                    value={editData.website_url || ''}
+                    onChangeText={(text) => setEditData({ ...editData, website_url: text })}
+                    placeholder="https://www.yourbusiness.com"
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                    keyboardType="url"
+                    returnKeyType="next"
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => instagramUrlRef.current?.focus()}
+                  />
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Instagram</Text>
+                  <TextInput
+                    ref={instagramUrlRef}
+                    style={styles.editInput}
+                    value={editData.instagram_url || ''}
+                    onChangeText={(text) => setEditData({ ...editData, instagram_url: text })}
+                    placeholder="https://instagram.com/yourbusiness"
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                    keyboardType="url"
+                    returnKeyType="next"
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => facebookUrlRef.current?.focus()}
+                  />
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Facebook</Text>
+                  <TextInput
+                    ref={facebookUrlRef}
+                    style={styles.editInput}
+                    value={editData.facebook_url || ''}
+                    onChangeText={(text) => setEditData({ ...editData, facebook_url: text })}
+                    placeholder="https://facebook.com/yourbusiness"
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                    keyboardType="url"
+                    returnKeyType="next"
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => youtubeUrlRef.current?.focus()}
+                  />
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>YouTube</Text>
+                  <TextInput
+                    ref={youtubeUrlRef}
+                    style={styles.editInput}
+                    value={editData.youtube_url || ''}
+                    onChangeText={(text) => setEditData({ ...editData, youtube_url: text })}
+                    placeholder="https://youtube.com/@yourbusiness"
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                    keyboardType="url"
+                    returnKeyType="done"
+                    onFocus={handleFieldFocus}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.editSection}>
+                <Text style={styles.editSectionTitle}>Verification (Optional)</Text>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>PAN</Text>
                   <View style={styles.inputActionRow}>
                     <TextInput
                       ref={panRef}
@@ -3194,6 +3498,7 @@ export default function BusinessDetailsScreen() {
                       autoCapitalize="characters"
                       maxLength={10}
                       returnKeyType="next"
+                      onFocus={handleFieldFocus}
                       onSubmitEditing={() => gstNumberRef.current?.focus()}
                     />
                     <TouchableOpacity
@@ -3234,8 +3539,8 @@ export default function BusinessDetailsScreen() {
                       ))}
                     </View>
                   )}
-                  {(validationErrors.business_registration_number || validationErrors.panDocument) && (
-                    <Text style={styles.validationErrorText}>{validationErrors.business_registration_number || validationErrors.panDocument}</Text>
+                  {validationErrors.business_registration_number && (
+                    <Text style={styles.validationErrorText}>{validationErrors.business_registration_number}</Text>
                   )}
                 </View>
 
@@ -3244,12 +3549,24 @@ export default function BusinessDetailsScreen() {
                   <View style={styles.inputActionRow}>
                     <TextInput
                       ref={gstNumberRef}
-                      style={[styles.editInput, styles.flexInput]}
+                      style={[styles.editInput, styles.flexInput, validationErrors.gst_number && styles.validationInputInvalid]}
                       value={editData.gst_number || ''}
-                      onChangeText={(text) => setEditData({ ...editData, gst_number: text })}
-                      placeholder="Enter GST number"
+                      onChangeText={(text) => {
+                        const filtered = text.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 15);
+                        setEditData({ ...editData, gst_number: filtered });
+                        if (validationErrors.gst_number) {
+                          setValidationErrors(prev => {
+                            const { gst_number, ...rest } = prev;
+                            return rest;
+                          });
+                        }
+                      }}
+                      placeholder="Enter 15-digit GST number"
                       placeholderTextColor="#999"
+                      autoCapitalize="characters"
+                      maxLength={15}
                       returnKeyType="next"
+                      onFocus={handleFieldFocus}
                       onSubmitEditing={() => websiteUrlRef.current?.focus()}
                     />
                     <TouchableOpacity
@@ -3290,29 +3607,28 @@ export default function BusinessDetailsScreen() {
                       ))}
                     </View>
                   )}
+                  {validationErrors.gst_number && (
+                    <Text style={styles.validationErrorText}>{validationErrors.gst_number}</Text>
+                  )}
                 </View>
 
                 {/* Verification Documents Section */}
                 <View style={styles.editField}>
                   <Text style={styles.editLabel}>Verification Documents</Text>
 
-                  {/* Document Types - PAN Card first and mandatory */}
                   {[
-                    { code: 'aadhaar', name: 'Aadhaar Card', mandatory: false },
-                    { code: 'bank_statement', name: 'Bank Statement', mandatory: false },
-                    { code: 'general', name: 'General Document', mandatory: false },
-                    { code: 'business_license', name: 'Business License', mandatory: false },
+                    { code: 'business_license', name: 'Business License', hint: 'e.g., GST, FSSAI, or Shop Act license' },
                   ].map((docType) => {
                     const docs = documentsByType[docType.code] || [];
                     const isUploading = uploadingDocument === docType.code;
 
                     return (
-                      <View key={docType.code} style={[styles.documentTypeSection, docType.mandatory && styles.mandatoryDocumentSection]}>
+                      <View key={docType.code} style={styles.documentTypeSection}>
                         <View style={styles.documentTypeHeader}>
                           <View style={styles.documentTypeLabelContainer}>
-                            <Text style={styles.documentTypeName}>{docType.name} {docType.mandatory ? '*' : ''}</Text>
-                            {docType.mandatory && (
-                              <Text style={styles.mandatoryDocumentHint}>Required</Text>
+                            <Text style={styles.documentTypeName}>{docType.name}</Text>
+                            {docType.hint && (
+                              <Text style={styles.mandatoryDocumentHint}>{docType.hint}</Text>
                             )}
                           </View>
                           <TouchableOpacity
@@ -3367,73 +3683,6 @@ export default function BusinessDetailsScreen() {
                 </View>
               </View>
 
-              <View style={styles.editSection}>
-                <Text style={styles.editSectionTitle}>Social Media</Text>
-
-                <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Website</Text>
-                  <TextInput
-                    ref={websiteUrlRef}
-                    style={styles.editInput}
-                    value={editData.website_url || ''}
-                    onChangeText={(text) => setEditData({ ...editData, website_url: text })}
-                    placeholder="https://www.yourbusiness.com"
-                    placeholderTextColor="#999"
-                    autoCapitalize="none"
-                    keyboardType="url"
-                    returnKeyType="next"
-                    onSubmitEditing={() => instagramUrlRef.current?.focus()}
-                  />
-                </View>
-
-                <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Instagram</Text>
-                  <TextInput
-                    ref={instagramUrlRef}
-                    style={styles.editInput}
-                    value={editData.instagram_url || ''}
-                    onChangeText={(text) => setEditData({ ...editData, instagram_url: text })}
-                    placeholder="https://instagram.com/yourbusiness"
-                    placeholderTextColor="#999"
-                    autoCapitalize="none"
-                    keyboardType="url"
-                    returnKeyType="next"
-                    onSubmitEditing={() => facebookUrlRef.current?.focus()}
-                  />
-                </View>
-
-                <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Facebook</Text>
-                  <TextInput
-                    ref={facebookUrlRef}
-                    style={styles.editInput}
-                    value={editData.facebook_url || ''}
-                    onChangeText={(text) => setEditData({ ...editData, facebook_url: text })}
-                    placeholder="https://facebook.com/yourbusiness"
-                    placeholderTextColor="#999"
-                    autoCapitalize="none"
-                    keyboardType="url"
-                    returnKeyType="next"
-                    onSubmitEditing={() => youtubeUrlRef.current?.focus()}
-                  />
-                </View>
-
-                <View style={styles.editField}>
-                  <Text style={styles.editLabel}>YouTube</Text>
-                  <TextInput
-                    ref={youtubeUrlRef}
-                    style={styles.editInput}
-                    value={editData.youtube_url || ''}
-                    onChangeText={(text) => setEditData({ ...editData, youtube_url: text })}
-                    placeholder="https://youtube.com/@yourbusiness"
-                    placeholderTextColor="#999"
-                    autoCapitalize="none"
-                    keyboardType="url"
-                    returnKeyType="done"
-                  />
-                </View>
-              </View>
-
             </View>
           )}
         </ScrollView>
@@ -3444,6 +3693,7 @@ export default function BusinessDetailsScreen() {
               style={[styles.saveButton, savingDetails && styles.saveButtonDisabled]}
               onPress={handleSaveDetails}
               disabled={savingDetails}
+              activeOpacity={0.85}
             >
               {savingDetails ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -3594,13 +3844,45 @@ export default function BusinessDetailsScreen() {
             >
               <X size={32} color="#fff" />
             </TouchableOpacity>
-            {previewImageUrl && (
-              <Image
-                source={{ uri: previewImageUrl }}
-                style={styles.previewImage}
-                resizeMode="contain"
-              />
-            )}
+
+            <PagerView 
+              style={styles.previewPager} 
+              initialPage={previewInitialIndex}
+              pageMargin={10}
+              onPageSelected={(e) => setCurrentPreviewIndex(e.nativeEvent.position)}
+            >
+              {images.map((item, index) => {
+                const imageSource = item.image_base64 || item.image_url;
+                const isVideo = item.image_type === 'video';
+                
+                return (
+                  <View key={`${item.id}-${index}`} style={styles.previewSlide}>
+                    {isVideo ? (
+                      <ExpoVideo
+                        source={{ uri: item.image_url || '' }}
+                        style={styles.previewImage}
+                        useNativeControls
+                        resizeMode={ResizeMode.CONTAIN}
+                        shouldPlay={index === currentPreviewIndex}
+                        isLooping
+                      />
+                    ) : (
+                      <Image
+                        source={{ uri: imageSource || undefined }}
+                        style={styles.previewImage}
+                        resizeMode="contain"
+                      />
+                    )}
+                  </View>
+                );
+              })}
+            </PagerView>
+            
+            <View style={styles.previewFooter}>
+              <Text style={styles.previewCounterText}>
+                {currentPreviewIndex + 1} / {images.length}
+              </Text>
+            </View>
           </View>
         </Modal>
         <Modal
@@ -3621,10 +3903,10 @@ export default function BusinessDetailsScreen() {
                 </TouchableOpacity>
               </View>
 
-              <View style={styles.searchContainer}>
+              <View style={styles.citySearchContainer}>
                 <Search size={20} color="#999" style={styles.searchIcon} />
                 <TextInput
-                  style={styles.modalSearchInput}
+                  style={styles.citySearchInput}
                   placeholder="Search cities..."
                   placeholderTextColor="#999"
                   value={citySearchQuery}
@@ -3634,7 +3916,6 @@ export default function BusinessDetailsScreen() {
 
               <ScrollView style={styles.optionsList}>
                 {filteredCities.map((city) => {
-                  // 'Pan India' is stored as '*' in operating_locations
                   const isSelected = city === 'Pan India'
                     ? editData.operating_locations?.includes('*')
                     : editData.operating_locations?.includes(city);
@@ -3663,7 +3944,7 @@ export default function BusinessDetailsScreen() {
                 })}
               </ScrollView>
 
-              <View style={[styles.modalFooter, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+              <View style={[styles.cityModalFooter, { paddingBottom: Math.max(insets.bottom, 20) }]}>
                 <TouchableOpacity
                   style={styles.doneButton}
                   onPress={() => setIsCityModalOpen(false)}
@@ -3682,65 +3963,76 @@ export default function BusinessDetailsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#f5f7fa',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#f5f7fa',
   },
   errorText: {
     fontSize: 16,
     color: '#666',
   },
-  header: {
+
+  // ─── Top Bar ───────────────────────────────────────────────────────────────
+  topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
-    paddingHorizontal: 20,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    backgroundColor: '#f5f7fa',
     zIndex: 10,
   },
   backBtn: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 4,
+    padding: 6,
   },
-  headerCenter: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  topBarCenter: {
     flex: 1,
-    gap: 0,
-    height: '100%',
+    alignItems: 'center',
+    paddingHorizontal: 8,
   },
-  headerLogo: {
-    marginRight: 4,
-    marginVertical: 0,
-  },
-  headerTitleContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    height: '100%',
-  },
-  headerTitle: {
-    fontSize: 18,
+  topBarTitle: {
+    fontSize: 17,
     fontWeight: '700',
     color: '#1a1a1a',
-    textAlignVertical: 'center',
-    includeFontPadding: false,
+    textAlign: 'center',
   },
-  headerSubtitle: {
-    fontSize: 13,
-    color: '#666',
-    lineHeight: 16,
-    textAlignVertical: 'center',
-    includeFontPadding: false,
+  topBarSubtitle: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+    marginTop: 1,
   },
-  tabContainer: {
+  offlineBanner: {
+    backgroundColor: '#FEF3C7',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
-    backgroundColor: '#52aad9',
-    paddingHorizontal: 4,
+  },
+  offlineText: {
+    color: '#B45309',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+
+  // ─── Tab Bar ────────────────────────────────────────────────────────────────
+  tabsContainer: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   tab: {
     flex: 1,
@@ -3748,52 +4040,63 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
-    paddingHorizontal: 8,
-    minWidth: 0, // Allow flex shrinking on iOS
+    borderRadius: 10,
     gap: 6,
+    minWidth: 0,
   },
-  activeTab: {
-    backgroundColor: 'rgba(255,255,255,0.25)',
+  tabActive: {
+    backgroundColor: '#D3D6DE',
   },
   tabText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: 'rgba(255,255,255,0.7)',
-    flexShrink: 1, // Allow text to shrink on iOS if needed
+    color: '#999',
+    flexShrink: 1,
   },
-  activeTabText: {
-    color: '#fff',
+  tabTextActive: {
+    color: '#1a1a1a',
   },
   content: {
     flex: 1,
   },
   section: {
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 20,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
     gap: 12,
     flexWrap: 'wrap',
   },
   sectionTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: '#1a1a1a',
-    flex: 1,
-    minWidth: 120,
-    marginRight: 8,
+    marginBottom: 2,
+  },
+  sectionSubtitle: {
+    fontSize: 12,
+    color: '#888',
+    fontWeight: '500',
+  },
+  editPageHeader: {
+    marginBottom: 16,
   },
   addButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
     paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 12,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+  },
+  addButtonDisabled: {
+    opacity: 0.5,
   },
   addButtonText: {
     color: '#fff',
@@ -3806,18 +4109,18 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   smallButton: {
-    paddingVertical: 8,
+    paddingVertical: 7,
     paddingHorizontal: 12,
   },
   smallButtonText: {
     color: '#fff',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
   },
   imageCounter: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 16,
+    fontSize: 13,
+    color: '#888',
+    marginBottom: 12,
   },
   progressContainer: {
     backgroundColor: '#f8f8f8',
@@ -3839,7 +4142,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
     borderRadius: 3,
   },
   emptyState: {
@@ -4017,7 +4320,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 8,
     left: 8,
-    backgroundColor: '#2563EB',
+    backgroundColor: '#6aa3ce',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 4,
@@ -4033,58 +4336,69 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 20,
-    marginBottom: 16,
+    marginBottom: 14,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
-    shadowRadius: 8,
+    shadowRadius: 6,
     elevation: 2,
   },
   editSectionTitle: {
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '700',
-    color: '#1a1a1a',
+    color: '#6aa3ce',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
     marginBottom: 16,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f2f5',
   },
   editField: {
     marginBottom: 16,
   },
   editLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 8,
+    color: '#555',
+    marginBottom: 7,
   },
   editInput: {
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#f7f8fa',
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: '#e8eaed',
     borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    fontSize: 15,
     color: '#1a1a1a',
   },
   textArea: {
     minHeight: 100,
     textAlignVertical: 'top',
-    paddingTop: 14,
+    paddingTop: 13,
   },
   saveButton: {
-    backgroundColor: '#2563EB',
-    borderRadius: 12,
+    backgroundColor: '#6aa3ce',
+    borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 8,
+    shadowColor: '#6aa3ce',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   saveButtonDisabled: {
-    backgroundColor: '#ccc',
+    backgroundColor: '#aaa',
+    shadowOpacity: 0,
+    elevation: 0,
   },
   saveButtonText: {
     fontSize: 16,
     fontWeight: '700',
     color: '#fff',
+    letterSpacing: 0.3,
   },
   inputActionRow: {
     flexDirection: 'row',
@@ -4100,9 +4414,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#f0f7ff',
+    backgroundColor: '#f0f6fb',
     borderWidth: 1,
-    borderColor: '#007AFF',
+    borderColor: '#6aa3ce',
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 16,
@@ -4111,7 +4425,7 @@ const styles = StyleSheet.create({
   inlineUploadButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#007AFF',
+    color: '#6aa3ce',
   },
   inlineDocumentsList: {
     marginTop: 12,
@@ -4259,7 +4573,7 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   submitButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
   },
   submitButtonText: {
     fontSize: 16,
@@ -4289,15 +4603,41 @@ const styles = StyleSheet.create({
   },
   previewImage: {
     width: Dimensions.get('window').width,
-    height: Dimensions.get('window').height * 0.8,
+    height: Dimensions.get('window').height,
+  },
+  previewPager: {
+    flex: 1,
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+  },
+  previewSlide: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  previewFooter: {
+    position: 'absolute',
+    bottom: 50,
+    width: '100%',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  previewCounterText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
   },
   dropdownTrigger: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#f7f8fa',
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: '#e8eaed',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -4325,10 +4665,10 @@ const styles = StyleSheet.create({
   selectedContainer: {
     marginBottom: 16,
     padding: 12,
-    backgroundColor: '#f0f7ff',
+    backgroundColor: '#f0f6fb',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#007AFF',
+    borderColor: '#6aa3ce',
   },
   selectedLabel: {
     fontSize: 14,
@@ -4346,7 +4686,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 6,
     borderWidth: 1,
-    borderColor: '#007AFF',
+    borderColor: '#6aa3ce',
     minHeight: 36,
   },
   selectedChipText: {
@@ -4407,13 +4747,45 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  selectAllRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    backgroundColor: '#fafafa',
+  },
+  selectAllCheck: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#ccc',
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  selectAllCheckActive: {
+    backgroundColor: '#6aa3ce',
+    borderColor: '#6aa3ce',
+  },
+  selectAllText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
+  },
+  selectAllTextActive: {
+    color: '#6aa3ce',
+  },
   categoryModalFooter: {
     padding: 16,
     borderTopWidth: 1,
     borderTopColor: '#f0f0f0',
   },
   categoryModalButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
@@ -4438,7 +4810,7 @@ const styles = StyleSheet.create({
     marginRight: 6,
     marginTop: 0,
   },
-  radioButton: {
+  categoryRadioButton: {
     width: 24,
     height: 24,
     justifyContent: 'center',
@@ -4450,7 +4822,7 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 10,
     borderWidth: 2,
-    borderColor: '#007AFF',
+    borderColor: '#6aa3ce',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -4458,7 +4830,7 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
   },
   radioButtonOuter: {
     width: 20,
@@ -4478,7 +4850,7 @@ const styles = StyleSheet.create({
   checkboxSelected: {
     width: 22,
     height: 22,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
     borderRadius: 6,
     justifyContent: 'center',
     alignItems: 'center',
@@ -4504,7 +4876,7 @@ const styles = StyleSheet.create({
   },
   categoryNameSelected: {
     fontWeight: '600',
-    color: '#007AFF',
+    color: '#6aa3ce',
   },
   childrenContainer: {
     marginLeft: 12,
@@ -4532,7 +4904,7 @@ const styles = StyleSheet.create({
   },
   eventOptionTextSelected: {
     fontWeight: '600',
-    color: '#007AFF',
+    color: '#6aa3ce',
   },
   editHint: {
     fontSize: 12,
@@ -4549,8 +4921,8 @@ const styles = StyleSheet.create({
     paddingRight: 44,
   },
   inputValid: {
-    borderColor: '#34C759',
-    backgroundColor: '#f0fff4',
+    borderColor: '#6aa3ce',
+    backgroundColor: '#f0f6fb',
   },
   inputInvalid: {
     borderColor: '#FF3B30',
@@ -4658,8 +5030,7 @@ const styles = StyleSheet.create({
   },
   validationInputInvalid: {
     borderColor: '#FF3B30',
-    borderWidth: 2,
-    backgroundColor: '#fff5f5',
+    borderWidth: 1,
   },
   editLabelError: {
     color: '#FF3B30',
@@ -4704,19 +5075,39 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
+  citySearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    marginHorizontal: 20,
+    marginVertical: 12,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+  },
+  citySearchInput: {
+    flex: 1,
+    height: 48,
+    fontSize: 16,
+    color: '#1a1a1a',
+  },
   searchIcon: {
     marginRight: 8,
+  },
+  cityModalFooter: {
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
   },
   checkmark: {
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
     justifyContent: 'center',
     alignItems: 'center',
   },
   doneButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
     borderRadius: 12,
     height: 56,
     justifyContent: 'center',
@@ -4746,16 +5137,19 @@ const styles = StyleSheet.create({
     color: '#1a1a1a',
   },
   optionTextSelected: {
-    color: '#007AFF',
+    color: '#6aa3ce',
     fontWeight: '600',
   },
   cityOptionTextSelected: {
-    color: '#007AFF',
+    color: '#6aa3ce',
     fontWeight: '600',
   },
   stickyFooter: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    backgroundColor: '#f5f7fa',
+    borderTopWidth: 1,
+    borderTopColor: '#ececec',
   },
   documentTypeSection: {
     marginBottom: 16,
@@ -4795,10 +5189,10 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: '#f0f7ff',
+    backgroundColor: '#f0f6fb',
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: '#007AFF',
+    borderColor: '#6aa3ce',
   },
   addDocumentButtonDisabled: {
     opacity: 0.6,
@@ -4806,7 +5200,7 @@ const styles = StyleSheet.create({
   addDocumentButtonText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#007AFF',
+    color: '#6aa3ce',
   },
   documentsList: {
     gap: 8,
@@ -4880,11 +5274,151 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   suggestionChipSelected: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
+    backgroundColor: '#6aa3ce',
+    borderColor: '#6aa3ce',
   },
   suggestionChipText: {
     fontSize: 13,
     color: '#666',
+  },
+  confirmModalButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cancelModalButtonText: {
+    color: '#666',
+  },
+  dangerModalButtonText: {
+    color: '#fff',
+  },
+  radioGroup: {
+    flexDirection: 'row',
+    gap: 24,
+    marginTop: 4,
+  },
+  radioButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  radioOuter: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioOuterSelected: {
+    borderColor: '#6aa3ce',
+  },
+  radioInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#6aa3ce',
+  },
+  radioText: {
+    fontSize: 15,
+    color: '#1a1a1a',
+    fontWeight: '500',
+  },
+  sectionSubtitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  videoPlaceholder: {
+    backgroundColor: '#f3f4f6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  videoPlaceholderText: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '500',
+  },
+  videoBadge: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    borderRadius: 4,
+    padding: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionTitleModal: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#666',
+    marginTop: 24,
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 24,
+    marginBottom: 12,
+  },
+  selectAllLink: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  categoryListItemCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    marginBottom: 2,
+  },
+  categoryListItemSelected: {
+    backgroundColor: 'transparent',
+  },
+  categoryListItemText: {
+    fontSize: 16,
+    color: '#1a1a1a',
+    flex: 1,
+  },
+  categoryListItemTextSelected: {
+    fontWeight: '700',
+    color: '#007AFF',
+  },
+  categoryPathText: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 2,
+  },
+  categoryIconStyles: {
+    fontSize: 18,
+    marginRight: 8,
+  },
+  checkboxLeft: {
+    marginRight: 10,
+  },
+  checkboxUnselectedSmall: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    backgroundColor: '#fff',
+  },
+  checkboxSelectedSmall: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });

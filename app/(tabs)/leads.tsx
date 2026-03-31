@@ -10,21 +10,21 @@ import {
   RefreshControl,
   TextInput,
   Alert,
-  Platform,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Calendar, MapPin, Clock, ArrowUpDown, ChevronRight, Search, Plus, X, MoveVertical as MoreVertical, SquareCheck as CheckSquare, Square, Building2 } from 'lucide-react-native';
+import { Phone, Mail, ChevronRight, Search, X, MoveVertical as MoreVertical, SquareCheck as CheckSquare, Square, WifiOff } from 'lucide-react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabaseCore, supabaseCrm } from '../../lib/supabase';
-import { getTimeAgo, formatEventDate } from '../../lib/timeUtils';
-import FilterChip from '../../components/FilterChip';
+import { getTimeAgo } from '../../lib/timeUtils';
+
 import SortModal, { SortOption } from '../../components/SortModal';
 import FilterModal from '../../components/FilterModal';
-import { Lead, STATUS_OPTIONS, PRIORITY_OPTIONS } from '../../types/leads';
+import { Lead, STATUS_OPTIONS } from '../../types/leads';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
-import Logo from '../../components/Logo';
+
 import ScreenBackground from '../../components/ScreenBackground';
 
 
@@ -50,6 +50,7 @@ export default function LeadsScreen() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const { user } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -110,15 +111,27 @@ export default function LeadsScreen() {
         setLoading(true);
       }
 
-      const { data: businessData } = await supabaseCore
+      try {
+        const cachedLeadsStr = await AsyncStorage.getItem(`leads_data_${user?.id}`);
+        if (cachedLeadsStr) {
+          setLeads(JSON.parse(cachedLeadsStr));
+        }
+      } catch (cacheError) {
+        console.error('Error loading cached leads:', cacheError);
+      }
+
+      const { data: businessData, error: businessError } = await supabaseCore
         .from('vendor_businesses')
         .select('id, business_name, city')
         .eq('vendor_id', user?.id);
+
+      if (businessError) throw businessError;
 
       if (!businessData || businessData.length === 0) {
         setLeads([]);
         if (showLoading) setLoading(false);
         hasLoadedLeads.current = true;
+        setIsOffline(false);
         return;
       }
 
@@ -177,10 +190,16 @@ export default function LeadsScreen() {
       console.log(`✅ Fetched ${leadsWithDetails.length} leads`);
       console.log('Sample lead IDs:', leadsWithDetails.slice(0, 3).map(l => l.id));
       setLeads(leadsWithDetails);
+      setIsOffline(false);
+      AsyncStorage.setItem(`leads_data_${user?.id}`, JSON.stringify(leadsWithDetails)).catch(() => {});
       hasLoadedLeads.current = true;
     } catch (error) {
       console.error('❌ Error fetching leads:', error);
-      Alert.alert('Error', 'Failed to load leads. Please try again.');
+      setIsOffline(true);
+      // We don't alert here if we have cached leads to show
+      if (leads.length === 0) {
+        // Alert.alert('Error', 'Failed to load leads. Please try again.');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -362,6 +381,31 @@ export default function LeadsScreen() {
   const activeFilterCount =
     selectedEventTypes.length + selectedStatuses.length + selectedCities.length;
 
+  const getInitials = (name: string) => {
+    const parts = name.trim().split(' ');
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return name.substring(0, 2).toUpperCase();
+  };
+
+  // Quick status tabs displayed below the search bar
+  const STATUS_TABS = [
+    { label: 'All', value: '' },
+    { label: 'New', value: 'new' },
+    { label: 'Contacted', value: 'contacted' },
+    { label: 'Quoted', value: 'quoted' },
+    { label: 'Converted', value: 'converted' },
+  ];
+
+  const activeStatusTab = selectedStatuses.length === 1 ? selectedStatuses[0] : '';
+
+  const setStatusTab = (value: string) => {
+    if (value === '') {
+      setSelectedStatuses([]);
+    } else {
+      setSelectedStatuses([value]);
+    }
+  };
+
   const renderLead = ({ item }: { item: Lead }) => {
     const isSelected = selectedLeads.includes(item.id);
 
@@ -390,64 +434,54 @@ export default function LeadsScreen() {
             )}
           </View>
         )}
-        <View style={styles.cardMainContent}>
-          <View style={styles.cardHeader}>
-            <View style={styles.cardHeaderTop}>
-              <Text style={styles.customerName}>{item.customer_name}</Text>
-              <View style={styles.badges}>
-                <View
-                  style={[
-                    styles.statusBadge,
-                    { backgroundColor: getStatusColor(item.lead_status) + '20' },
-                  ]}
-                >
-                  <Text
-                    style={[styles.statusText, { color: getStatusColor(item.lead_status) }]}
-                  >
-                    {getStatusLabel(item.lead_status)}
-                  </Text>
-                </View>
-              </View>
-            </View>
-            {item.business_name && (
-              <View style={styles.businessNameRow}>
-                <Building2 size={14} color="#666" strokeWidth={2} />
-                <Text style={styles.businessName}>{item.business_name}</Text>
-              </View>
-            )}
+
+        {/* Top row: avatar + name/business + status badge */}
+        <View style={styles.cardTopRow}>
+          <View style={styles.avatarCircle}>
+            <Text style={styles.avatarText}>{getInitials(item.customer_name)}</Text>
           </View>
-
-          <View style={styles.cardContent}>
-            <View style={styles.infoRow}>
-              <Calendar size={18} color="#007AFF" strokeWidth={2} />
-              <Text style={styles.infoText}>
-                {item.event_type}
-                {item.event_date && ` • ${formatEventDate(item.event_date)}`}
-                {item.event_location && ` • ${item.event_location}`}
-              </Text>
-            </View>
-
-            {item.city && (
-              <View style={styles.infoRow}>
-                <MapPin size={18} color="#34C759" strokeWidth={2} />
-                <Text style={styles.infoText}>{item.city}</Text>
-              </View>
-            )}
-
-            <View style={styles.infoRow}>
-              <Clock size={18} color="#999" strokeWidth={2} />
-              <Text style={styles.timeText}>{getTimeAgo(item.created_at)}</Text>
-            </View>
+          <View style={styles.cardNameBlock}>
+            <Text style={styles.customerName}>{item.customer_name}</Text>
+            <Text style={styles.businessName}>{item.business_name}</Text>
           </View>
+          <View
+            style={[
+              styles.statusBadge,
+              { backgroundColor: getStatusColor(item.lead_status) + '18' },
+            ]}
+          >
+            <Text style={[styles.statusText, { color: getStatusColor(item.lead_status) }]}>
+              {getStatusLabel(item.lead_status)}
+            </Text>
+          </View>
+        </View>
 
-          {!bulkSelectMode && (
-            <View style={styles.cardFooter}>
-              <View style={styles.viewDetailsButton}>
-                <Text style={styles.viewDetailsText}>View Details</Text>
-                <ChevronRight size={16} color="#007AFF" strokeWidth={2.5} />
-              </View>
-            </View>
-          )}
+        {/* Divider */}
+        <View style={styles.cardDivider} />
+
+        {/* Bottom row: time + budget on left, actions on right */}
+        <View style={styles.cardBottomRow}>
+          <Text style={styles.cardMeta}>
+            {getTimeAgo(item.created_at)}
+            {item.budget_range ? (
+              <Text style={styles.budgetText}>{`  •  ${item.budget_range}`}</Text>
+            ) : null}
+          </Text>
+          <View style={styles.cardActions}>
+            <TouchableOpacity
+              style={styles.actionIconBtn}
+              onPress={() => { }}
+            >
+              <Phone size={16} color="#6B7FD7" strokeWidth={2} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.actionIconBtn}
+              onPress={() => { }}
+            >
+              <Mail size={16} color="#6B7FD7" strokeWidth={2} />
+            </TouchableOpacity>
+            <ChevronRight size={18} color="#C0C4D6" strokeWidth={2} />
+          </View>
         </View>
       </TouchableOpacity>
     );
@@ -455,20 +489,8 @@ export default function LeadsScreen() {
 
   return (
     <ScreenBackground style={styles.container}>
-      <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
-        <View style={styles.headerLeft}>
-          <Logo size={38} style={styles.headerLogo} />
-          <View style={styles.headerTitleRow}>
-            <Text style={styles.headerTitle}>Leads</Text>
-            {timeFilter !== 'all' && (
-              <View style={styles.timeFilterBadge}>
-                <Text style={styles.timeFilterBadgeText}>
-                  {timeFilter === 'month' ? 'This Month' : 'Today'}
-                </Text>
-              </View>
-            )}
-          </View>
-        </View>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+        <Text style={styles.headerTitle}>Leads</Text>
         <View style={styles.headerActions}>
           {bulkSelectMode ? (
             <TouchableOpacity
@@ -478,19 +500,9 @@ export default function LeadsScreen() {
                 setSelectedLeads([]);
               }}
             >
-              <X size={20} color="#007AFF" strokeWidth={2} />
+              <X size={20} color="#fff" strokeWidth={2} />
             </TouchableOpacity>
-          ) : (
-            <>
-
-              <TouchableOpacity
-                style={styles.headerButton}
-                onPress={() => setShowSortModal(true)}
-              >
-                <ArrowUpDown size={20} color="#007AFF" strokeWidth={2} />
-              </TouchableOpacity>
-            </>
-          )}
+          ) : null}
         </View>
       </View>
 
@@ -514,11 +526,11 @@ export default function LeadsScreen() {
       )}
 
       <View style={styles.searchContainer}>
-        <Search size={20} color="#999" style={styles.searchIcon} />
+        <Search size={18} color="#aaa" style={styles.searchIcon} />
         <TextInput
           style={styles.searchInput}
           placeholder="Search leads..."
-          placeholderTextColor="#999"
+          placeholderTextColor="#aaa"
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
@@ -527,109 +539,64 @@ export default function LeadsScreen() {
             onPress={() => setSearchQuery('')}
             style={styles.clearSearchButton}
           >
-            <X size={18} color="#999" />
+            <X size={16} color="#aaa" />
           </TouchableOpacity>
         )}
       </View>
 
-      <View style={styles.filterBar}>
-        <View style={styles.scrollContainer}>
-          <ScrollView
-            ref={filterScrollViewRef}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.filterScrollContent}
-            onContentSizeChange={(width) => {
-              setShowFilterScrollIndicator(width > 0);
-            }}
-            onScroll={(event) => {
-              const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-              const canScrollRight = contentOffset.x + layoutMeasurement.width < contentSize.width - 10;
-              setShowFilterScrollIndicator(canScrollRight);
-            }}
-            scrollEventThrottle={16}
-          >
-            <FilterChip
-              label={
-                selectedEventTypes.length > 0
-                  ? `Event (${selectedEventTypes.length})`
-                  : 'Event Type'
-              }
-              active={selectedEventTypes.length > 0}
-              onPress={() => setShowEventTypeModal(true)}
-              showClear={selectedEventTypes.length > 0}
-              onClear={() => setSelectedEventTypes([])}
-            />
-            <FilterChip
-              label={
-                selectedStatuses.length > 0
-                  ? `Status (${selectedStatuses.length})`
-                  : 'Status'
-              }
-              active={selectedStatuses.length > 0}
-              onPress={() => setShowStatusModal(true)}
-              showClear={selectedStatuses.length > 0}
-              onClear={() => setSelectedStatuses([])}
-            />
-            {availableCities.length > 0 && (
-              <FilterChip
-                label={
-                  selectedCities.length > 0
-                    ? `City (${selectedCities.length})`
-                    : 'City'
-                }
-                active={selectedCities.length > 0}
-                onPress={() => setShowCityModal(true)}
-                showClear={selectedCities.length > 0}
-                onClear={() => setSelectedCities([])}
-              />
-            )}
-            {activeFilterCount > 0 && (
-              <TouchableOpacity
-                style={styles.clearAllButton}
-                onPress={() => {
-                  setSearchQuery('');
-                  setSelectedEventTypes([]);
-                  setSelectedStatuses([]);
-                  setSelectedCities([]);
-                  setTimeFilter('all');
-                }}
-              >
-                <Text style={styles.clearAllText}>Clear All</Text>
-              </TouchableOpacity>
-            )}
-          </ScrollView>
-          {showFilterScrollIndicator && (
+      {/* Status pill tabs */}
+      <View style={styles.statusTabsWrapper}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          alwaysBounceVertical={false}
+          style={styles.statusTabsScroll}
+          contentContainerStyle={styles.statusTabsRow}
+        >
+          {STATUS_TABS.map((tab) => (
             <TouchableOpacity
-              style={styles.scrollIndicatorRight}
-              onPress={() => {
-                filterScrollViewRef.current?.scrollTo({
-                  x: 200,
-                  animated: true,
-                });
-              }}
-              activeOpacity={0.7}
+              key={tab.value}
+              style={[
+                styles.statusTab,
+                activeStatusTab === tab.value && styles.statusTabActive,
+              ]}
+              onPress={() => setStatusTab(tab.value)}
             >
-              <LinearGradient
-                colors={['transparent', 'rgba(255, 255, 255, 0.8)']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.scrollGradient}
+              <Text
+                style={[
+                  styles.statusTabText,
+                  activeStatusTab === tab.value && styles.statusTabTextActive,
+                ]}
               >
-                <ChevronRight size={20} color="#666" />
-              </LinearGradient>
+                {tab.label}
+              </Text>
             </TouchableOpacity>
-          )}
-        </View>
+          ))}
+        </ScrollView>
       </View>
 
-      {loading ? (
+      {/* Lead count row - occupies space even when loading to prevent jumps */}
+      <View style={{ minHeight: 20 }}>
+        {!loading && (
+          <Text style={styles.leadCount}>
+            {filteredAndSortedLeads.length} lead{filteredAndSortedLeads.length !== 1 ? 's' : ''} found
+          </Text>
+        )}
+      </View>
+
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <WifiOff size={16} color="#B45309" />
+          <Text style={styles.offlineText}>You're currently offline.</Text>
+        </View>
+      )}
+
+      {loading && leads.length === 0 ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
         </View>
       ) : filteredAndSortedLeads.length === 0 ? (
         <View style={styles.emptyState}>
-          <Calendar size={64} color="#ddd" strokeWidth={1.5} />
           <Text style={styles.emptyStateTitle}>
             {activeFilterCount > 0 ? 'No Matching Leads' : 'No Leads Yet'}
           </Text>
@@ -733,27 +700,7 @@ export default function LeadsScreen() {
         multiSelect
       />
 
-      {!bulkSelectMode && false && (
-        <TouchableOpacity
-          style={[
-            styles.fab,
-            {
-              bottom: Platform.OS === 'ios' ? 20 + insets.bottom + 60 : 80,
-            },
-          ]}
-          onPress={() => router.push('/lead-form')}
-          activeOpacity={0.8}
-        >
-          <LinearGradient
-            colors={[Colors.primary.main, Colors.primary.light]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.fabGradient}
-          >
-            <Plus size={28} color={Colors.neutral.white} strokeWidth={2.5} />
-          </LinearGradient>
-        </TouchableOpacity>
-      )}
+
     </ScreenBackground>
   );
 }
@@ -768,57 +715,48 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     backgroundColor: '#fff',
     paddingHorizontal: 20,
+    paddingBottom: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 0,
-    flex: 1,
-    height: '100%',
-  },
-  headerLogo: {
-    marginRight: 4,
-    marginVertical: 0,
-  },
-  headerTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: '#1a1a1a',
-    lineHeight: 22,
-    textAlignVertical: 'center',
-    includeFontPadding: false,
-  },
-  timeFilterBadge: {
-    backgroundColor: '#E8F1FF',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 6,
-    borderRadius: BorderRadius.md,
-  },
-  timeFilterBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#1a1a1a',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   headerActions: {
     flexDirection: 'row',
     gap: Spacing.sm,
   },
-  headerButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#f5f5f5',
+  addButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    backgroundColor: '#3D5AFE',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  headerButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    backgroundColor: '#3D5AFE',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  offlineBanner: {
+    backgroundColor: '#FEF3C7',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  offlineText: {
+    color: '#B45309',
+    fontSize: 13,
+    fontWeight: '500',
   },
   bulkActionsBar: {
     flexDirection: 'row',
@@ -847,67 +785,71 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: '#F2F3F8',
     marginHorizontal: 16,
-    marginTop: 12,
-    marginBottom: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
+    marginTop: 14,
+    marginBottom: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 30,
   },
   searchIcon: {
     marginRight: 8,
   },
   searchInput: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 15,
     color: '#1a1a1a',
     padding: 0,
   },
   clearSearchButton: {
     padding: 4,
   },
-  filterBar: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-    paddingVertical: 12,
-  },
-  scrollContainer: {
-    position: 'relative',
-  },
-  filterScrollContent: {
-    paddingHorizontal: 20,
-    gap: 8,
-    paddingRight: 40, // Add padding for scroll indicator
-  },
-  scrollIndicatorRight: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
-    width: 40,
+  statusTabsWrapper: {
+    height: 46,
     justifyContent: 'center',
-    alignItems: 'flex-end',
-    zIndex: 10,
   },
-  scrollGradient: {
-    width: 40,
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingRight: 8,
+  statusTabsScroll: {
+    flexGrow: 0,
+    flexShrink: 0,
   },
-  clearAllButton: {
+  statusTabsRow: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    justifyContent: 'center',
+    paddingTop: 8,
+    paddingBottom: 6,
+    gap: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  clearAllText: {
-    fontSize: 14,
+  statusTab: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: '#eef0f4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+  },
+  statusTabActive: {
+    backgroundColor: '#1a1a1a',
+  },
+  statusTabText: {
+    fontSize: 13,
     fontWeight: '600',
-    color: '#FF3B30',
+    color: '#555',
+    includeFontPadding: false,
+    lineHeight: 16,
+    textAlignVertical: 'center',
+  },
+  statusTabTextActive: {
+    color: '#fff',
+  },
+  leadCount: {
+    fontSize: 13,
+    color: '#888',
+    fontWeight: '500',
+    marginHorizontal: 20,
+    marginBottom: 4,
   },
   loadingContainer: {
     flex: 1,
@@ -951,14 +893,14 @@ const styles = StyleSheet.create({
   leadCard: {
     backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 14,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
-    flexDirection: 'row',
-    gap: 12,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
   },
   selectedCard: {
     borderWidth: 2,
@@ -969,6 +911,31 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     width: 32,
+    marginBottom: 8,
+  },
+  cardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 14,
+  },
+  avatarCircle: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: '#1E2A4A',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  avatarText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 0.5,
+  },
+  cardNameBlock: {
+    flex: 1,
   },
   cardMainContent: {
     flex: 1,
@@ -976,86 +943,59 @@ const styles = StyleSheet.create({
   cardHeader: {
     marginBottom: 12,
   },
-  cardHeaderTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 4,
-  },
   customerName: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     color: '#1a1a1a',
-    flex: 1,
-    marginRight: 8,
-  },
-  businessNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
-  },
-  businessLabel: {
-    fontSize: 13,
-    color: '#999',
-    fontWeight: '500',
   },
   businessName: {
     fontSize: 13,
-    color: '#666',
+    color: '#888',
+    fontWeight: '400',
+    marginTop: 1,
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+  },
+  statusText: {
+    fontSize: 12,
     fontWeight: '600',
   },
-  badges: {
+  cardDivider: {
+    height: 1,
+    backgroundColor: '#F0F1F5',
+    marginBottom: 12,
+  },
+  cardBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  cardMeta: {
+    fontSize: 13,
+    color: '#888',
+    fontWeight: '400',
+    flex: 1,
+  },
+  budgetText: {
+    fontSize: 13,
+    color: '#34C759',
+    fontWeight: '600',
+  },
+  cardActions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
-  statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusText: {
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  cardContent: {
-    gap: 10,
-    marginBottom: 12,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  infoText: {
-    fontSize: 15,
-    color: '#333',
-    fontWeight: '500',
-    flex: 1,
-  },
-  timeText: {
-    fontSize: 14,
-    color: '#999',
-    fontWeight: '500',
-  },
-  cardFooter: {
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#f5f5f5',
-  },
-  viewDetailsButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  actionIconBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: '#EEF0FF',
     justifyContent: 'center',
-    gap: 4,
-  },
-  viewDetailsText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#007AFF',
+    alignItems: 'center',
   },
   fab: {
     position: 'absolute',

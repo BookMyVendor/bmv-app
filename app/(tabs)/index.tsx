@@ -14,24 +14,54 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Plus, TrendingUp, Calendar, Eye, X, ChevronRight } from 'lucide-react-native';
+import { TrendingUp, Calendar, Eye, X, ChevronRight, Bell, WifiOff } from 'lucide-react-native';
 import { useAuth } from '../../contexts/AuthContext';
-import { supabaseCore, supabaseCrm } from '../../lib/supabase';
+import { supabaseCore, supabaseCrm, supabaseCms } from '../../lib/supabase';
 import { checkNotificationPermission, requestNotificationPermission } from '../../lib/pushNotifications';
 import { STATUS_OPTIONS, LeadStatus } from '../../types/leads';
-import FilterChip from '../../components/FilterChip';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
-import Logo from '../../components/Logo';
 import ScreenBackground from '../../components/ScreenBackground';
 
 interface Business {
   id: string;
   business_name: string;
-  vendor_service_category: string;
+  business_category: string;
   business_description: string;
   cover_photo_url: string | null;
-  city: string;
-  state: string;
+  city: string | null;
+  state: string | null;
+  // Mandatory fields for completion calculation (from vendor_businesses)
+  description?: string | null;
+  address?: string | null;
+  pincode?: string | null;
+  contact_person_name?: string | null;
+  business_email?: string | null;
+  contact_person_phone?: string | null;
+  years_experience?: number | null;
+  operating_locations?: string[] | null;
+  // Joined fields for mandatory completion checks
+  vendor_business_category_mappings?: {
+    categories?: {
+      category_type: string;
+      parent_category_id: string | null;
+    }
+  }[] | null;
+  vendor_business_pricing_packages?: {
+    id: string;
+    base_price: number;
+    price_unit: string;
+  }[] | null;
+  // Optional fields (not counted in mandatory progress)
+  website_url?: string | null;
+  instagram_url?: string | null;
+  facebook_url?: string | null;
+  youtube_url?: string | null;
+  gst_number?: string | null;
+  pan_number?: string | null; // Keep for fallback
+  business_registration_number?: string | null; // Actual PAN column
+  locality?: string | null;
+  image_count?: number;
+  document_count?: number;
 }
 
 interface LeadStats {
@@ -41,27 +71,99 @@ interface LeadStats {
   byStatus: Record<LeadStatus, number>;
 }
 
+// Returns a 0-100 integer representing how complete the business profile is
+function calculateProfileCompletion(business: Business): number {
+  const coreChecks = [
+    // 1-4. Basic Info
+    !!(business.business_name?.trim()),
+    !!(business.contact_person_name?.trim()),
+    !!(business.business_email?.trim()),
+    !!(business.contact_person_phone?.trim()),
+    // 5-6. Services & Experience
+    !!(business.description?.trim() || business.business_description?.trim()),
+    !!(business.years_experience !== null && business.years_experience !== undefined),
+    // 7-9. Location
+    !!(business.address?.trim()),
+    !!(business.pincode?.trim()),
+    !!(business.operating_locations && business.operating_locations.length > 0),
+    // 10. Pricing (Base Price & Unit filled)
+    !!(business.vendor_business_pricing_packages?.[0]?.base_price && business.vendor_business_pricing_packages?.[0]?.price_unit),
+    // 11. Primary Category Mapped
+    !!(business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'business' && m.categories?.parent_category_id === null)),
+    // 12. Specialization Mapped
+    !!(business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'business' && m.categories?.parent_category_id !== null)),
+    // 13-15. Detailed Location
+    !!(business.city?.trim()),
+    !!(business.locality?.trim()),
+    !!(business.state?.trim()),
+    // 16. Cover Photo (Required during registration)
+    !!(business.cover_photo_url?.trim()),
+  ];
+
+  const optionalChecks = [
+    // 17-20. Social Media
+    !!(business.website_url?.trim()),
+    !!(business.instagram_url?.trim()),
+    !!(business.facebook_url?.trim()),
+    !!(business.youtube_url?.trim()),
+    // 21-22. Tax Info
+    !!(business.business_registration_number?.trim() || business.pan_number?.trim()),
+    !!(business.gst_number?.trim()),
+    // 23. Verification Documents
+    !!(business.document_count && business.document_count > 0),
+    // 24. Events Mapped (Optional)
+    !!(business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'event')),
+    // 25. Gallery/Portfolio (Additional images)
+    !!(business.image_count && business.image_count > 0),
+  ];
+
+  const coreFilled = coreChecks.filter(Boolean).length;
+  const optionalFilled = optionalChecks.filter(Boolean).length;
+
+  // Weighting: Core fields account for 90%, Optional fields account for 10%
+  // 16 core fields * 5.625% = 90%
+  // 9 optional fields * ~1.11% = 10%
+  const coreScore = (coreFilled / coreChecks.length) * 90;
+  const optionalScore = optionalChecks.length > 0 ? (optionalFilled / optionalChecks.length) * 10 : 0;
+
+  return Math.round(coreScore + optionalScore);
+}
+
+function getGreeting(userName?: string) {
+  const hour = new Date().getHours();
+  let greeting = '';
+  if (hour >= 5 && hour < 12) greeting = 'Good morning';
+  else if (hour >= 12 && hour < 17) greeting = 'Good afternoon';
+  else if (hour >= 17 && hour < 21) greeting = 'Good evening';
+  else greeting = 'Good night';
+
+  return userName ? `${greeting}, ${userName.split(' ')[0]}` : greeting;
+}
+
+// Avatar color palette for businesses (matches screenshot style)
+const AVATAR_COLORS: [string, string][] = [
+  ['#6c7ef7', '#8b9dff'],
+  ['#4ecb71', '#6fdd90'],
+  ['#ff9c42', '#ffb26b'],
+  ['#f75c7e', '#ff85a0'],
+  ['#5bc4f5', '#7dd6ff'],
+];
+
 export default function DashboardScreen() {
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [leadStats, setLeadStats] = useState<LeadStats>({
     total: 0,
     monthly: 0,
     today: 0,
-    byStatus: {
-      new: 0,
-      contacted: 0,
-      quoted: 0,
-      converted: 0,
-      lost: 0,
-    },
+    byStatus: { new: 0, contacted: 0, quoted: 0, converted: 0, lost: 0 },
   });
   const [selectedStatuses, setSelectedStatuses] = useState<LeadStatus[]>([]);
   const [loading, setLoading] = useState(true);
+  const [initialDataLoaded, setInitialDataLoaded] = useState(false);
   const [showFilterScrollIndicator, setShowFilterScrollIndicator] = useState(false);
-  const [showBusinessScrollIndicator, setShowBusinessScrollIndicator] = useState(false);
-  const [businessScrollX, setBusinessScrollX] = useState(0);
+  const [businessLeadCounts, setBusinessLeadCounts] = useState<Record<string, number>>({});
+  const [isOffline, setIsOffline] = useState(false);
   const filterScrollViewRef = useRef<ScrollView>(null);
-  const businessScrollViewRef = useRef<ScrollView>(null);
   const { user } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -73,14 +175,6 @@ export default function DashboardScreen() {
     }
   }, [user?.id, selectedStatuses]);
 
-  // Hide business scroll hint when there's only one business
-  useEffect(() => {
-    if (businesses.length <= 1) {
-      setShowBusinessScrollIndicator(false);
-    }
-  }, [businesses.length]);
-
-  // Check notification permission on mount
   useEffect(() => {
     const checkPermissionStatus = async () => {
       try {
@@ -89,59 +183,77 @@ export default function DashboardScreen() {
           const hasPrompted = await AsyncStorage.getItem('notificationPermissionPromptShown');
           if (hasPrompted !== 'true') {
             Alert.alert(
-              "Enable Notifications",
-              "Stay updated with new leads and important alerts. Enable notifications now?",
+              'Enable Notifications',
+              'Stay updated with new leads and important alerts. Enable notifications now?',
               [
                 {
-                  text: "Later",
-                  style: "cancel",
+                  text: 'Later',
+                  style: 'cancel',
                   onPress: async () => {
                     await AsyncStorage.setItem('notificationPermissionPromptShown', 'true');
-                  }
+                  },
                 },
                 {
-                  text: "Enable",
+                  text: 'Enable',
                   onPress: async () => {
                     await requestNotificationPermission();
                     await AsyncStorage.setItem('notificationPermissionPromptShown', 'true');
-                  }
-                }
+                  },
+                },
               ]
             );
           }
         }
       } catch (e) {
-        console.error("Permission check failed", e);
+        console.error('Permission check failed', e);
       }
     };
-
     checkPermissionStatus();
   }, []);
 
-  // Refresh businesses when screen comes into focus (e.g., after editing)
   useFocusEffect(
     useCallback(() => {
       if (user?.id) {
-        fetchBusinesses();
+        // On refocus, silently refresh in the background without resetting state
+        fetchBusinesses(true);
         fetchLeadStats();
       }
     }, [user?.id])
   );
 
-  const fetchBusinesses = async () => {
+  const fetchBusinesses = async (isSilentRefresh = false) => {
     if (!user?.id) {
       setLoading(false);
       return;
     }
+
+    // On first load only, show cached data immediately so UI isn't empty
+    if (!isSilentRefresh && !initialDataLoaded) {
+      try {
+        const cachedStr = await AsyncStorage.getItem(`dashboard_businesses_${user.id}`);
+        if (cachedStr) {
+          setBusinesses(JSON.parse(cachedStr));
+        }
+      } catch { }
+    }
+
     try {
+      // 1. Fetch businesses with joined data
       const { data, error } = await supabaseCore
         .from('vendor_businesses')
         .select(`
           *,
           vendor_business_category_mappings (
             categories (
-              name
+              name,
+              category_type,
+              parent_category_id
             )
+          ),
+          vendor_business_pricing_packages (
+            id,
+            base_price,
+            price_unit
           )
         `)
         .eq('vendor_id', user.id)
@@ -149,24 +261,101 @@ export default function DashboardScreen() {
 
       if (error) throw error;
 
-      const formattedBusinesses = (data || []).map((business: any) => ({
-        ...business,
-        business_description: business.description,
-        vendor_service_category: business.vendor_business_category_mappings?.[0]?.categories?.name || 'General',
-      }));
+      const rawBusinesses = data || [];
 
+      // 2. Fetch metadata (image + doc counts) for ALL businesses in parallel
+      //    This must happen BEFORE setting state so percentage is calculated once.
+      const businessIds = rawBusinesses.map((b: any) => b.id);
+      const metadata: Record<string, { images: number; docs: number }> = {};
+
+      if (businessIds.length > 0) {
+        await Promise.all(
+          businessIds.map(async (id: string) => {
+            const [{ count: imageCount }, { count: docCount }] = await Promise.all([
+              supabaseCms
+                .from('vendor_business_media')
+                .select('*', { count: 'exact', head: true })
+                .eq('business_id', id),
+              supabaseCms
+                .from('vendor_verification_documents')
+                .select('*', { count: 'exact', head: true })
+                .eq('business_id', id),
+            ]);
+            metadata[id] = {
+              images: imageCount || 0,
+              docs: docCount || 0,
+            };
+          })
+        );
+      }
+
+      // 3. Build final businesses array with ALL data in one pass
+      const formattedBusinesses = rawBusinesses.map((business: any) => {
+        const rootCategoryMatch = business.vendor_business_category_mappings?.find((m: any) =>
+          m.categories?.category_type === 'business' && m.categories?.parent_category_id === null
+        );
+        const categoryName = rootCategoryMatch?.categories?.name ||
+          business.vendor_business_category_mappings?.find((m: any) => m.categories?.category_type === 'business')?.categories?.name ||
+          business.vendor_business_category_mappings?.[0]?.categories?.name;
+
+        return {
+          ...business,
+          business_description: business.description,
+          business_category: categoryName || 'General',
+          image_count: metadata[business.id]?.images || 0,
+          document_count: metadata[business.id]?.docs || 0,
+        };
+      });
+
+      // 4. Single state update — percentage is computed once, no flicker
       setBusinesses(formattedBusinesses);
+      setInitialDataLoaded(true);
+      AsyncStorage.setItem(`dashboard_businesses_${user.id}`, JSON.stringify(formattedBusinesses)).catch(() => { });
+      setIsOffline(false);
+
+      // 5. Fetch lead counts (doesn't affect percentage, so can run after)
+      if (businessIds.length > 0) {
+        fetchBusinessLeadCounts(businessIds);
+      }
     } catch (error) {
       console.error('Error fetching businesses:', error);
+      setIsOffline(true);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchLeadStats = async () => {
-    if (!user?.id) {
-      return;
+  const fetchBusinessLeadCounts = async (businessIds: string[]) => {
+    try {
+      const counts: Record<string, number> = {};
+      await Promise.all(
+        businessIds.map(async (id) => {
+          const { count } = await supabaseCrm
+            .from('customer_leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('business_id', id);
+          counts[id] = count || 0;
+        })
+      );
+      setBusinessLeadCounts(counts);
+      AsyncStorage.setItem(`dashboard_business_counts_${user?.id}`, JSON.stringify(counts)).catch(() => { });
+      setIsOffline(false);
+    } catch (error) {
+      console.error('Error fetching business lead counts:', error);
+      setIsOffline(true);
     }
+  };
+
+  const fetchLeadStats = async () => {
+    if (!user?.id) return;
+
+    try {
+      const cachedStr = await AsyncStorage.getItem(`dashboard_lead_stats_${user.id}_${selectedStatuses.join(',')}`);
+      if (cachedStr) {
+        setLeadStats(JSON.parse(cachedStr));
+      }
+    } catch { }
+
     try {
       const { data: businessData } = await supabaseCore
         .from('vendor_businesses')
@@ -178,60 +367,39 @@ export default function DashboardScreen() {
           total: 0,
           monthly: 0,
           today: 0,
-          byStatus: {
-            new: 0,
-            contacted: 0,
-            quoted: 0,
-            converted: 0,
-            lost: 0,
-          },
+          byStatus: { new: 0, contacted: 0, quoted: 0, converted: 0, lost: 0 },
         });
         return;
       }
 
       const statusFilter = selectedStatuses.length > 0 ? selectedStatuses : undefined;
 
-      // Use vendor_id for RLS policy compliance
       let totalQuery = supabaseCrm
         .from('customer_leads')
         .select('*', { count: 'exact', head: true })
         .eq('vendor_id', user.id);
-
-      if (statusFilter) {
-        totalQuery = totalQuery.in('lead_status', statusFilter);
-      }
-
+      if (statusFilter) totalQuery = totalQuery.in('lead_status', statusFilter);
       const { count: totalCount } = await totalQuery;
 
       const startOfMonth = new Date();
       startOfMonth.setDate(1);
       startOfMonth.setHours(0, 0, 0, 0);
-
       let monthlyQuery = supabaseCrm
         .from('customer_leads')
         .select('*', { count: 'exact', head: true })
         .eq('vendor_id', user.id)
         .gte('created_at', startOfMonth.toISOString());
-
-      if (statusFilter) {
-        monthlyQuery = monthlyQuery.in('lead_status', statusFilter);
-      }
-
+      if (statusFilter) monthlyQuery = monthlyQuery.in('lead_status', statusFilter);
       const { count: monthlyCount } = await monthlyQuery;
 
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
-
       let todayQuery = supabaseCrm
         .from('customer_leads')
         .select('*', { count: 'exact', head: true })
         .eq('vendor_id', user.id)
         .gte('created_at', startOfDay.toISOString());
-
-      if (statusFilter) {
-        todayQuery = todayQuery.in('lead_status', statusFilter);
-      }
-
+      if (statusFilter) todayQuery = todayQuery.in('lead_status', statusFilter);
       const { count: todayCount } = await todayQuery;
 
       const { data: allLeads } = await supabaseCrm
@@ -240,27 +408,27 @@ export default function DashboardScreen() {
         .eq('vendor_id', user.id);
 
       const statusCounts: Record<LeadStatus, number> = {
-        new: 0,
-        contacted: 0,
-        quoted: 0,
-        converted: 0,
-        lost: 0,
+        new: 0, contacted: 0, quoted: 0, converted: 0, lost: 0,
       };
-
       allLeads?.forEach((lead) => {
         if (lead.lead_status in statusCounts) {
           statusCounts[lead.lead_status as LeadStatus]++;
         }
       });
 
-      setLeadStats({
+      const stats = {
         total: totalCount || 0,
         monthly: monthlyCount || 0,
         today: todayCount || 0,
         byStatus: statusCounts,
-      });
+      };
+
+      setLeadStats(stats);
+      AsyncStorage.setItem(`dashboard_lead_stats_${user.id}_${selectedStatuses.join(',')}`, JSON.stringify(stats)).catch(() => { });
+      setIsOffline(false);
     } catch (error) {
       console.error('Error fetching lead stats:', error);
+      setIsOffline(true);
     }
   };
 
@@ -274,279 +442,301 @@ export default function DashboardScreen() {
 
   return (
     <ScreenBackground style={styles.container}>
-      <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
+      {/* ── Header ── */}
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <View style={styles.headerLeft}>
-          <Logo size={38} style={styles.headerLogo} />
-          <Text style={styles.headerTitle}>Dashboard</Text>
+          <View>
+            <Text style={styles.headerGreeting}>
+              {getGreeting(user?.user_metadata?.full_name || user?.user_metadata?.name)}
+            </Text>
+            <Text style={styles.headerTitle}>Dashboard</Text>
+          </View>
         </View>
       </View>
 
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <WifiOff size={16} color="#B45309" />
+          <Text style={styles.offlineText}>You're currently offline. Data may be outdated.</Text>
+        </View>
+      )}
 
-      <ScrollView contentContainerStyle={[styles.content]}>
-        <View style={styles.statsSection}>
-          <Text style={styles.sectionTitle}>Lead Statistics</Text>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* ── Lead Statistics ── */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Lead Statistics</Text>
+            <TouchableOpacity onPress={() => router.push('/leads')} activeOpacity={0.7}>
+              <Text style={styles.actionLink}>See all</Text>
+            </TouchableOpacity>
+          </View>
 
-          <View style={styles.scrollContainer}>
+          {/* Filter Chips */}
+          <View style={styles.filterWrapper}>
             <ScrollView
               ref={filterScrollViewRef}
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.filterScrollContent}
-              style={styles.filterContainer}
-              onContentSizeChange={(width) => {
-                // Check if content is wider than container
-                setShowFilterScrollIndicator(width > 0);
-              }}
-              onScroll={(event) => {
-                const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-                const canScrollRight = contentOffset.x + layoutMeasurement.width < contentSize.width - 10;
-                setShowFilterScrollIndicator(canScrollRight);
+              onContentSizeChange={(w) => setShowFilterScrollIndicator(w > 0)}
+              onScroll={(e) => {
+                const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+                setShowFilterScrollIndicator(
+                  contentOffset.x + layoutMeasurement.width < contentSize.width - 10
+                );
               }}
               scrollEventThrottle={16}
             >
-              {STATUS_OPTIONS.map((status) => (
-                <FilterChip
-                  key={status.value}
-                  label={`${status.label} (${leadStats.byStatus[status.value]})`}
-                  active={selectedStatuses.includes(status.value)}
-                  onPress={() => {
-                    setSelectedStatuses((prev) =>
-                      prev.includes(status.value)
-                        ? prev.filter((s) => s !== status.value)
-                        : [...prev, status.value]
-                    );
-                  }}
-                  showClear={false}
-                />
-              ))}
+              {STATUS_OPTIONS.map((status) => {
+                const isActive = selectedStatuses.includes(status.value);
+                return (
+                  <TouchableOpacity
+                    key={status.value}
+                    style={[styles.chip, isActive && styles.chipActive]}
+                    onPress={() =>
+                      setSelectedStatuses((prev) =>
+                        prev.includes(status.value)
+                          ? prev.filter((s) => s !== status.value)
+                          : [...prev, status.value]
+                      )
+                    }
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
+                      {status.label}{' '}
+                      <Text style={[styles.chipCount, isActive && styles.chipCountActive]}>
+                        {leadStats.byStatus[status.value]}
+                      </Text>
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
               {selectedStatuses.length > 0 && (
                 <TouchableOpacity
-                  style={styles.clearAllButton}
+                  style={styles.clearBtn}
                   onPress={() => setSelectedStatuses([])}
                 >
-                  <X size={16} color="#FF3B30" />
-                  <Text style={styles.clearAllText}>Clear</Text>
+                  <X size={14} color="#FF3B30" />
+                  <Text style={styles.clearBtnText}>Clear</Text>
                 </TouchableOpacity>
               )}
             </ScrollView>
             {showFilterScrollIndicator && (
               <TouchableOpacity
-                style={styles.scrollIndicatorRight}
-                onPress={() => {
-                  filterScrollViewRef.current?.scrollTo({
-                    x: 200,
-                    animated: true,
-                  });
-                }}
+                style={styles.scrollFade}
+                onPress={() =>
+                  filterScrollViewRef.current?.scrollTo({ x: 200, animated: true })
+                }
                 activeOpacity={0.7}
               >
                 <LinearGradient
-                  colors={['transparent', 'rgba(255, 255, 255, 0.8)']}
+                  colors={['transparent', 'rgba(245,247,250,0.95)']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
-                  style={styles.scrollGradient}
+                  style={styles.scrollFadeGradient}
                 >
-                  <ChevronRight size={20} color="#666" />
+                  <ChevronRight size={18} color="#aaa" />
                 </LinearGradient>
               </TouchableOpacity>
             )}
           </View>
 
-          <View style={styles.statsGrid}>
+          {/* Stat Cards — white cards with colored accent bottom border */}
+          <View style={styles.statsRow}>
+            {/* Total Leads */}
             <TouchableOpacity
               style={styles.statCard}
-              activeOpacity={0.7}
-              onPress={() => {
+              activeOpacity={0.75}
+              onPress={() =>
                 router.push({
                   pathname: '/leads',
-                  params: selectedStatuses.length > 0 ? { statuses: selectedStatuses.join(',') } : {}
-                });
-              }}
+                  params: selectedStatuses.length > 0 ? { statuses: selectedStatuses.join(',') } : {},
+                })
+              }
             >
-              <LinearGradient
-                colors={['#b1dafc', '#bbf2fc']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.statCardGradient}
-              >
-                <View style={styles.statIconCircle}>
-                  <TrendingUp size={24} color={Colors.neutral.black} strokeWidth={2.5} />
-                </View>
-                <Text style={styles.statValue}>{leadStats.total}</Text>
-                <Text style={styles.statLabel}>Total Leads</Text>
-              </LinearGradient>
+              <View style={[styles.statIconWrap, { backgroundColor: '#e8f0fe' }]}>
+                <TrendingUp size={20} color="#4285F4" strokeWidth={2.5} />
+              </View>
+              <Text style={styles.statNumber}>{leadStats.total}</Text>
+              <Text style={styles.statLbl}>Total Leads</Text>
+              <View style={[styles.statAccent, { backgroundColor: '#4285F4' }]} />
             </TouchableOpacity>
 
+            {/* This Month */}
             <TouchableOpacity
               style={styles.statCard}
-              activeOpacity={0.7}
+              activeOpacity={0.75}
               onPress={() => {
                 const params: any = { timeFilter: 'month' };
-                if (selectedStatuses.length > 0) {
-                  params.statuses = selectedStatuses.join(',');
-                }
-                router.push({
-                  pathname: '/leads',
-                  params
-                });
+                if (selectedStatuses.length > 0) params.statuses = selectedStatuses.join(',');
+                router.push({ pathname: '/leads', params });
               }}
             >
-              <LinearGradient
-                colors={['#7cf293', '#9df5ae']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.statCardGradient}
-              >
-                <View style={styles.statIconCircle}>
-                  <Calendar size={24} color={Colors.neutral.black} strokeWidth={2.5} />
-                </View>
-                <Text style={styles.statValue}>{leadStats.monthly}</Text>
-                <Text style={styles.statLabel}>This Month</Text>
-              </LinearGradient>
+              <View style={[styles.statIconWrap, { backgroundColor: '#e6f4ea' }]}>
+                <Calendar size={20} color="#34A853" strokeWidth={2.5} />
+              </View>
+              <Text style={styles.statNumber}>{leadStats.monthly}</Text>
+              <Text style={styles.statLbl}>This Month</Text>
+              <View style={[styles.statAccent, { backgroundColor: '#34A853' }]} />
             </TouchableOpacity>
 
+            {/* Today */}
             <TouchableOpacity
               style={styles.statCard}
-              activeOpacity={0.7}
+              activeOpacity={0.75}
               onPress={() => {
                 const params: any = { timeFilter: 'today' };
-                if (selectedStatuses.length > 0) {
-                  params.statuses = selectedStatuses.join(',');
-                }
-                router.push({
-                  pathname: '/leads',
-                  params
-                });
+                if (selectedStatuses.length > 0) params.statuses = selectedStatuses.join(',');
+                router.push({ pathname: '/leads', params });
               }}
             >
-              <LinearGradient
-                colors={['#ffd24d', '#ffd573']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.statCardGradient}
-              >
-                <View style={styles.statIconCircle}>
-                  <Eye size={24} color={Colors.neutral.black} strokeWidth={2.5} />
-                </View>
-                <Text style={styles.statValue}>{leadStats.today}</Text>
-                <Text style={styles.statLabel}>Today</Text>
-              </LinearGradient>
+              <View style={[styles.statIconWrap, { backgroundColor: '#fef3dc' }]}>
+                <Eye size={20} color="#FBBC04" strokeWidth={2.5} />
+              </View>
+              <Text style={styles.statNumber}>{leadStats.today}</Text>
+              <Text style={styles.statLbl}>Today</Text>
+              <View style={[styles.statAccent, { backgroundColor: '#FBBC04' }]} />
             </TouchableOpacity>
           </View>
         </View>
 
-        <View style={styles.businessSection}>
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>My Businesses</Text>
-            <TouchableOpacity
-              onPress={() => router.push('/business-registration')}
-              activeOpacity={0.6}
-            >
-              <Text style={styles.registerBusinessLink}>+ Add Business</Text>
-            </TouchableOpacity>
-          </View>
-
-          {businesses.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyStateTitle}>No Businesses Yet</Text>
-              <Text style={styles.emptyStateText}>
-                Register your first business to start receiving leads
-              </Text>
+        {/* ── My Businesses ── */}
+        {businesses.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>My Businesses</Text>
             </View>
-          ) : (
-            <View style={styles.scrollContainer}>
-              <ScrollView
-                ref={businessScrollViewRef}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.businessList}
-                onContentSizeChange={(width) => {
-                  setShowBusinessScrollIndicator(businesses.length > 1 && width > 0);
-                }}
-                onScroll={(event) => {
-                  const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-                  const canScrollRight = contentOffset.x + layoutMeasurement.width < contentSize.width - 10;
-                  setShowBusinessScrollIndicator(businesses.length > 1 && canScrollRight);
-                  setBusinessScrollX(contentOffset.x);
-                }}
-                scrollEventThrottle={16}
-              >
-                {businesses.map((business) => (
+
+            <View style={styles.businessList}>
+              {businesses.map((business, index) => {
+                const completion = calculateProfileCompletion(business);
+                const isIncomplete = completion < 100;
+                // Color: amber at low%, transitions to green near 100%
+                const barColor = completion >= 80 ? '#34A853' : completion >= 50 ? '#FBBC04' : '#FF9C42';
+
+                return (
                   <TouchableOpacity
                     key={business.id}
-                    style={styles.businessCard}
-                    onPress={() =>
-                      router.push(`/business-details?id=${business.id}`)
-                    }
+                    style={styles.businessCardItem}
+                    onPress={() => (router as any).push(`/business-profile?id=${business.id}`)}
+                    activeOpacity={0.7}
                   >
-                    {business.cover_photo_url ? (
-                      <View style={styles.businessImageContainer}>
+                    {/* Main row */}
+                    <View style={styles.businessRow}>
+                      {/* Avatar */}
+                      {business.cover_photo_url ? (
                         <Image
                           source={{ uri: business.cover_photo_url }}
-                          style={styles.businessImageBackground}
-                          blurRadius={15}
+                          style={styles.businessAvatar}
                           resizeMode="cover"
                         />
-                        <Image
-                          source={{ uri: business.cover_photo_url }}
-                          style={styles.businessImage}
-                          resizeMode="contain"
-                        />
-                      </View>
-                    ) : (
-                      <LinearGradient
-                        colors={[Colors.secondary.main, Colors.secondary.light]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={styles.businessImagePlaceholder}
-                      >
-                        <Text style={styles.businessImagePlaceholderText}>
-                          {business.business_name.charAt(0)}
-                        </Text>
-                      </LinearGradient>
-                    )}
-                    <View style={styles.businessInfo}>
-                      <Text style={styles.businessName} numberOfLines={1}>
-                        {business.business_name}
-                      </Text>
-                      <Text style={styles.businessCategory} numberOfLines={1}>
-                        {business.vendor_service_category}
-                      </Text>
-                      <Text style={styles.businessDescription} numberOfLines={2}>
-                        {business.business_description}
-                      </Text>
-                      <Text style={styles.businessLocation} numberOfLines={1}>
-                        {business.city}, {business.state}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-              {businesses.length > 1 && showBusinessScrollIndicator && (
-                <TouchableOpacity
-                  style={styles.scrollIndicatorRight}
-                  onPress={() => {
-                    businessScrollViewRef.current?.scrollTo({
-                      x: businessScrollX + 296,
-                      animated: true,
-                    });
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <LinearGradient
-                    colors={['transparent', 'rgba(255, 255, 255, 0.8)']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.scrollGradient}
-                  >
-                    <ChevronRight size={32} color="#333" />
-                  </LinearGradient>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
+                      ) : (
+                        <LinearGradient
+                          colors={AVATAR_COLORS[index % AVATAR_COLORS.length]}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
+                          style={styles.businessAvatar}
+                        >
+                          <Text style={styles.businessAvatarLetter}>
+                            {business.business_name.charAt(0).toUpperCase()}
+                          </Text>
+                        </LinearGradient>
+                      )}
 
+                      {/* Info */}
+                      <View style={styles.businessInfo}>
+                        <Text style={styles.businessName} numberOfLines={1}>
+                          {business.business_name}
+                        </Text>
+                        <Text style={styles.businessCategory} numberOfLines={1}>
+                          {business.business_category}
+                        </Text>
+                      </View>
+
+                      {/* Right side */}
+                      <View style={styles.businessRight}>
+                        {businessLeadCounts[business.id] !== undefined && (
+                          <View style={styles.leadsBadge}>
+                            <Text style={styles.leadsBadgeText}>
+                              {businessLeadCounts[business.id]} {businessLeadCounts[business.id] === 1 ? 'lead' : 'leads'}
+                            </Text>
+                          </View>
+                        )}
+                        <ChevronRight size={16} color="#c8c8c8" strokeWidth={2} />
+                      </View>
+                    </View>
+
+                    {/* Profile completion bar — only shown when incomplete */}
+                    {isIncomplete && (
+                      <View style={styles.completionWrap}>
+                        <Text style={[styles.completionLabelText, { color: barColor }]}>
+                          Profile Completed
+                        </Text>
+                        <View style={styles.completionBarBg}>
+                          <View
+                            style={[
+                              styles.completionBarFill,
+                              { width: `${completion}%` as any, backgroundColor: barColor },
+                            ]}
+                          />
+                        </View>
+                        <Text style={[styles.completionLabel, { color: barColor }]}>
+                          {completion}%
+                        </Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        )}
+
+        {/* ── Quick Actions ── */}
+        <View style={[styles.section]}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+          </View>
+          <View style={styles.quickRow}>
+            {/* <TouchableOpacity
+              style={styles.quickCard}
+              activeOpacity={0.75}
+              onPress={() => router.push('/leads')}
+            >
+              <View style={[styles.quickIconWrap, { backgroundColor: '#ede9ff' }]}>
+                <TrendingUp size={24} color="#7c5cfc" strokeWidth={2} />
+              </View>
+              <Text style={styles.quickLabel}>Add Lead</Text>
+            </TouchableOpacity> */}
+
+            <TouchableOpacity
+              style={styles.quickCard}
+              activeOpacity={0.75}
+              onPress={() => router.push('/business-registration')}
+            >
+              <View style={[styles.quickIconWrap, { backgroundColor: '#e6f4ea' }]}>
+                <Calendar size={24} color="#34A853" strokeWidth={2} />
+              </View>
+              <Text style={styles.quickLabel}>Add Business</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickCard}
+              activeOpacity={0.75}
+              onPress={() => (router as any).push('/schedule')}
+            >
+              <View style={[styles.quickIconWrap, { backgroundColor: '#fef3dc' }]}>
+                <Calendar size={24} color="#FBBC04" strokeWidth={2} />
+              </View>
+              <Text style={styles.quickLabel}>Schedule</Text>
+            </TouchableOpacity>
+          </View>
         </View>
+
+        <View style={{ height: 20 }} />
       </ScrollView>
     </ScreenBackground>
   );
@@ -555,253 +745,358 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#f5f7fa',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#f5f7fa',
   },
+
+  /* Header */
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#fff',
     paddingHorizontal: 20,
+    paddingBottom: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: '#efefef',
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 0,
-    height: '100%',
+    gap: 10,
   },
   headerLogo: {
-    marginRight: 4,
-    marginVertical: 0,
+    marginRight: 0,
+  },
+  headerGreeting: {
+    fontSize: 11,
+    color: '#999',
+    fontWeight: '500',
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1a1a1a',
-    lineHeight: 22,
-    textAlignVertical: 'center',
-    includeFontPadding: false,
-  },
-  content: {
-    padding: 20,
-  },
-  statsSection: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
     fontSize: 20,
     fontWeight: '700',
     color: '#1a1a1a',
-    marginBottom: 16,
+    lineHeight: 24,
   },
-  statsGrid: {
-    flexDirection: 'row',
-    gap: Spacing.md,
-  },
-  statCard: {
-    flex: 1,
-    borderRadius: BorderRadius.lg,
-    overflow: 'hidden',
-    ...Shadows.medium,
-  },
-  statCardGradient: {
-    padding: Spacing.lg,
-    alignItems: 'center',
-  },
-  statIconCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: Spacing.md,
-  },
-  statValue: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: Colors.neutral.black,
-    marginBottom: 4,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: Colors.neutral.black,
-    textAlign: 'center',
-    fontWeight: '600',
-    opacity: 0.9,
-  },
-  scrollContainer: {
-    position: 'relative',
-    marginBottom: 16,
-  },
-  filterContainer: {
-    marginBottom: 0,
-  },
-  filterScrollContent: {
-    paddingVertical: 4,
-    gap: 8,
-    paddingRight: 40, // Add padding for scroll indicator
-  },
-  scrollIndicatorRight: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
+  notificationBtn: {
     width: 40,
-    justifyContent: 'center',
-    alignItems: 'flex-end',
-    zIndex: 10,
-  },
-  scrollGradient: {
-    width: 40,
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingRight: 8,
-  },
-  clearAllButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#FFF5F5',
+    height: 40,
     borderRadius: 20,
+    backgroundColor: '#f4f4f4',
+    justifyContent: 'center',
+    alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#FF3B30',
+    borderColor: '#ececec',
   },
-  clearAllText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FF3B30',
+  offlineBanner: {
+    backgroundColor: '#FEF3C7',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  businessSection: {
+  offlineText: {
+    color: '#B45309',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+
+  /* Content layout */
+  content: {
+    padding: 16,
+  },
+  section: {
     marginBottom: 24,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
-  registerBusinessLink: {
-    fontSize: 16,
+  sectionTitle: {
+    fontSize: 17,
     fontWeight: '700',
     color: '#1a1a1a',
   },
+  actionLink: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#4285F4',
+  },
+
+  /* Filter chips */
+  filterWrapper: {
+    position: 'relative',
+    marginBottom: 14,
+  },
+  filterScrollContent: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingVertical: 2,
+    paddingRight: 36,
+  },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: '#eef0f4',
+  },
+  chipActive: {
+    backgroundColor: '#1a1a1a',
+  },
+  chipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#555',
+  },
+  chipTextActive: {
+    color: '#fff',
+  },
+  chipCount: {
+    fontWeight: '700',
+    color: '#555',
+  },
+  chipCountActive: {
+    color: '#fff',
+  },
+  clearBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    backgroundColor: '#FFF5F5',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+  },
+  clearBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FF3B30',
+  },
+  scrollFade: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 36,
+    zIndex: 10,
+  },
+  scrollFadeGradient: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    paddingRight: 4,
+  },
+
+  /* Stat cards */
+  statsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 14,
+    alignItems: 'flex-start',
+    overflow: 'hidden',
+    /* Shadow */
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  statIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  statNumber: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    lineHeight: 30,
+  },
+  statLbl: {
+    fontSize: 11,
+    color: '#888',
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  statAccent: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
+  },
+
+  /* Business list — each business is its own card */
+  businessList: {
+    gap: 10,
+  },
+  businessCardItem: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  businessRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+  },
+  businessAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  businessAvatarLetter: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  businessInfo: {
+    flex: 1,
+  },
+  businessName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 2,
+  },
+  businessCategory: {
+    fontSize: 12,
+    color: '#999',
+    fontWeight: '400',
+  },
+  businessRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  leadsBadge: {
+    backgroundColor: '#f0f4ff',
+    borderRadius: 10,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  leadsBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4285F4',
+  },
+
+  /* Profile completion bar */
+  completionWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 11,
+    gap: 8,
+  },
+  completionLabelText: {
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  completionBarBg: {
+    flex: 1,
+    height: 4,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 99,
+    overflow: 'hidden',
+  },
+  completionBarFill: {
+    height: 4,
+    borderRadius: 99,
+  },
+  completionLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+    minWidth: 28,
+    textAlign: 'right',
+  },
+
+  /* Empty */
   emptyState: {
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 32,
     alignItems: 'center',
-    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
   },
   emptyStateTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
     color: '#1a1a1a',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   emptyStateText: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 13,
+    color: '#888',
     textAlign: 'center',
-    marginBottom: 24,
   },
-  primaryButtonContainer: {
-    alignItems: 'center',
-    width: '100%',
-  },
-  primaryButton: {
-    borderRadius: BorderRadius.md,
-    overflow: 'hidden',
-    ...Shadows.medium,
-    alignSelf: 'center',
-  },
-  primaryButtonWithMargin: {
-    marginTop: 8,
-  },
-  primaryButtonGradient: {
+
+  /* Quick Actions */
+  quickRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.xxxl,
+    gap: 10,
   },
-  primaryButtonText: {
-    color: Colors.neutral.black,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  businessList: {
-    gap: 16,
-    paddingRight: 40, // Add padding for scroll indicator
-  },
-  businessCard: {
-    width: 280,
+  quickCard: {
+    flex: 1,
     backgroundColor: '#fff',
     borderRadius: 16,
-    overflow: 'hidden',
+    paddingVertical: 18,
+    alignItems: 'center',
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
   },
-  businessImageContainer: {
-    width: '100%',
-    height: 160,
-    backgroundColor: '#f0f0f0',
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  businessImageBackground: {
-    ...StyleSheet.absoluteFillObject,
-    width: '100%',
-    height: '100%',
-    opacity: 0.7,
-  },
-  businessImage: {
-    width: '100%',
-    height: '100%',
-    zIndex: 1,
-  },
-  businessImagePlaceholder: {
-    width: '100%',
-    height: 140,
+  quickIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  businessImagePlaceholderText: {
-    fontSize: 48,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  businessInfo: {
-    padding: 16,
-  },
-  businessName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1a1a1a',
-    marginBottom: 4,
-  },
-  businessCategory: {
+  quickLabel: {
     fontSize: 12,
-    color: Colors.primary.main,
     fontWeight: '600',
-    marginBottom: 8,
-  },
-  businessDescription: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 20,
-    marginBottom: 8,
-  },
-  businessLocation: {
-    fontSize: 12,
-    color: '#999',
+    color: '#444',
+    textAlign: 'center',
   },
 });

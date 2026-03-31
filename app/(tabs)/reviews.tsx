@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { useFocusEffect } from 'expo-router';
 import {
   View,
   Text,
@@ -14,8 +15,9 @@ import {
   Dimensions,
   Linking,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Video } from 'expo-av';
+import { Video, ResizeMode } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Star,
@@ -23,18 +25,18 @@ import {
   SlidersHorizontal,
   ArrowUpDown,
   MessageSquare,
+  CornerDownLeft,
+  TrendingUp,
   X,
   Play,
-  Store,
+  WifiOff,
 } from 'lucide-react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabaseCore, supabaseCrm, supabaseCms } from '../../lib/supabase';
 import { getPublicUrl } from '../../lib/businessApi';
-import FilterModal from '../../components/FilterModal';
-import SortModal from '../../components/SortModal';
+import FilterSortModal from '../../components/FilterSortModal';
 import ReplyModal from '../../components/ReplyModal';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
-import Logo from '../../components/Logo';
 import ScreenBackground from '../../components/ScreenBackground';
 
 interface Review {
@@ -72,8 +74,7 @@ export default function ReviewsScreen() {
   const [selectedEventTypes, setSelectedEventTypes] = useState<string[]>([]);
   const [dateFilter, setDateFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<SortOption>('newest');
-  const [showFilterModal, setShowFilterModal] = useState(false);
-  const [showSortModal, setShowSortModal] = useState(false);
+  const [showFilterSortModal, setShowFilterSortModal] = useState(false);
   const [showReplyModal, setShowReplyModal] = useState(false);
   const [selectedReview, setSelectedReview] = useState<Review | null>(null);
   const [selectedMedia, setSelectedMedia] = useState<{
@@ -81,24 +82,37 @@ export default function ReviewsScreen() {
     mimeType?: string;
   } | null>(null);
   const [mediaLoadError, setMediaLoadError] = useState(false);
-  const { user } = useAuth();
+  const { user, isOffline: authIsOffline } = useAuth();
 
-  useEffect(() => {
-    if (user?.id) {
-      fetchReviews();
-    }
-  }, [user?.id]);
+  // Refresh reviews whenever the screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.id) {
+        fetchReviews();
+      }
+    }, [user?.id, fetchReviews])
+  );
 
   useEffect(() => {
     if (selectedMedia) setMediaLoadError(false);
   }, [selectedMedia]);
 
-  const fetchReviews = async () => {
+  const fetchReviews = useCallback(async () => {
     try {
       if (!user?.id) return;
 
       const isRefresh = refreshing;
       if (!isRefresh) setLoading(true);
+
+      // Check cache first
+      try {
+        const cachedReviews = await AsyncStorage.getItem(`vendor_reviews_${user.id}`);
+        if (cachedReviews) {
+          setReviews(JSON.parse(cachedReviews));
+        }
+      } catch (cacheError) {
+        console.error("Cache read error:", cacheError);
+      }
 
       // Get business data for mapping business_id to business_name
       const { data: businessData, error: businessError } = await supabaseCore
@@ -287,14 +301,20 @@ export default function ReviewsScreen() {
 
       console.log(`Mapped ${reviewsWithBusiness.length} reviews`);
       setReviews(reviewsWithBusiness);
+
+      // Update cache
+      try {
+        AsyncStorage.setItem(`vendor_reviews_${user.id}`, JSON.stringify(reviewsWithBusiness));
+      } catch (e) { }
     } catch (error) {
       console.error('Error fetching reviews:', error);
-      setReviews([]);
+      // We do not clear reviews here to allow showing cached data
+      // setReviews([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [user?.id, refreshing]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -479,6 +499,22 @@ export default function ReviewsScreen() {
     });
   };
 
+  const formatRelativeTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return '1 day ago';
+    if (diffDays < 30) return `${diffDays} days ago`;
+    const diffMonths = Math.floor(diffDays / 30);
+    if (diffMonths === 1) return '1 month ago';
+    if (diffMonths < 12) return `${diffMonths} months ago`;
+    const diffYears = Math.floor(diffMonths / 12);
+    if (diffYears === 1) return '1 year ago';
+    return `${diffYears} years ago`;
+  };
+
   const getInitials = (name: string) => {
     return name
       .split(' ')
@@ -498,38 +534,25 @@ export default function ReviewsScreen() {
               style={styles.avatar}
             />
           ) : (
-            <LinearGradient
-              colors={[Colors.info.main, Colors.info.light]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={[styles.avatar, styles.avatarPlaceholder]}
-            >
+            <View style={[styles.avatar, styles.avatarPlaceholder]}>
               <Text style={styles.avatarText}>{getInitials(item.customer_name)}</Text>
-            </LinearGradient>
+            </View>
           )}
           <View style={styles.customerDetails}>
             <Text style={styles.customerName}>{item.customer_name}</Text>
-            {renderStars(item.rating, 14)}
+            <View style={styles.starsRow}>
+              {renderStars(item.rating, 14)}
+              <Text style={styles.reviewDate}>{formatRelativeTime(item.created_at)}</Text>
+            </View>
           </View>
         </View>
-        <Text style={styles.reviewDate}>{formatDate(item.created_at)}</Text>
       </View>
 
-      <View style={styles.badgesContainer}>
-        {item.event_type && (
-          <View style={styles.eventBadge}>
-            <Text style={styles.eventBadgeText}>{item.event_type}</Text>
-          </View>
-        )}
-        {item.businesses?.business_name && (
-          <View style={styles.businessBadge}>
-            <Store size={14} color="#6366F1" style={{ marginTop: -1 }} />
-            <Text style={styles.businessBadgeText}>
-              {item.businesses.business_name}
-            </Text>
-          </View>
-        )}
-      </View>
+      {item.event_type && (
+        <View style={styles.eventBadge}>
+          <Text style={styles.eventBadgeText}>{item.event_type}</Text>
+        </View>
+      )}
 
       {item.comment && <Text style={styles.comment}>{item.comment}</Text>}
 
@@ -562,7 +585,7 @@ export default function ReviewsScreen() {
         </View>
       )}
 
-      {item.vendor_response && (
+      {/* {item.vendor_response && (
         <View style={styles.replyContainer}>
           <View style={styles.replyHeader}>
             <MessageSquare size={14} color="#3B82F6" />
@@ -575,129 +598,96 @@ export default function ReviewsScreen() {
           </View>
           <Text style={styles.replyText}>{item.vendor_response}</Text>
         </View>
-      )}
+      )} */}
 
-      <TouchableOpacity
-        style={styles.replyButton}
-        onPress={() => handleReply(item)}
-      >
-        <MessageSquare size={16} color="#3B82F6" />
-        <Text style={styles.replyButtonText}>
-          {item.vendor_response ? 'Edit Reply' : 'Reply'}
-        </Text>
-      </TouchableOpacity>
+      <View style={styles.reviewFooter}>
+        {item.businesses?.business_name ? (
+          <View style={styles.businessBadge}>
+            <Text style={styles.businessBadgeText}>
+              {item.businesses.business_name}
+            </Text>
+          </View>
+        ) : (
+          <View />
+        )}
+        {/* <TouchableOpacity
+          style={styles.replyButton}
+          onPress={() => handleReply(item)}
+        >
+          <CornerDownLeft size={14} color='#5B8DB8' />
+          <Text style={styles.replyButtonText}>
+            {item.vendor_response ? 'Edit Reply' : 'Reply'}
+          </Text>
+        </TouchableOpacity> */}
+      </View>
     </View>
   );
 
+  const fiveStarCount = useMemo(() => reviews.filter((r) => r.rating === 5).length, [reviews]);
+
   const renderListHeader = () => (
     <>
-      <View style={styles.summaryCard}>
-        <View style={styles.summaryTop}>
-          <View style={styles.summaryRatingSection}>
-            <Text style={styles.summaryRating}>{averageRating}</Text>
-            {renderStars(Math.round(Number(averageRating)), 20)}
-            <Text style={styles.summaryText}>
-              {reviews.length} {reviews.length === 1 ? 'review' : 'reviews'}
-            </Text>
+      {/* Stat Cards Container */}
+      <View style={styles.statCardsContainer}>
+        <View style={styles.individualStatCard}>
+          <View style={[styles.statIconWrap, { backgroundColor: '#FFF6DC' }]}>
+            <Star size={20} color="#FFB800" fill="#FFB800" />
           </View>
-
-          <View style={styles.insightsSection}>
-            <View style={styles.insightItem}>
-              <Text style={styles.insightValue}>{responseRate}%</Text>
-              <Text style={styles.insightLabel}>Response Rate</Text>
-            </View>
-            {mostCommonRating && (
-              <View style={styles.insightItem}>
-                <Text style={styles.insightValue}>{mostCommonRating}★</Text>
-                <Text style={styles.insightLabel}>Most Common</Text>
-              </View>
-            )}
-          </View>
+          <Text style={styles.statValue}>{averageRating}</Text>
+          <Text style={styles.statLabel}>Avg. Rating</Text>
         </View>
 
-        <View style={styles.distributionSection}>
-          {ratingDistribution.map((dist) => (
-            <View key={dist.stars} style={styles.distributionRow}>
-              <Text style={styles.distributionStars}>{dist.stars}★</Text>
-              <View style={styles.distributionBar}>
-                <View
-                  style={[
-                    styles.distributionBarFill,
-                    { width: `${dist.percentage}%` },
-                  ]}
-                />
-              </View>
-              <Text style={styles.distributionCount}>{dist.count}</Text>
-            </View>
-          ))}
+        <View style={styles.individualStatCard}>
+          <View style={[styles.statIconWrap, { backgroundColor: '#EAF0FF' }]}>
+            <MessageSquare size={20} color="#6B7FD7" />
+          </View>
+          <Text style={styles.statValue}>{reviews.length}</Text>
+          <Text style={styles.statLabel}>Total</Text>
+        </View>
+
+        <View style={styles.individualStatCard}>
+          <View style={[styles.statIconWrap, { backgroundColor: '#E6F9EE' }]}>
+            <TrendingUp size={20} color="#4CAF50" />
+          </View>
+          <Text style={styles.statValue}>{fiveStarCount}</Text>
+          <Text style={styles.statLabel}>5-Star</Text>
         </View>
       </View>
 
-      <View style={styles.searchContainer}>
-        <Search size={20} color="#999" style={styles.searchIcon} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search reviews..."
-          placeholderTextColor="#999"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-        {searchQuery.length > 0 && (
-          <TouchableOpacity
-            onPress={() => setSearchQuery('')}
-            style={styles.clearSearchButton}
-          >
-            <X size={18} color="#999" />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <View style={styles.filterSortRow}>
+      {/* Recent Reviews Header row with Filter/Sort button */}
+      <View style={styles.sectionHeaderRow}>
+        <Text style={styles.sectionTitle}>Recent Reviews</Text>
+        
         <TouchableOpacity
-          style={styles.filterButton}
-          onPress={() => setShowFilterModal(true)}
+          style={styles.filterSortButton}
+          onPress={() => setShowFilterSortModal(true)}
+          activeOpacity={0.7}
         >
-          <SlidersHorizontal size={18} color="#3B82F6" />
-          <Text style={styles.filterButtonText}>Filters</Text>
-          {activeFilterCount > 0 && (
-            <View style={styles.filterBadge}>
-              <Text style={styles.filterBadgeText}>
-                {activeFilterCount}
-              </Text>
-            </View>
-          )}
+          <SlidersHorizontal size={16} color="#3B82F6" />
+          <Text style={styles.filterSortButtonText}>
+            Filter & Sort{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+          </Text>
         </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.sortButton}
-          onPress={() => setShowSortModal(true)}
-        >
-          <ArrowUpDown size={18} color="#3B82F6" />
-          <Text style={styles.sortButtonText}>Sort</Text>
-        </TouchableOpacity>
-
-        {activeFilterCount > 0 && (
-          <TouchableOpacity
-            style={styles.clearButton}
-            onPress={clearAllFilters}
-          >
-            <Text style={styles.clearButtonText}>Clear All</Text>
-          </TouchableOpacity>
-        )}
       </View>
     </>
   );
 
   return (
-    <ScreenBackground style={styles.container}>
+    <ScreenBackground style={[styles.container, { backgroundColor: '#ECEEF5' }]}>
       <View style={[styles.header, { height: insets.top + 60, paddingTop: insets.top }]}>
         <View style={styles.headerLeft}>
-          <Logo size={38} style={styles.headerLogo} />
           <Text style={styles.headerTitle}>Reviews</Text>
         </View>
       </View>
 
-      {loading ? (
+      {authIsOffline && (
+        <View style={styles.offlineBanner}>
+          <WifiOff size={16} color="#B45309" />
+          <Text style={styles.offlineText}>You're currently offline. Viewing cached data.</Text>
+        </View>
+      )}
+
+      {loading && reviews.length === 0 ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#3B82F6" />
         </View>
@@ -752,22 +742,20 @@ export default function ReviewsScreen() {
         />
       )}
 
-      <FilterModal
-        visible={showFilterModal}
-        onClose={() => setShowFilterModal(false)}
-        title="Filter by Rating"
-        options={['5', '4', '3', '2', '1']}
-        selectedOptions={selectedRatings}
-        onSelectOptions={setSelectedRatings}
-        multiSelect={true}
-      />
-
-      <SortModal
-        visible={showSortModal}
-        onClose={() => setShowSortModal(false)}
-        selectedSort={sortBy as any}
+      <FilterSortModal
+        visible={showFilterSortModal}
+        onClose={() => setShowFilterSortModal(false)}
+        selectedSort={sortBy}
         onSelectSort={(sort) => setSortBy(sort as SortOption)}
-        context="reviews"
+        sortOptions={[
+          { label: 'Newest first', value: 'newest' },
+          { label: 'Oldest first', value: 'oldest' },
+          { label: 'Highest rated', value: 'highest' },
+          { label: 'Lowest rated', value: 'lowest' },
+        ]}
+        selectedRatings={selectedRatings}
+        onSelectRatings={setSelectedRatings}
+        ratingOptions={['5', '4', '3', '2', '1']}
       />
 
       {selectedReview && (
@@ -841,7 +829,7 @@ export default function ReviewsScreen() {
                       source={{ uri: selectedMedia.url }}
                       style={styles.mediaModalVideo}
                       useNativeControls
-                      resizeMode="contain"
+                      resizeMode={ResizeMode.CONTAIN}
                       shouldPlay
                       onError={() => setMediaLoadError(true)}
                     />
@@ -881,12 +869,20 @@ const styles = StyleSheet.create({
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 0,
-    height: '100%',
+    gap: 12,
   },
-  headerLogo: {
-    marginRight: 4,
-    marginVertical: 0,
+  offlineBanner: {
+    backgroundColor: '#FEF3C7',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  offlineText: {
+    color: '#B45309',
+    fontSize: 13,
+    fontWeight: '500',
   },
   headerTitle: {
     fontSize: 18,
@@ -901,212 +897,283 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  summaryCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 12,
-    borderRadius: 16,
-    padding: 20,
-  },
-  summaryTop: {
+
+  // ── Stat Cards ──────────────────────────────────────
+  statCardsContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-  },
-  summaryRatingSection: {
-    alignItems: 'flex-start',
-  },
-  summaryRating: {
-    fontSize: 56,
-    fontWeight: '700',
-    color: Colors.primary.main,
-    marginBottom: 8,
-    lineHeight: 56,
-  },
-  summaryText: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 8,
-  },
-  insightsSection: {
-    gap: 16,
-  },
-  insightItem: {
-    alignItems: 'flex-end',
-  },
-  insightValue: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: Colors.secondary.main,
-  },
-  insightLabel: {
-    fontSize: 12,
-    color: '#666',
     marginTop: 4,
-  },
-  distributionSection: {
-    gap: 10,
-  },
-  distributionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    marginBottom: 8,
     gap: 12,
   },
-  distributionStars: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-    width: 24,
-  },
-  distributionBar: {
+  individualStatCard: {
     flex: 1,
-    height: 8,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  distributionBarFill: {
-    height: '100%',
-    backgroundColor: Colors.accent.main,
-    borderRadius: 4,
-  },
-  distributionCount: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#666',
-    width: 30,
-    textAlign: 'right',
-  },
-  searchContainer: {
-    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  searchIcon: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#1a1a1a',
-    padding: 0,
-  },
-  clearSearchButton: {
-    padding: 4,
-  },
-  filterSortRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    marginBottom: 12,
-    gap: 8,
-  },
-  filterButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.neutral.white,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: 10,
-    borderRadius: 20,
-    gap: 6,
-    borderWidth: 2,
-    borderColor: Colors.secondary.main,
-  },
-  filterButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.secondary.main,
-  },
-  filterBadge: {
-    backgroundColor: Colors.secondary.main,
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
     justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 6,
-  },
-  filterBadgeText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  sortButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.neutral.white,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: 10,
-    borderRadius: 20,
-    gap: 6,
-    borderWidth: 2,
-    borderColor: Colors.secondary.main,
-  },
-  sortButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.secondary.main,
-  },
-  badgesContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 12,
-  },
-  eventBadge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    backgroundColor: Colors.accent.light + '30',
-    marginBottom: Spacing.md,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    paddingVertical: 20,
     borderWidth: 1,
-    borderColor: Colors.accent.main,
-  },
-  businessBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    backgroundColor: '#EEF2FF',
-    borderWidth: 1,
-    borderColor: '#C7D2FE',
-    marginBottom: Spacing.md,
-    gap: 6,
-    shadowColor: '#6366F1',
+    borderColor: '#F0F2F8',
+    shadowColor: '#8090B8',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
     elevation: 2,
   },
-  businessBadgeText: {
-    fontSize: 13,
+  statIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  statValue: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#1C2340',
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#8A94A6',
+    fontWeight: '500',
+  },
+
+  // ── Section Header ────────────────────────────────
+
+
+  // ── Header & Filters ────────────────────────────────
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 12,
+    paddingHorizontal: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1a1a1a',
+  },
+  filterSortButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#3B82F6',
+    gap: 6,
+  },
+  filterSortButtonText: {
+    fontSize: 14,
     fontWeight: '600',
-    color: '#4F46E5',
-    letterSpacing: 0.2,
+    color: '#3B82F6',
   },
   clearButton: {
     backgroundColor: '#fff',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#999',
+    borderColor: '#C8CDD8',
   },
   clearButtonText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: '#666',
+    color: '#9AA0BB',
   },
+
+  // ── Review Card ─────────────────────────────────────
+  listContent: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 24,
+    gap: 12,
+  },
+  reviewCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#8090B8',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.10,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  reviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+  },
+  customerInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+  },
+  avatarPlaceholder: {
+    backgroundColor: '#2D3554',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 0.5,
+  },
+  customerDetails: {
+    flex: 1,
+    gap: 4,
+  },
+  customerName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1C2340',
+  },
+  starsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  starsContainer: {
+    flexDirection: 'row',
+    gap: 2,
+  },
+  reviewDate: {
+    fontSize: 12,
+    color: '#9AA0BB',
+    fontWeight: '400',
+  },
+
+  // ── Badges ──────────────────────────────────────────
+  eventBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    backgroundColor: Colors.accent.light + '30',
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: Colors.accent.main,
+  },
+  eventBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.accent.dark,
+  },
+  businessBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 20,
+    backgroundColor: '#F0F2F8',
+  },
+  businessBadgeText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#6B7280',
+  },
+
+  // ── Comment / Media ─────────────────────────────────
+  comment: {
+    fontSize: 14,
+    color: '#4B5275',
+    lineHeight: 21,
+    marginBottom: 14,
+  },
+  mediaGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 14,
+  },
+  mediaThumb: {
+    width: 96,
+    height: 96,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#f0f0f0',
+  },
+  mediaThumbImage: {
+    width: '100%',
+    height: '100%',
+  },
+  mediaThumbVideo: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#333',
+  },
+
+  // ── Reply ───────────────────────────────────────────
+  replyContainer: {
+    backgroundColor: '#EAF2FB',
+    borderLeftWidth: 3,
+    borderLeftColor: '#5B8DB8',
+    padding: Spacing.md,
+    borderRadius: BorderRadius.sm,
+    marginBottom: 12,
+  },
+  replyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: Spacing.sm,
+  },
+  replyLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#5B8DB8',
+    flex: 1,
+  },
+  replyDate: {
+    fontSize: 11,
+    color: '#9AA0BB',
+  },
+  replyText: {
+    fontSize: 13,
+    color: '#4B5275',
+    lineHeight: 19,
+  },
+
+  // ── Review Footer (business badge + reply button) ───
+  reviewFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: '#ECEEF5',
+    paddingTop: 10,
+    marginTop: 4,
+  },
+  replyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: '#EAF2FB',
+    borderWidth: 1,
+    borderColor: '#C1D8EC',
+  },
+  replyButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#5B8DB8',
+  },
+
+  // ── Empty States ────────────────────────────────────
   emptyState: {
     flex: 1,
     justifyContent: 'center',
@@ -1150,99 +1217,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.secondary.main,
     textAlign: 'center',
   },
-  listContent: {
-    padding: 16,
-    gap: 16,
-  },
-  reviewCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  reviewHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  customerInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    flex: 1,
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-  },
-  avatarPlaceholder: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  customerDetails: {
-    flex: 1,
-    gap: 6,
-  },
-  customerName: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1a1a1a',
-  },
-  starsContainer: {
-    flexDirection: 'row',
-    gap: 2,
-  },
-  reviewDate: {
-    fontSize: 13,
-    color: '#999',
-  },
 
-  eventBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.accent.dark,
-  },
-  comment: {
-    fontSize: 15,
-    color: '#333',
-    lineHeight: 22,
-    marginBottom: 16,
-  },
-  mediaGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 16,
-  },
-  mediaThumb: {
-    width: 96,
-    height: 96,
-    borderRadius: 8,
-    overflow: 'hidden',
-    backgroundColor: '#f0f0f0',
-  },
-  mediaThumbImage: {
-    width: '100%',
-    height: '100%',
-  },
-  mediaThumbVideo: {
-    width: '100%',
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#333',
-  },
+  // ── Media Modal ─────────────────────────────────────
   mediaModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.95)',
@@ -1288,49 +1264,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#fff',
     fontWeight: '600',
-  },
-  replyContainer: {
-    backgroundColor: Colors.secondary.light + '20',
-    borderLeftWidth: 4,
-    borderLeftColor: Colors.secondary.main,
-    padding: Spacing.md,
-    borderRadius: BorderRadius.sm,
-    marginBottom: Spacing.md,
-  },
-  replyHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: Spacing.sm,
-  },
-  replyLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.secondary.main,
-    flex: 1,
-  },
-  replyDate: {
-    fontSize: 11,
-    color: '#999',
-  },
-  replyText: {
-    fontSize: 14,
-    color: '#555',
-    lineHeight: 20,
-  },
-  replyButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: Colors.neutral.light,
-    marginTop: 4,
-  },
-  replyButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: Colors.secondary.main,
   },
 });
