@@ -21,8 +21,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabaseCore } from '../lib/supabase';
 import BasicInformationStep, { BasicInformationStepRef } from '../components/registration/BasicInformationStep';
 import ServicesExperienceStep, { ServicesExperienceStepRef } from '../components/registration/ServicesExperienceStep';
-import VerificationStep, { VerificationStepRef } from '../components/registration/VerificationStep';
-import PortfolioSocialStep from '../components/registration/PortfolioSocialStep';
 import { pickMultipleImages, uploadMultipleBusinessImages, uploadMultipleVerificationDocuments, UploadDocumentData, uploadBusinessImage, setCoverImage } from '../lib/businessApi';
 import Dropdown from '../components/Dropdown';
 import { validateEmail, getEmailError } from '../lib/validation';
@@ -77,7 +75,6 @@ export default function BusinessRegistrationScreen() {
   const router = useRouter();
   const basicInfoStepRef = useRef<BasicInformationStepRef>(null);
   const servicesStepRef = useRef<ServicesExperienceStepRef>(null);
-  const verificationStepRef = useRef<VerificationStepRef>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const [contentHeight, setContentHeight] = useState(0);
   const [containerHeight, setContainerHeight] = useState(0);
@@ -176,13 +173,12 @@ export default function BusinessRegistrationScreen() {
   const areMandatoryFieldsFilled = (): boolean => {
     const hasBusinessName = !!(businessData.businessName?.trim());
     const hasContactName = !!(businessData.contactPersonName?.trim());
-    const hasEmail = !!(businessData.email?.trim()) && validateEmail(businessData.email);
+    const isEmailValid = !businessData.email || !businessData.email.trim() || validateEmail(businessData.email);
     const hasPhone = !!(businessData.phoneNumber?.trim());
     const hasCategory = !!(businessData.selectedRootCategoryId || (businessData.selectedCategoryIds && businessData.selectedCategoryIds.length > 0));
-    const hasEvents = !!(businessData.selectedEventIds && businessData.selectedEventIds.length > 0);
     const hasOperatingLocations = !!(businessData.operatingLocations && businessData.operatingLocations.length > 0);
 
-    return hasBusinessName && hasContactName && hasEmail && hasPhone && hasCategory && hasEvents && hasOperatingLocations;
+    return hasBusinessName && hasContactName && isEmailValid && hasPhone && hasCategory && hasOperatingLocations;
   };
 
   const handleNextField = () => {
@@ -194,9 +190,7 @@ export default function BusinessRegistrationScreen() {
     if (!businessData.contactPersonName || !businessData.contactPersonName.trim()) {
       errors.contactPersonName = 'Contact person name is required';
     }
-    if (!businessData.email || !businessData.email.trim()) {
-      errors.email = 'Email is required';
-    } else if (!validateEmail(businessData.email)) {
+    if (businessData.email && businessData.email.trim() && !validateEmail(businessData.email)) {
       errors.email = 'Please enter a valid email address';
     }
     if (!businessData.phoneNumber || !businessData.phoneNumber.trim()) {
@@ -204,9 +198,6 @@ export default function BusinessRegistrationScreen() {
     }
     if (!businessData.selectedCategoryIds || businessData.selectedCategoryIds.length === 0) {
       errors.selectedCategoryIds = 'Please select at least one sub-category';
-    }
-    if (!businessData.selectedEventIds || businessData.selectedEventIds.length === 0) {
-      errors.selectedEventIds = 'Please select at least one event type';
     }
     if (!businessData.operatingLocations || businessData.operatingLocations.length === 0) {
       errors.operatingLocations = 'Please select at least one operating location';
@@ -240,9 +231,7 @@ export default function BusinessRegistrationScreen() {
     if (!businessData.contactPersonName || !businessData.contactPersonName.trim()) {
       errors.contactPersonName = 'Contact person name is required';
     }
-    if (!businessData.email || !businessData.email.trim()) {
-      errors.email = 'Email is required';
-    } else if (!validateEmail(businessData.email)) {
+    if (businessData.email && businessData.email.trim() && !validateEmail(businessData.email)) {
       errors.email = 'Please enter a valid email address';
     }
     if (!businessData.phoneNumber || !businessData.phoneNumber.trim()) {
@@ -258,9 +247,6 @@ export default function BusinessRegistrationScreen() {
     }
     if (!businessData.selectedCategoryIds || businessData.selectedCategoryIds.length === 0) {
       errors.selectedCategoryIds = 'Please select at least one specialization';
-    }
-    if (!businessData.selectedEventIds || businessData.selectedEventIds.length === 0) {
-      errors.selectedEventIds = 'Please select at least one event type';
     }
     if (!businessData.operatingLocations || businessData.operatingLocations.length === 0) {
       errors.operatingLocations = 'Please select at least one operating location';
@@ -520,7 +506,7 @@ export default function BusinessRegistrationScreen() {
           cover_photo_url: null,
           years_experience: 0,
           gst_number: null,
-          status: 'pending',
+          status: 'approved',
           availability: null,
           subscription_status: 'trial',
         })
@@ -821,15 +807,15 @@ export default function BusinessRegistrationScreen() {
               <CheckCircle2 size={60} color="#34C759" />
             </View>
 
-            <Text style={styles.successModalTitle}>Welcome to BookMyVendor!</Text>
+            <Text style={styles.successModalTitle}>You’re live! 🚀</Text>
 
             <Text style={styles.successModalMessage}>
-              Thanks for joining us! Your business will be visible on our website after a quick review <Text style={{ fontWeight: '700' }}>(typically within 48 hours)</Text>.
+              Your profile is now live on BookMyVendors and ready to receive customer inquiries.
             </Text>
 
             <View style={styles.successInfoBox}>
               <Text style={styles.successInfoBoxText}>
-                To get the most out of your listing, please update your profile with photos, videos, and social links from your business settings. A detailed profile helps build trust with new customers!
+                <Text style={{ fontWeight: '700' }}>Tip:</Text> Complete your profile and add photos and videos to stand out.
               </Text>
             </View>
 
@@ -841,7 +827,7 @@ export default function BusinessRegistrationScreen() {
               }}
               activeOpacity={0.8}
             >
-              <Text style={styles.successModalButtonText}>Let's Go!</Text>
+              <Text style={styles.successModalButtonText}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>

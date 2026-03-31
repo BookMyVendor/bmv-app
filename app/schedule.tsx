@@ -56,12 +56,12 @@ export default function ScheduleScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  
+
   const [items, setItems] = useState<ScheduleItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewCard, setShowNewCard] = useState(false);
-  const [businesses, setBusinesses] = useState<{id: string, business_name: string}[]>([]);
-  
+  const [businesses, setBusinesses] = useState<{ id: string, business_name: string }[]>([]);
+
   // New Item State
   const [title, setTitle] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -142,7 +142,7 @@ export default function ScheduleScreen() {
       await notifee.cancelNotification(item.id);
 
       const triggerDate = new Date(date.getTime() - 15 * 60 * 1000); // 15 mins before
-      
+
       // If the trigger time is already in the past, don't schedule
       if (triggerDate.getTime() <= Date.now()) {
         console.log('[SCHEDULE] Reminder time is in the past, skipping notification');
@@ -174,10 +174,10 @@ export default function ScheduleScreen() {
   };
 
   const handleSaveItem = async () => {
-    if (!title || !selectedCategory || !selectedBusiness) return;
+    if (!title || !selectedCategory) return;
 
     let newItems: ScheduleItem[];
-    
+
     if (editingItem) {
       const updatedItem: ScheduleItem = {
         ...editingItem,
@@ -185,7 +185,7 @@ export default function ScheduleScreen() {
         date: formatDate(selectedDate),
         time: formatTime(selectedDate),
         category: selectedCategory,
-        businessName: selectedBusiness,
+        businessName: selectedBusiness || 'General Business',
         timestamp: selectedDate.getTime(),
       };
       newItems = items.map(item => item.id === editingItem.id ? updatedItem : item);
@@ -197,7 +197,7 @@ export default function ScheduleScreen() {
         date: formatDate(selectedDate),
         time: formatTime(selectedDate),
         category: selectedCategory,
-        businessName: selectedBusiness,
+        businessName: selectedBusiness || 'General Business',
         timestamp: selectedDate.getTime(),
       };
       newItems = [...items, newItem];
@@ -207,7 +207,7 @@ export default function ScheduleScreen() {
     // Sort by timestamp ascending
     newItems.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     saveItems(newItems);
-    
+
     // Reset form
     setTitle('');
     setSelectedDate(new Date());
@@ -259,12 +259,12 @@ export default function ScheduleScreen() {
           </TouchableOpacity>
           <Text style={styles.appBarTitle}>Schedule</Text>
         </View>
-        <TouchableOpacity 
+        <TouchableOpacity
           onPress={() => {
             if (showNewCard) handleCancelEdit();
             else setShowNewCard(true);
-          }} 
-          activeOpacity={0.7} 
+          }}
+          activeOpacity={0.7}
           style={styles.iconBtn}
         >
           {showNewCard ? (
@@ -296,7 +296,7 @@ export default function ScheduleScreen() {
                 </TouchableOpacity>
               )}
             </View>
-            
+
             <TextInput
               style={styles.input}
               placeholder="Title (e.g. Follow up call)"
@@ -306,16 +306,16 @@ export default function ScheduleScreen() {
             />
 
             <View style={styles.dateTimeRow}>
-              <TouchableOpacity 
-                style={[styles.input, styles.dateTimeBtn]} 
+              <TouchableOpacity
+                style={[styles.input, styles.dateTimeBtn]}
                 onPress={() => setShowDatePicker(true)}
               >
                 <Calendar size={16} color="#4285F4" />
                 <Text style={styles.dateTimeText}>{formatDate(selectedDate)}</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity 
-                style={[styles.input, styles.dateTimeBtn]} 
+              <TouchableOpacity
+                style={[styles.input, styles.dateTimeBtn]}
                 onPress={() => setShowTimePicker(true)}
               >
                 <Clock size={16} color="#4285F4" />
@@ -369,35 +369,37 @@ export default function ScheduleScreen() {
               ))}
             </View>
 
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsScrollContent}>
-              {businesses.map(bus => (
-                <TouchableOpacity
-                  key={bus.id}
-                  style={[
-                    styles.chip,
-                    selectedBusiness === bus.business_name && styles.chipActive
-                  ]}
-                  onPress={() => setSelectedBusiness(bus.business_name)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[
-                    styles.chipText,
-                    selectedBusiness === bus.business_name && styles.chipTextActive
-                  ]}>
-                    {bus.business_name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            {businesses.length > 0 && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsScrollContent}>
+                {businesses.map(bus => (
+                  <TouchableOpacity
+                    key={bus.id}
+                    style={[
+                      styles.chip,
+                      selectedBusiness === bus.business_name && styles.chipActive
+                    ]}
+                    onPress={() => setSelectedBusiness(bus.business_name)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.chipText,
+                      selectedBusiness === bus.business_name && styles.chipTextActive
+                    ]}>
+                      {bus.business_name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
 
             <TouchableOpacity
               style={[
                 styles.addBtn,
-                (!title || !selectedCategory || !selectedBusiness) && styles.addBtnDisabled
+                (!title || !selectedCategory) && styles.addBtnDisabled
               ]}
               onPress={handleSaveItem}
               activeOpacity={0.8}
-              disabled={!title || !selectedCategory || !selectedBusiness}
+              disabled={!title || !selectedCategory}
             >
               <Text style={styles.addBtnText}>{editingItem ? 'Update Schedule' : 'Add to Schedule'}</Text>
             </TouchableOpacity>
@@ -414,7 +416,7 @@ export default function ScheduleScreen() {
             <Text style={styles.emptyMessage}>
               Your planned calls, meetings, and follow-ups will appear here once you add them.
             </Text>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.emptyAddBtn}
               onPress={() => setShowNewCard(true)}
             >
@@ -454,9 +456,9 @@ export default function ScheduleScreen() {
                           </TouchableOpacity>
                         </View>
                       </View>
-                      
+
                       <Text style={styles.itemTitle}>{item.title}</Text>
-                      
+
                       <View style={styles.businessRow}>
                         <Building2 size={14} color="#4285F4" strokeWidth={2} />
                         <Text style={styles.businessName}>{item.businessName}</Text>
@@ -479,7 +481,7 @@ export default function ScheduleScreen() {
             })}
           </View>
         )}
-        <View style={{height: 40}} />
+        <View style={{ height: 40 }} />
       </ScrollView>
     </ScreenBackground>
   );
@@ -719,7 +721,7 @@ const styles = StyleSheet.create({
   },
   // Let's refine the line:
   // Using absolute horizontal center for line, and absolute top for dot.
-  
+
   itemCardWrap: {
     flex: 1,
     paddingLeft: 12,

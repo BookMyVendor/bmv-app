@@ -29,8 +29,8 @@ const profileSchema = Yup.object().shape({
   firstName: Yup.string().required('First name is required'),
   lastName: Yup.string().required('Last name is required'),
   email: Yup.string()
-    .required('Email is required')
     .test('email-validation', 'Invalid email address', function (value) {
+      if (!value || value.trim() === '') return true;
       return validateEmail(value);
     }),
 });
@@ -465,7 +465,7 @@ export default function CompleteProfileScreen() {
                     First Name <Text style={styles.required}>*</Text>
                   </Text>
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, touched.firstName && errors.firstName && styles.inputError]}
                     placeholder="Enter first name"
                     value={values.firstName}
                     onChangeText={handleChange('firstName')}
@@ -484,7 +484,7 @@ export default function CompleteProfileScreen() {
                   </Text>
                   <TextInput
                     ref={lastNameRef}
-                    style={styles.input}
+                    style={[styles.input, touched.lastName && errors.lastName && styles.inputError]}
                     placeholder="Enter last name"
                     value={values.lastName}
                     onChangeText={handleChange('lastName')}
@@ -499,7 +499,7 @@ export default function CompleteProfileScreen() {
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>
-                    Email Address <Text style={styles.required}>*</Text>
+                    Email Address
                   </Text>
                   <TextInput
                     ref={emailRef}
@@ -617,7 +617,6 @@ const styles = StyleSheet.create({
   },
   inputError: {
     borderColor: '#FF3B30',
-    backgroundColor: '#fff5f5',
   },
   button: {
     backgroundColor: '#007AFF',

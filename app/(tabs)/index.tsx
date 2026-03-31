@@ -92,40 +92,40 @@ function calculateProfileCompletion(business: Business): number {
     !!(business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'business' && m.categories?.parent_category_id === null)),
     // 12. Specialization Mapped
     !!(business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'business' && m.categories?.parent_category_id !== null)),
-    // 13. Event Types Mapped
-    !!(business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'event')),
-    // 14. Cover Photo
-    !!(business.cover_photo_url?.trim()),
-    // 15. Gallery/Images
-    !!(business.image_count && business.image_count > 0),
-    // 16-18. Detailed Location
+    // 13-15. Detailed Location
     !!(business.city?.trim()),
     !!(business.locality?.trim()),
     !!(business.state?.trim()),
+    // 16. Cover Photo (Required during registration)
+    !!(business.cover_photo_url?.trim()),
   ];
 
   const optionalChecks = [
-    // 19-22. Social Media
+    // 17-20. Social Media
     !!(business.website_url?.trim()),
     !!(business.instagram_url?.trim()),
     !!(business.facebook_url?.trim()),
     !!(business.youtube_url?.trim()),
-    // 23-24. Tax Info
+    // 21-22. Tax Info
     !!(business.business_registration_number?.trim() || business.pan_number?.trim()),
     !!(business.gst_number?.trim()),
-    // 25. Verification Documents
+    // 23. Verification Documents
     !!(business.document_count && business.document_count > 0),
+    // 24. Events Mapped (Optional)
+    !!(business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'event')),
+    // 25. Gallery/Portfolio (Additional images)
+    !!(business.image_count && business.image_count > 0),
   ];
 
   const coreFilled = coreChecks.filter(Boolean).length;
   const optionalFilled = optionalChecks.filter(Boolean).length;
-  
+
   // Weighting: Core fields account for 90%, Optional fields account for 10%
-  // 18 core fields * 5% = 90%
-  // 7 optional fields * ~1.43% = 10%
+  // 16 core fields * 5.625% = 90%
+  // 9 optional fields * ~1.11% = 10%
   const coreScore = (coreFilled / coreChecks.length) * 90;
-  const optionalScore = (optionalFilled / optionalChecks.length) * 10;
-  
+  const optionalScore = optionalChecks.length > 0 ? (optionalFilled / optionalChecks.length) * 10 : 0;
+
   return Math.round(coreScore + optionalScore);
 }
 
@@ -159,9 +159,9 @@ export default function DashboardScreen() {
   });
   const [selectedStatuses, setSelectedStatuses] = useState<LeadStatus[]>([]);
   const [loading, setLoading] = useState(true);
+  const [initialDataLoaded, setInitialDataLoaded] = useState(false);
   const [showFilterScrollIndicator, setShowFilterScrollIndicator] = useState(false);
   const [businessLeadCounts, setBusinessLeadCounts] = useState<Record<string, number>>({});
-  const [businessMetadata, setBusinessMetadata] = useState<Record<string, { images: number; docs: number }>>({});
   const [isOffline, setIsOffline] = useState(false);
   const filterScrollViewRef = useRef<ScrollView>(null);
   const { user } = useAuth();
@@ -214,26 +214,31 @@ export default function DashboardScreen() {
   useFocusEffect(
     useCallback(() => {
       if (user?.id) {
-        fetchBusinesses();
+        // On refocus, silently refresh in the background without resetting state
+        fetchBusinesses(true);
         fetchLeadStats();
       }
     }, [user?.id])
   );
 
-  const fetchBusinesses = async () => {
+  const fetchBusinesses = async (isSilentRefresh = false) => {
     if (!user?.id) {
       setLoading(false);
       return;
     }
 
-    try {
-      const cachedStr = await AsyncStorage.getItem(`dashboard_businesses_${user.id}`);
-      if (cachedStr) {
-        setBusinesses(JSON.parse(cachedStr));
-      }
-    } catch { }
+    // On first load only, show cached data immediately so UI isn't empty
+    if (!isSilentRefresh && !initialDataLoaded) {
+      try {
+        const cachedStr = await AsyncStorage.getItem(`dashboard_businesses_${user.id}`);
+        if (cachedStr) {
+          setBusinesses(JSON.parse(cachedStr));
+        }
+      } catch { }
+    }
 
     try {
+      // 1. Fetch businesses with joined data
       const { data, error } = await supabaseCore
         .from('vendor_businesses')
         .select(`
@@ -256,13 +261,39 @@ export default function DashboardScreen() {
 
       if (error) throw error;
 
-      const formattedBusinesses = (data || []).map((business: any) => {
-        // Find the root business category (parent_category_id is null)
+      const rawBusinesses = data || [];
+
+      // 2. Fetch metadata (image + doc counts) for ALL businesses in parallel
+      //    This must happen BEFORE setting state so percentage is calculated once.
+      const businessIds = rawBusinesses.map((b: any) => b.id);
+      const metadata: Record<string, { images: number; docs: number }> = {};
+
+      if (businessIds.length > 0) {
+        await Promise.all(
+          businessIds.map(async (id: string) => {
+            const [{ count: imageCount }, { count: docCount }] = await Promise.all([
+              supabaseCms
+                .from('vendor_business_media')
+                .select('*', { count: 'exact', head: true })
+                .eq('business_id', id),
+              supabaseCms
+                .from('vendor_verification_documents')
+                .select('*', { count: 'exact', head: true })
+                .eq('business_id', id),
+            ]);
+            metadata[id] = {
+              images: imageCount || 0,
+              docs: docCount || 0,
+            };
+          })
+        );
+      }
+
+      // 3. Build final businesses array with ALL data in one pass
+      const formattedBusinesses = rawBusinesses.map((business: any) => {
         const rootCategoryMatch = business.vendor_business_category_mappings?.find((m: any) =>
           m.categories?.category_type === 'business' && m.categories?.parent_category_id === null
         );
-
-        // Fallback: if no root is found, try any business category, then index 0
         const categoryName = rootCategoryMatch?.categories?.name ||
           business.vendor_business_category_mappings?.find((m: any) => m.categories?.category_type === 'business')?.categories?.name ||
           business.vendor_business_category_mappings?.[0]?.categories?.name;
@@ -271,17 +302,20 @@ export default function DashboardScreen() {
           ...business,
           business_description: business.description,
           business_category: categoryName || 'General',
+          image_count: metadata[business.id]?.images || 0,
+          document_count: metadata[business.id]?.docs || 0,
         };
       });
 
+      // 4. Single state update — percentage is computed once, no flicker
       setBusinesses(formattedBusinesses);
+      setInitialDataLoaded(true);
       AsyncStorage.setItem(`dashboard_businesses_${user.id}`, JSON.stringify(formattedBusinesses)).catch(() => { });
       setIsOffline(false);
 
-      if (formattedBusinesses.length > 0) {
-        const businessIds = formattedBusinesses.map((b: Business) => b.id);
+      // 5. Fetch lead counts (doesn't affect percentage, so can run after)
+      if (businessIds.length > 0) {
         fetchBusinessLeadCounts(businessIds);
-        fetchBusinessMetadata(businessIds);
       }
     } catch (error) {
       console.error('Error fetching businesses:', error);
@@ -292,13 +326,6 @@ export default function DashboardScreen() {
   };
 
   const fetchBusinessLeadCounts = async (businessIds: string[]) => {
-    try {
-      const cachedStr = await AsyncStorage.getItem(`dashboard_business_counts_${user?.id}`);
-      if (cachedStr) {
-        setBusinessLeadCounts(JSON.parse(cachedStr));
-      }
-    } catch { }
-
     try {
       const counts: Record<string, number> = {};
       await Promise.all(
@@ -315,54 +342,6 @@ export default function DashboardScreen() {
       setIsOffline(false);
     } catch (error) {
       console.error('Error fetching business lead counts:', error);
-      setIsOffline(true);
-    }
-  };
-
-  const fetchBusinessMetadata = async (businessIds: string[]) => {
-    try {
-      const metadata: Record<string, { images: number; docs: number }> = {};
-      
-      await Promise.all(
-        businessIds.map(async (id) => {
-          // Fetch image count
-          const { count: imageCount } = await supabaseCms
-            .from('vendor_business_media')
-            .select('*', { count: 'exact', head: true })
-            .eq('business_id', id);
-            
-          // Fetch document count
-          const { count: docCount } = await supabaseCms
-            .from('vendor_verification_documents')
-            .select('*', { count: 'exact', head: true })
-            .eq('business_id', id);
-            
-          metadata[id] = { 
-            images: imageCount || 0, 
-            docs: docCount || 0 
-          };
-        })
-      );
-      
-      setBusinessMetadata(metadata);
-      
-      // Also update the businesses state to include the counts for calculation
-      setBusinesses(prev => {
-        const updated = prev.map(b => ({
-          ...b,
-          image_count: metadata[b.id]?.images || 0,
-          document_count: metadata[b.id]?.docs || 0
-        }));
-        // Update cache so next load looks consistent
-        if (user?.id) {
-          AsyncStorage.setItem(`dashboard_businesses_${user.id}`, JSON.stringify(updated)).catch(() => { });
-        }
-        return updated;
-      });
-      
-      setIsOffline(false);
-    } catch (error) {
-      console.error('Error fetching business metadata:', error);
       setIsOffline(true);
     }
   };
