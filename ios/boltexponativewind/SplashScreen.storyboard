@@ -5,7 +5,6 @@
         <deployment identifier="iOS"/>
         <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="24405"/>
         <capability name="Safe area layout guides" minToolsVersion="9.0"/>
-        <capability name="System colors in document resources" minToolsVersion="11.0"/>
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
     </dependencies>
     <scenes>
@@ -19,10 +18,11 @@
                         <subviews>
                             <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="bmv_internal_splash" translatesAutoresizingMaskIntoConstraints="NO" id="DI3-ac-xxC">
                                 <rect key="frame" x="0.0" y="118" width="393" height="666"/>
+                                <color key="backgroundColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
                             </imageView>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="Rmq-lb-GrQ"/>
-                        <color key="backgroundColor" systemColor="systemBackgroundColor"/>
+                        <color key="backgroundColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
                         <constraints>
                             <constraint firstItem="DI3-ac-xxC" firstAttribute="top" secondItem="Rmq-lb-GrQ" secondAttribute="top" id="3AT-b4-0mJ"/>
                             <constraint firstItem="Rmq-lb-GrQ" firstAttribute="bottom" secondItem="DI3-ac-xxC" secondAttribute="bottom" id="3m3-3b-phv"/>
@@ -37,9 +37,6 @@
         </scene>
     </scenes>
     <resources>
-        <image name="bmv_internal_splash" width="512" height="512"/>
-        <systemColor name="systemBackgroundColor">
-            <color white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
-        </systemColor>
+        <image name="bmv_internal_splash" width="170.66667175292969" height="170.66667175292969"/>
     </resources>
 </document>
