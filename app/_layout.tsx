@@ -192,7 +192,7 @@ function RootLayoutNav() {
 
         // Only redirect to dashboard if they are coming from an setup/auth screen
         if (inAuthGroup || inTermsAndConditions || inOnboarding || inCompleteProfile) {
-          console.log('[NAV] User has profile and business - redirecting to dashboard');
+          console.log('[NAV] User has profile and completed setup - redirecting to dashboard');
           router.replace('/(tabs)');
         }
         return;

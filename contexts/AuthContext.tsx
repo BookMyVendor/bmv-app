@@ -291,23 +291,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { error: err };
       }
       if (!result.data) return { error: new Error('No data received') };
-      const { user: userData, newUser } = result.data;
+      const { user: userData, newUser, accessToken: newAccessToken, refreshToken: newRefreshToken, expiresIn } = result.data;
       const appUser = userFromVerify(userData);
-      const accessToken = await getAccessToken();
-      const session: AppSession = {
-        access_token: accessToken || result.data.accessToken,
-        refresh_token: result.data.refreshToken,
-        expires_at: Math.floor(Date.now() / 1000) + result.data.expiresIn,
-        expires_in: result.data.expiresIn,
+      
+      const sessionData: AppSession = {
+        access_token: newAccessToken,
+        refresh_token: newRefreshToken,
+        expires_at: Math.floor(Date.now() / 1000) + expiresIn,
+        expires_in: expiresIn,
         token_type: 'bearer',
         user: appUser,
       };
-      setSession(session);
+
+      setSession(sessionData);
       setUser(appUser);
       userRef.current = appUser;
       setIsNewUser(newUser);
+
       await AsyncStorage.setItem('current_user_id', appUser.id).catch(() => {});
+      
+      // We must fetch the latest profile before finishing, so _layout avoids flicker/redirect issues
       await fetchProfile(appUser.id);
+      
       return { error: null };
     } finally {
       setLoading(false);

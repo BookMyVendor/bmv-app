@@ -45,8 +45,8 @@ import {
   Video,
 } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
-import { getBusinessCategoryMappings, updateBusinessCategoryMappings } from '../lib/api/packages';
-import { getCategories } from '../lib/api/categories';
+import { updateBusinessCategoryMappings } from '../lib/api/packages';
+import { getCategories, getCategoryTree } from '../lib/api/categories';
 import { Video as ExpoVideo, ResizeMode } from 'expo-av';
 import {
   getBusinessDetails,
@@ -95,6 +95,38 @@ const getExperienceDisplayValue = (years: number | null | undefined): string => 
   if (years >= 3 && years < 5) return '3-5 years';
   if (years >= 5 && years < 10) return '5-10 years';
   return 'More than 10 years';
+};
+
+// Helper to convert experience display string to numeric years (highest in range)
+const parseExperienceToYears = (val: string | number | null | undefined): number | null => {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'number') return val;
+
+  const s = val.toLowerCase().trim();
+
+  // Direct numeric input
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+
+  // "Less than 1 year" -> 0
+  if (s.includes('less than') || s.includes('< 1')) return 0;
+
+  // "1-3 years" -> 3 (highest in range)
+  if (s.includes('1-3')) return 3;
+
+  // "3-5 years" -> 5 (highest in range)
+  if (s.includes('3-5')) return 5;
+
+  // "5-10 years" -> 10 (highest in range)
+  if (s.includes('5-10')) return 10;
+
+  // "More than 10 years" -> 15 (arbitrary high value)
+  if (s.includes('more than') || s.includes('> 10')) return 15;
+
+  // Fallback: try to extract any number
+  const match = s.match(/(\d+)/);
+  if (match) return parseInt(match[1], 10);
+
+  return null;
 };
 
 // Helper to convert display string to numeric years
@@ -361,13 +393,62 @@ export default function BusinessDetailsScreen() {
 
       if (businessRes.error) throw businessRes.error;
 
-      setBusiness(businessRes.data);
+      // DEBUG: Log raw API response
+      console.log('[loadData] DEBUG - Raw API response keys:', Object.keys(businessRes.data || {}));
+      console.log('[loadData] DEBUG - Raw category data:', {
+        business_category: businessRes.data?.business_category,
+        primary_category_id: businessRes.data?.primary_category_id,
+        category_ids: businessRes.data?.category_ids,
+        vendor_business_category_mappings: businessRes.data?.vendor_business_category_mappings,
+      });
+      console.log('[loadData] DEBUG - Raw contact data:', {
+        contact_person_name: businessRes.data?.contact_person_name,
+        contact_name: businessRes.data?.contact_name,
+        vendor: businessRes.data?.vendor,
+      });
+      console.log('[loadData] DEBUG - Raw location data:', {
+        operating_locations: businessRes.data?.operating_locations,
+        availability: businessRes.data?.availability,
+        cities: businessRes.data?.cities,
+      });
+
+      // Normalize business data keys with multiple fallback field names
+      const rawBusiness = businessRes.data;
+      const normalizedBusiness = rawBusiness ? {
+        ...rawBusiness,
+        business_name: rawBusiness.business_name || rawBusiness.name || '',
+        business_email: rawBusiness.business_email || rawBusiness.email || '',
+        contact_person_phone: rawBusiness.contact_person_phone || rawBusiness.phone || rawBusiness.contact_phone || '',
+        contact_person_name: rawBusiness.contact_person_name || rawBusiness.contact_name || rawBusiness.primary_contact_name ||
+          (rawBusiness.vendor?.first_name && rawBusiness.vendor?.last_name
+            ? `${rawBusiness.vendor.first_name} ${rawBusiness.vendor.last_name}`.trim()
+            : rawBusiness.vendor?.first_name || rawBusiness.vendor?.last_name || ''),
+        operating_locations: rawBusiness.operating_locations || rawBusiness.availability || rawBusiness.cities || rawBusiness.service_locations || [],
+        // Preserve category data from API
+        category_ids: rawBusiness.category_ids || [],
+      } : {};
+
+      console.log('[loadData] DEBUG - Normalized business:', {
+        business_name: normalizedBusiness.business_name,
+        contact_person_name: normalizedBusiness.contact_person_name,
+        operating_locations: normalizedBusiness.operating_locations,
+        business_category: normalizedBusiness.business_category,
+        category_ids: normalizedBusiness.category_ids,
+        years_experience: normalizedBusiness.years_experience,
+        cover_photo_url: normalizedBusiness.cover_photo_url,
+        city: normalizedBusiness.city,
+        locality: normalizedBusiness.locality,
+        state: normalizedBusiness.state,
+        address: normalizedBusiness.address,
+      });
+
+      setBusiness(normalizedBusiness);
       setIsOffline(false);
       try {
-        AsyncStorage.setItem(`business_details_${id}`, JSON.stringify(businessRes.data));
+        AsyncStorage.setItem(`business_details_${id}`, JSON.stringify(normalizedBusiness));
       } catch (e) { }
 
-      const dataToEdit = businessRes.data ? { ...businessRes.data } : {};
+      const dataToEdit = { ...normalizedBusiness };
       if (dataToEdit.contact_person_phone) {
         dataToEdit.contact_person_phone = stripCountryCode(dataToEdit.contact_person_phone);
       }
@@ -415,35 +496,11 @@ export default function BusinessDetailsScreen() {
 
       setImages(allImages);
 
-      // Load existing category mappings (this will determine businessType)
-      const { businessIds, businessType: determinedType } = await loadCategoryMappings();
+      // Load existing category mappings
+      const { businessType: determinedType } = await loadCategoryMappings(normalizedBusiness);
 
       // Load categories using the determined businessType
-      const fetchedBusinessCategories = await loadCategories(determinedType);
-
-      // After mappings are loaded, determine root category
-      if (businessIds.length > 0) {
-        const selectedCats = fetchedBusinessCategories.filter((cat: any) =>
-          businessIds.includes(cat.id)
-        );
-
-        // Find the root parent for the first selected category
-        const firstSelectedCat = selectedCats[0];
-        if (firstSelectedCat) {
-          let current = firstSelectedCat;
-          // Traverse up to find the root
-          while (current.parent_category_id) {
-            const parent = fetchedBusinessCategories.find((c: any) => c.id === current.parent_category_id);
-            if (!parent) break;
-            current = parent;
-          }
-
-          if (current) {
-            setSelectedRootCategoryId(current.id);
-            setExpandedCategoryIds(new Set([current.id]));
-          }
-        }
-      }
+      await loadCategories(determinedType);
 
       // Load verification documents
       await loadVerificationDocuments();
@@ -453,22 +510,33 @@ export default function BusinessDetailsScreen() {
       const { getBusinessPackages } = await import('../lib/packageApi');
       const { data: packagesData } = await getBusinessPackages(id);
 
+      console.log('[loadData] Packages raw data:', JSON.stringify(packagesData, null, 2));
+
       const activePackages = (packagesData || []).filter((pkg: any) => pkg.is_active !== false);
+      console.log('[loadData] Active packages count:', activePackages.length);
       setPackages(activePackages);
 
       // If we have any packages, use the first one's price/unit for the edit form
       // If we have a 'Standard Package', prefer that
-      let defaultPkg = activePackages.find((p: any) => p.package_name === 'Standard Package');
+      let defaultPkg = activePackages.find((p: any) => p.package_name === 'Standard Package' || p.name === 'Standard Package');
       if (!defaultPkg && activePackages.length > 0) {
         defaultPkg = activePackages[0];
       }
 
+      console.log('[loadData] Default package:', JSON.stringify(defaultPkg, null, 2));
+
       if (defaultPkg) {
         setDefaultPackageId(defaultPkg.id ?? null);
+        // Backend returns 'price' (not 'base_price') and 'price_unit'
+        const pkgPrice = defaultPkg.price ?? defaultPkg.base_price ?? null;
+        const pkgUnit = defaultPkg.price_unit ?? defaultPkg.pricing_unit ?? 'per_event';
+        console.log('[loadData] Setting price fields:', { base_price: pkgPrice, pricing_unit: pkgUnit });
         setEditData((prev: any) => ({
           ...prev,
-          base_price: defaultPkg.base_price,
-          pricing_unit: defaultPkg.price_unit
+          base_price: pkgPrice,
+          pricing_unit: pkgUnit,
+          initial_base_price: pkgPrice,
+          initial_pricing_unit: pkgUnit,
         }));
       } else {
         setDefaultPackageId(null);
@@ -487,26 +555,50 @@ export default function BusinessDetailsScreen() {
     }
   };
 
-  const loadCategoryMappings = async (): Promise<{ businessIds: string[]; eventIds: string[]; businessType: 'services' | 'rental' }> => {
+  const loadCategoryMappings = async (rawBusiness?: any): Promise<{ businessIds: string[]; eventIds: string[]; businessType: 'services' | 'rental' }> => {
     try {
-      const { data: mappings, error } = await getBusinessCategoryMappings(id);
-      if (error) {
-        console.error('Error loading category mappings:', error);
-        return { businessIds: [], eventIds: [], businessType: 'services' };
+      const biz = rawBusiness || business;
+      if (!biz) return { businessIds: [], eventIds: [], businessType: 'services' };
+
+      // Get category IDs from business object
+      let allCategoryIds: string[] = [];
+
+      if (Array.isArray(biz.category_ids)) {
+        allCategoryIds = biz.category_ids.filter(Boolean);
+      } else if (Array.isArray(biz.categories)) {
+        allCategoryIds = biz.categories.map((c: any) => c.id || c.category_id || c).filter(Boolean);
+      } else if (biz.category_id) {
+        allCategoryIds = [biz.category_id].filter(Boolean);
       }
-      const list = mappings || [];
-      if (list.length === 0) {
+
+      if (allCategoryIds.length === 0) {
         setBusinessType('services');
         return { businessIds: [], eventIds: [], businessType: 'services' };
       }
-      const allCategoryIds = list.map((m: any) => m.category_id || m.categories?.id).filter(Boolean);
-      const { data: categories } = await getCategories();
-      const catList = categories || [];
+
+      const { data: treeData, error: treeError } = await getCategoryTree();
+      if (treeError) {
+        console.error('Error loading category tree for mappings:', treeError);
+      }
+
+      const tree = Array.isArray(treeData) ? treeData : [];
+      const flatList: any[] = [];
+      const flatten = (nodes: any[]) => {
+        nodes.forEach(node => {
+          flatList.push(node);
+          if (node.children && node.children.length > 0) {
+            flatten(node.children);
+          }
+        });
+      };
+      flatten(tree);
+
       let determinedBusinessType: 'services' | 'rental' = 'services';
       const businessCategoryIds: string[] = [];
       const eventCategoryIds: string[] = [];
+
       allCategoryIds.forEach((cid: string) => {
-        const cat = catList.find((c: any) => c.id === cid);
+        const cat = flatList.find((c: any) => c.id === cid);
         if (cat?.category_type === 'business') {
           businessCategoryIds.push(cid);
           if ((cat as any).business_model === 'rental') determinedBusinessType = 'rental';
@@ -516,9 +608,46 @@ export default function BusinessDetailsScreen() {
       });
 
       setBusinessType(determinedBusinessType);
-      setEditData((prev: any) => ({ ...prev, businessType: determinedBusinessType }));
+      // Don't set editData here, let the caller handle it if needed
       setSelectedCategoryIds(businessCategoryIds);
       setSelectedEventIds(eventCategoryIds);
+
+      // Store initial category IDs for change detection
+      setEditData((prev: any) => ({
+        ...prev,
+        initial_category_ids: [...businessCategoryIds, ...eventCategoryIds]
+      }));
+
+      // Determine Primary Category (Root business category)
+      const businessCats = flatList.filter(c => c.category_type === 'business');
+      let rootId = null;
+
+      // Try to find a Root category among businessCategoryIds
+      const selectedRoots = businessCategoryIds.filter(id => {
+        const cat = businessCats.find(c => c.id === id);
+        return cat && !cat.parent_category_id;
+      });
+
+      if (selectedRoots.length > 0) {
+        rootId = selectedRoots[0];
+      } else if (businessCategoryIds.length > 0) {
+        // Fallback: find root for the first selected business category
+        const firstCat = businessCats.find(c => c.id === businessCategoryIds[0]);
+        if (firstCat) {
+          let current = firstCat;
+          while (current.parent_category_id) {
+            const parent = businessCats.find(c => c.id === current.parent_category_id);
+            if (!parent) break;
+            current = parent;
+          }
+          rootId = current.id;
+        }
+      }
+
+      if (rootId) {
+        setSelectedRootCategoryId(rootId);
+        setExpandedCategoryIds(new Set([rootId]));
+      }
 
       return {
         businessIds: businessCategoryIds,
@@ -532,26 +661,46 @@ export default function BusinessDetailsScreen() {
   };
 
 
-
   const loadCategories = async (type?: 'services' | 'rental') => {
     let businessCatsResult: any[] = [];
     try {
       setLoadingCategories(true);
-      const businessParams: any = { category_type: 'business', visible: true };
-      if (type === 'rental') businessParams.business_model = 'rental';
-      const { data: businessCats } = await getCategories(businessParams);
-      businessCatsResult = businessCats || [];
-      setAllBusinessCategories(businessCatsResult);
+      const { data: treeData, error } = await getCategoryTree();
 
-      const { data: eventCats, error: eventError } = await getCategories({ category_type: 'event', visible: true });
-
-      if (eventError) {
-        console.error('Error fetching event categories:', eventError);
-      } else {
-        setAllEventCategories(eventCats || []);
+      if (error) {
+        console.error('Error fetching category tree in edit:', error);
+        return [];
       }
+
+      const tree = Array.isArray(treeData) ? treeData : [];
+
+      // Flatten for state management compatibility
+      const flatList: any[] = [];
+      const flatten = (nodes: any[]) => {
+        nodes.forEach(node => {
+          flatList.push(node);
+          if (node.children && node.children.length > 0) {
+            flatten(node.children);
+          }
+        });
+      };
+      flatten(tree);
+
+      // Separate and filter categories
+      const businessCats = flatList.filter(c => {
+        if (c.category_type !== 'business') return false;
+        if (type === 'rental') return c.business_model === 'rental';
+        if (type === 'services') return c.business_model === 'service';
+        return true;
+      });
+
+      const eventCats = flatList.filter(c => c.category_type === 'event' && !c.parent_category_id);
+
+      businessCatsResult = businessCats;
+      setAllBusinessCategories(businessCats);
+      setAllEventCategories(eventCats);
     } catch (error) {
-      console.error('Error fetching categories:', error);
+      console.error('Error fetching categories in edit:', error);
     } finally {
       setLoadingCategories(false);
     }
@@ -659,11 +808,12 @@ export default function BusinessDetailsScreen() {
 
   // Build hierarchical tree structure
   const buildCategoryTree = (categories: any[]): any[] => {
+    const safeCategories = Array.isArray(categories) ? categories : [];
     const categoryMap = new Map<string, any>();
     const rootCategories: any[] = [];
 
     // First pass: create all nodes
-    categories.forEach((cat) => {
+    safeCategories.forEach((cat) => {
       categoryMap.set(cat.id, {
         ...cat,
         children: [],
@@ -671,7 +821,7 @@ export default function BusinessDetailsScreen() {
     });
 
     // Second pass: build tree structure
-    categories.forEach((cat) => {
+    safeCategories.forEach((cat) => {
       const node = categoryMap.get(cat.id)!;
       if (cat.parent_category_id) {
         const parent = categoryMap.get(cat.parent_category_id);
@@ -701,8 +851,9 @@ export default function BusinessDetailsScreen() {
 
   // Get full path for a category
   const getCategoryPath = (categoryId: string, categories: any[]): string => {
+    const safeCategories = Array.isArray(categories) ? categories : [];
     const categoryMap = new Map<string, any>();
-    categories.forEach((cat) => categoryMap.set(cat.id, cat));
+    safeCategories.forEach((cat) => categoryMap.set(cat.id, cat));
 
     const path: string[] = [];
     let currentId: string | null = categoryId;
@@ -718,8 +869,9 @@ export default function BusinessDetailsScreen() {
   };
 
   const getRootCategoryId = (categoryId: string, categories: any[]): string => {
+    const safeCategories = Array.isArray(categories) ? categories : [];
     const categoryMap = new Map<string, any>();
-    categories.forEach((cat) => categoryMap.set(cat.id, cat));
+    safeCategories.forEach((cat) => categoryMap.set(cat.id, cat));
 
     let currentId: string | null = categoryId;
     let rootId = categoryId;
@@ -1958,51 +2110,101 @@ export default function BusinessDetailsScreen() {
     try {
       setSavingDetails(true);
 
-      // Extract base_price and pricing_unit from editData as they are not columns on vendor_businesses
-      const { base_price, pricing_unit, businessType: editDataBusinessType, ...businessUpdateData } = editData;
+      // 1. Identify purely business fields supported by the vendor-businesses-update API
+      const SUPPORTED_BUSINESS_FIELDS = [
+        'business_name', 'description', 'business_type', 'address', 'locality', 'city',
+        'state', 'pincode', 'district', 'contact_person_name', 'contact_person_phone',
+        'contact_person_role', 'business_email', 'website_url', 'instagram_url',
+        'facebook_url', 'youtube_url', 'business_registration_number', 'gst_number',
+        'years_experience', 'availability', 'cover_photo_url',
+        'operating_locations'
+      ];
 
-      // Update business details
-      const finalUpdateData = {
-        ...businessUpdateData
-      };
-      if (finalUpdateData.contact_person_phone) {
-        finalUpdateData.contact_person_phone = stripCountryCode(finalUpdateData.contact_person_phone);
+      // 2. Identify package-level fields
+      const { base_price, pricing_unit } = editData;
+
+      // 3. Build the business update payload: only include changed and supported fields
+      const businessUpdates: Record<string, any> = {};
+      let hasBusinessChanges = false;
+
+      SUPPORTED_BUSINESS_FIELDS.forEach(field => {
+        if (field in editData) {
+          let newValue = editData[field];
+          let oldValue = business[field];
+
+          // Normalize phone for comparison
+          if (field === 'contact_person_phone') {
+            newValue = stripCountryCode(newValue || '');
+            oldValue = stripCountryCode(oldValue || '');
+          }
+
+          // Convert years_experience display string to numeric
+          if (field === 'years_experience') {
+            newValue = parseExperienceToYears(newValue);
+            oldValue = typeof oldValue === 'string' ? parseExperienceToYears(oldValue) : oldValue;
+          }
+
+          // Deep comparison for arrays (operating_locations)
+          const isChanged = Array.isArray(newValue)
+            ? JSON.stringify(newValue) !== JSON.stringify(oldValue)
+            : newValue !== oldValue;
+
+          if (isChanged) {
+            businessUpdates[field] = newValue === '' ? null : newValue;
+            hasBusinessChanges = true;
+          }
+        }
+      });
+
+      // Update business details if changes exist
+      if (hasBusinessChanges) {
+        const { data, error } = await updateBusinessDetails(id, businessUpdates);
+        if (error) throw error;
+        setBusiness(data);
       }
-      const { data, error } = await updateBusinessDetails(id, finalUpdateData);
-      if (error) throw error;
-      setBusiness(data);
-
-
 
       // Handle Package Update/Creation using the extracted price fields
-      if (base_price && pricing_unit) {
+      const packageChanged =
+        String(base_price) !== String(editData.initial_base_price ?? '') ||
+        pricing_unit !== (editData.initial_pricing_unit ?? '');
+
+      if (packageChanged && base_price && pricing_unit) {
         const { createPackage, updatePackage } = await import('../lib/packageApi');
 
+        console.log('[handleSaveDetails] Saving package with price:', base_price, 'unit:', pricing_unit);
+
         if (defaultPackageId) {
-          // Update existing package
+          // Update existing package - backend expects 'price' not 'base_price'
           await updatePackage(defaultPackageId, {
-            base_price: parseFloat(base_price),
+            price: parseFloat(base_price),
             price_unit: pricing_unit
           });
         } else {
-          // Create new default package
+          // Create new default package - backend expects 'price' not 'base_price'
           const { data: newPkg } = await createPackage({
             business_id: id,
             package_name: 'Standard Package',
             package_type: 'fixed',
-            base_price: parseFloat(base_price),
+            price: parseFloat(base_price),
             price_unit: pricing_unit,
             included_services: [],
             is_active: true,
             sort_order: 0
           });
+          console.log('[handleSaveDetails] Created new package:', newPkg);
           if (newPkg) setDefaultPackageId(newPkg.id ?? null);
         }
       }
 
-      const allCategoryIds = [...selectedCategoryIds, ...selectedEventIds];
-      if (allCategoryIds.length > 0) {
-        const { error: mappingError } = await updateBusinessCategoryMappings(id, allCategoryIds);
+      // 5. Update category mappings if they have changed
+      // Comparison logic for categories
+      const currentCategoryIds = [...selectedCategoryIds, ...selectedEventIds].sort();
+      const initialCategoryIds = [...(editData.initial_category_ids || [])].sort();
+
+      const categoriesChanged = JSON.stringify(currentCategoryIds) !== JSON.stringify(initialCategoryIds);
+
+      if (categoriesChanged && currentCategoryIds.length > 0) {
+        const { error: mappingError } = await updateBusinessCategoryMappings(id, currentCategoryIds);
         if (mappingError) console.error('Error updating category mappings:', mappingError);
       }
 

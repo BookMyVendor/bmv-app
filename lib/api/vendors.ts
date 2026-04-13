@@ -1,4 +1,4 @@
-import { functionsCall } from '../apiClient';
+import { axiosFunctionsCall } from '../axiosClient';
 import { MeResponse } from './me';
 
 export interface UpdateVendorMeRequest {
@@ -12,7 +12,7 @@ export interface UpdateVendorMeRequest {
 
 /** Updates your vendor profile — wraps vendor-me-update. */
 export async function updateVendorMe(body: UpdateVendorMeRequest) {
-  return functionsCall<MeResponse>('vendor-me-update', body as any, 'vendor');
+  return axiosFunctionsCall<MeResponse>('vendor-me-update', body as any, 'vendor');
 }
 
 export interface VendorCreateRequest {
@@ -24,5 +24,5 @@ export interface VendorCreateRequest {
 
 /** Dev-only: bypass OTP to create a vendor. */
 export async function devCreateVendor(body: VendorCreateRequest) {
-  return functionsCall<unknown>('vendor-create', body as any);
+  return axiosFunctionsCall<unknown>('vendor-create', body as any);
 }

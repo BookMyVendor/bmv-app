@@ -29,6 +29,7 @@ import {
 } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { getVendorBusiness } from '../lib/api/vendorBusinesses';
+import { getCategoryTree } from '../lib/api/categories';
 import { getLeads } from '../lib/api/leads';
 import { getReviews } from '../lib/api/reviews';
 import { getTimeAgo } from '../lib/timeUtils';
@@ -162,14 +163,67 @@ export default function BusinessProfileScreen() {
             const cachedParams = await AsyncStorage.getItem(`business_profile_${id}`);
             if (cachedParams) setBusiness(JSON.parse(cachedParams));
 
-            const { data, error } = await getVendorBusiness(id);
+            // Fetch both business and category tree in parallel
+            const [{ data, error }, categoryTreeRes] = await Promise.all([
+                getVendorBusiness(id),
+                getCategoryTree().catch(err => {
+                    console.error('Failed to fetch category tree:', err);
+                    return { data: null, error: err };
+                })
+            ]);
+
             if (error) throw new Error(error.error);
             if (data) {
                 const raw = data as any;
-                const category = raw.business_category ?? raw.vendor_business_category_mappings?.[0]?.categories?.name ?? 'General';
+
+                // Build category lookup map from category tree
+                const categoryMap = new Map<string, { name: string; category_type?: string; parent_category_id?: string | null }>();
+                if (categoryTreeRes.data) {
+                    const flattenCategories = (cats: any[]) => {
+                        cats.forEach(cat => {
+                            categoryMap.set(cat.id, {
+                                name: cat.name,
+                                category_type: cat.category_type,
+                                parent_category_id: cat.parent_category_id,
+                            });
+                            if (cat.children) flattenCategories(cat.children);
+                        });
+                    };
+                    flattenCategories(categoryTreeRes.data);
+                }
+
+                // Try multiple possible API response structures for category
+                let category = 'General';
+                if (raw.business_category) {
+                    category = raw.business_category;
+                } else if (raw.primary_category_name) {
+                    category = raw.primary_category_name;
+                } else if (raw.category_name) {
+                    category = raw.category_name;
+                } else if (raw.vendor_business_category_mappings?.length > 0) {
+                    const mapping = raw.vendor_business_category_mappings[0];
+                    category = mapping.categories?.name || mapping.category_name || 'General';
+                } else if (raw.categories?.name) {
+                    category = raw.categories.name;
+                } else if (raw.category_ids?.length > 0) {
+                    // Find PRIMARY business category (category_type='business' with no parent)
+                    const primaryCatId = raw.category_ids.find((id: string) => {
+                        const cat = categoryMap.get(id);
+                        return cat && cat.category_type === 'business' && !cat.parent_category_id;
+                    });
+                    // If no primary found, try any business category
+                    const anyBusinessCatId = primaryCatId || raw.category_ids.find((id: string) => {
+                        const cat = categoryMap.get(id);
+                        return cat && cat.category_type === 'business';
+                    });
+                    // Use the found category name or fall back to first category name
+                    const foundCatId = primaryCatId || anyBusinessCatId || raw.category_ids[0];
+                    category = categoryMap.get(foundCatId)?.name || 'General';
+                }
+
                 const businessData: Business = {
                     id: data.id,
-                    business_name: data.business_name,
+                    business_name: data.business_name || data.name || 'Unnamed Business',
                     business_category: category,
                     cover_photo_url: data.cover_photo_url ?? null,
                 };
@@ -226,9 +280,12 @@ export default function BusinessProfileScreen() {
                 }
             } catch (_) {}
 
-            const { data, error } = await getReviews();
-            if (error) throw new Error(error.error);
-            const raw = (data ?? []).filter((r: any) => r.business_id === id);
+            const { data, error } = await getReviews({ business_id: id, limit: 100 });
+            if (error) {
+                console.error('Error fetching reviews:', error);
+                return;
+            }
+            const raw = Array.isArray(data) ? (data as any[]) : [];
             const mapped: Review[] = raw.map((r: any) => ({
                 id: r.id,
                 customer_name: r.customers?.name ?? 'Anonymous',

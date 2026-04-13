@@ -1,4 +1,4 @@
-import { functionsCall } from '../apiClient';
+import { axiosFunctionsCall } from '../axiosClient';
 
 export interface Lead {
   id: string;
@@ -24,6 +24,7 @@ export interface LeadStats {
 
 export interface ListLeadsRequest {
   business_id?: string;
+  vendor_id?: string;
   status?: string | string[];
   lead_status?: string | string[]; // Compatibility
   limit?: number;
@@ -39,39 +40,39 @@ export async function getLeads(params: ListLeadsRequest = {}) {
     body.status = params.lead_status;
   }
   
-  return functionsCall<Lead[]>('leads-list', body, 'leads');
+  return axiosFunctionsCall<Lead[]>('leads-list', body, 'leads');
 }
 
 /** Helper to fetch a single lead by ID. */
 export async function getLead(id: string) {
-  return functionsCall<Lead>('lead-get', { lead_id: id }, 'lead');
+  return axiosFunctionsCall<Lead>('lead-get', { lead_id: id }, 'lead');
 }
 
 /** Spec: submit-customer-lead { business_id, customer_name, ... } -> { success: true, leadId: string } */
 export async function submitLead(body: Record<string, unknown>) {
-  return functionsCall<{ leadId: string }>('submit-customer-lead', body);
+  return axiosFunctionsCall<{ leadId: string }>('submit-customer-lead', body);
 }
 
 /** Spec: lead-update { lead_id: string; status?; ... } */
 export async function updateLead(leadId: string, body: Partial<Lead> & Record<string, unknown>) {
-  return functionsCall<Lead>('lead-update', { lead_id: leadId, ...body }, 'lead');
+  return axiosFunctionsCall<Lead>('lead-update', { lead_id: leadId, ...body }, 'lead');
 }
 
 /** Spec: lead-communications-list { lead_id } */
 export async function getLeadCommunications(leadId: string) {
-  return functionsCall<LeadCommunication[]>('lead-communications-list', { lead_id: leadId }, 'communications');
+  return axiosFunctionsCall<LeadCommunication[]>('lead-communications-list', { lead_id: leadId }, 'communications');
 }
 
 /** Spec: lead-communication-create { lead_id, message, ... } */
 export async function createLeadCommunication(params: { lead_id: string; message: string; [key: string]: unknown }) {
-  return functionsCall<LeadCommunication>('lead-communication-create', params, 'communication');
+  return axiosFunctionsCall<LeadCommunication>('lead-communication-create', params, 'communication');
 }
 
 /** Not in spec; call leads-list and compute, or backend may expose leads-stats. */
 export async function getLeadStats(vendorId: string, statuses?: string[]) {
-  const res = await functionsCall<Lead[]>('leads-list', { limit: 1000, ...(statuses?.length ? { status: statuses[0] } : {}) }, 'leads');
+  const res = await axiosFunctionsCall<Lead[]>('leads-list', { limit: 1000, ...(statuses?.length ? { status: statuses[0] } : {}) }, 'leads');
   if (res.error || !res.data) return { data: { total: 0, monthly: 0, today: 0, byStatus: {} } as LeadStats, error: res.error };
-  const leads = res.data;
+  const leads = Array.isArray(res.data) ? res.data : [];
   const now = new Date();
   const byStatus: Record<string, number> = {};
   let monthly = 0;
@@ -90,5 +91,5 @@ export async function getLeadStats(vendorId: string, statuses?: string[]) {
 
 /** Not in spec; backend may implement lead-delete with { lead_id }. */
 export async function deleteLead(id: string) {
-  return functionsCall<void>('lead-delete', { lead_id: id });
+  return axiosFunctionsCall<void>('lead-delete', { lead_id: id });
 }

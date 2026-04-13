@@ -1,4 +1,4 @@
-import { functionsCall } from '../apiClient';
+import { axiosFunctionsCall } from '../axiosClient';
 
 /** Matches vendor-me-get response vendor shape (API_SPEC_FOR_CONSUMERS.md). */
 export interface MeResponse {
@@ -18,5 +18,5 @@ export interface MeResponse {
 }
 
 export async function getMe() {
-  return functionsCall<MeResponse>('vendor-me-get', {}, 'vendor');
+  return axiosFunctionsCall<MeResponse>('vendor-me-get', {}, 'vendor');
 }

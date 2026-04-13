@@ -46,7 +46,7 @@ export interface SendOTPResponse {
 /** Sends OTP to the provided phone number. */
 export async function sendOTP(phone: string): Promise<{ data?: SendOTPResponse; error?: AuthError }> {
   try {
-    const url = `${getAuthFunctionsBaseUrl()}/auth-vendor-send-otp`;
+    const url = `${getAuthFunctionsBaseUrl()}auth-vendor-send-otp`;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -71,7 +71,7 @@ export async function sendOTP(phone: string): Promise<{ data?: SendOTPResponse; 
 /** Resends OTP to the provided phone number. */
 export async function resendOTP(phone: string): Promise<{ data?: SendOTPResponse; error?: AuthError }> {
   try {
-    const url = `${getAuthFunctionsBaseUrl()}/auth-vendor-resend-otp`;
+    const url = `${getAuthFunctionsBaseUrl()}auth-vendor-resend-otp`;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -101,6 +101,8 @@ export interface VerifyOTPResponse {
     phone: string;
     created_at?: string;
     email?: string | null;
+    first_name?: string | null;
+    last_name?: string | null;
     app_metadata?: any;
     user_metadata?: any;
   };
@@ -112,7 +114,7 @@ export async function verifyOTP(
   otp: string
 ): Promise<{ data?: VerifyOTPResponse; error?: AuthError }> {
   try {
-    const url = `${getAuthFunctionsBaseUrl()}/auth-vendor-verify-otp`;
+    const url = `${getAuthFunctionsBaseUrl()}auth-vendor-verify-otp`;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -148,7 +150,7 @@ export async function verifyOTP(
 export async function signOut(): Promise<{ success: boolean; error?: AuthError }> {
   try {
     // We use apiFetch so it automatically includes the Bearer token if available
-    const response = await apiFetch(`${getAuthFunctionsBaseUrl()}/auth-sign-out`, {
+    const response = await apiFetch(`${getAuthFunctionsBaseUrl()}auth-sign-out`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
@@ -181,23 +183,33 @@ export interface AccountDeletionResponse {
  */
 export async function deleteAccount(): Promise<{ data?: AccountDeletionResponse; error?: AuthError }> {
   try {
-    const response = await apiFetch(`${getAuthFunctionsBaseUrl()}/auth-vendor-delete-account`, {
+    const url = `${getAuthFunctionsBaseUrl()}auth-vendor-delete-account`;
+    const payload = {};
+
+    console.log('[deleteAccount] Request URL:', url);
+    console.log('[deleteAccount] Request Payload:', JSON.stringify(payload, null, 2));
+
+    const response = await apiFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      body: JSON.stringify(payload),
     });
-    
+
     const data = await response.json().catch(() => ({}));
-    
+
+    console.log('[deleteAccount] Response Status:', response.status);
+    console.log('[deleteAccount] Response Data:', JSON.stringify(data, null, 2));
+
     if (!response.ok) {
       return { error: parseErrorResponse(data) };
     }
-    
+
     // Clear tokens after successful deletion
     await clearTokens();
-    
+
     return { data: data as AccountDeletionResponse };
   } catch (err: any) {
+    console.error('[deleteAccount] Error:', err);
     return {
       error: {
         code: 'NETWORK_ERROR',

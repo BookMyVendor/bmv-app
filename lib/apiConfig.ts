@@ -23,5 +23,5 @@ export function getApiBaseUrl(): string {
 
 /** Base URL for all Edge Functions (auth + vendor-me-get, vendor-businesses-*, etc.). Uses EXPO_PUBLIC_API_URL only (host:port), not Supabase. */
 export function getAuthFunctionsBaseUrl(): string {
-  return getApiBaseUrl() + '/functions/v1';
+  return getApiBaseUrl() + '/functions/v1/';
 }

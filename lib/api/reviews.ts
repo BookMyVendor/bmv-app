@@ -1,4 +1,4 @@
-import { functionsCall } from '../apiClient';
+import { axiosFunctionsCall } from '../axiosClient';
 
 export interface Review {
   id: string;
@@ -22,10 +22,10 @@ export async function getReviews(params?: { business_id?: string; limit?: number
   if (params?.business_id) body.business_id = params.business_id;
   if (params?.limit !== undefined) body.limit = params.limit;
   if (params?.offset !== undefined) body.offset = params.offset;
-  return functionsCall<Review[]>('reviews-list', body, 'reviews');
+  return axiosFunctionsCall<Review[]>('reviews-list', body, 'reviews');
 }
 
 /** Spec: review-update { review_id, vendor_response?, vendor_response_date? } */
 export async function updateReview(id: string, body: { vendor_response?: string; vendor_response_date?: string }) {
-  return functionsCall<Review>('review-update', { review_id: id, ...body } as Record<string, unknown>, 'review');
+  return axiosFunctionsCall<Review>('review-update', { review_id: id, ...body } as Record<string, unknown>, 'review');
 }

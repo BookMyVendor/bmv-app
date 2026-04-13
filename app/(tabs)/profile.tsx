@@ -314,23 +314,9 @@ export default function ProfileScreen() {
       const isLocalImage = photoUri && !photoUri.startsWith('http://') && !photoUri.startsWith('https://');
 
       if (isLocalImage && photoUri) {
-        const formData = new FormData();
-        if (Platform.OS === 'web') {
-          const response = await fetch(photoUri);
-          if (!response.ok) throw new Error('Failed to load image');
-          const blob = await response.blob();
-          const ext = blob.type?.includes('png') ? 'png' : 'jpg';
-          const name = `${user?.id}-${Date.now()}.${ext}`;
-          formData.append('image', new File([blob], name, { type: blob.type || 'image/jpeg' }));
-        } else {
-          const fs = await import('expo-file-system/legacy');
-          const fileInfo = await fs.getInfoAsync(photoUri);
-          if (!fileInfo.exists) throw new Error('File does not exist');
-          const ext = photoUri.split('.').pop() || 'jpg';
-          const name = `${user?.id}-${Date.now()}.${ext}`;
-          formData.append('image', { uri: photoUri, name, type: `image/${ext === 'jpg' ? 'jpeg' : ext}` } as any);
-        }
-        const uploadResult = await uploadProfilePhoto(formData);
+        const fileExt = photoUri.split('.').pop() || 'jpg';
+        const fileName = `${user?.id}-${Date.now()}.${fileExt}`;
+        const uploadResult = await uploadProfilePhoto(photoUri, fileName);
         if (uploadResult.error) throw new Error(uploadResult.error.error);
         if (uploadResult.data?.file_id) imageFileId = uploadResult.data.file_id;
         if (uploadResult.data?.url) setPhotoUri(uploadResult.data.url);

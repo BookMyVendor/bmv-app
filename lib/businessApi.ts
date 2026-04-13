@@ -74,12 +74,28 @@ export const validateImageSize = async (
   maxSize: number
 ): Promise<boolean> => {
   try {
+    if (!uri) return false;
+
+    // Local file/content URIs on RN should use FileSystem, not fetch(blob),
+    // which can throw generic "Internal error" on some Android devices.
+    const isLocalUri = uri.startsWith('file://') || uri.startsWith('content://');
+    if (isLocalUri) {
+      const info = await FileSystem.getInfoAsync(uri, { size: true });
+      if (info.exists && typeof (info as any).size === 'number') {
+        return ((info as any).size as number) <= maxSize;
+      }
+      // If size is unavailable for a valid local URI, allow upload to proceed.
+      return true;
+    }
+
+    // data/blob/http URLs
     const response = await fetch(uri);
     const blob = await response.blob();
     return blob.size <= maxSize;
   } catch (error) {
     console.error('Error validating image size:', error);
-    return false;
+    // Validation errors should not block uploads; backend will enforce limits.
+    return true;
   }
 };
 
@@ -191,14 +207,14 @@ export const uploadBusinessImage = async (
       throw new Error(`Maximum ${MAX_IMAGES_PER_BUSINESS} images allowed per business`);
     }
     if (!validateImageUri(imageUri)) throw new Error('Invalid image URI');
-    const fileExt = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
-    const formData = new FormData();
-    formData.append('image', {
-      uri: imageUri,
-      name: `business-${businessId}-${Date.now()}.${fileExt}`,
-      type: `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`,
-    } as any);
-    const result = await mediaApi.uploadBusinessImage(businessId, formData);
+    const stripped = imageUri.split('?')[0].split('#')[0];
+    const extractedExt = stripped.split('.').pop()?.toLowerCase() || 'jpg';
+    const safeExt = ['jpg', 'jpeg', 'png', 'webp'].includes(extractedExt) ? extractedExt : 'jpg';
+    const result = await mediaApi.uploadBusinessImage(
+      businessId,
+      imageUri,
+      `business-${businessId}-${Date.now()}.${safeExt}`
+    );
     if (result.error) throw new Error(result.error.error);
     if (!result.data) throw new Error('Upload failed');
     return {
@@ -233,15 +249,7 @@ export const uploadBusinessVideo = async (
 
     // Prepare form data
     const fileExt = videoUri.split('.').pop()?.toLowerCase() || 'mp4';
-    const formData = new FormData();
-    formData.append('image', {
-      uri: videoUri,
-      name: `business-video-${businessId}-${Date.now()}.${fileExt}`,
-      type: `video/${fileExt === 'mov' ? 'quicktime' : fileExt}`,
-    } as any);
-
-    // Use the same media upload API
-    const result = await mediaApi.uploadBusinessImage(businessId, formData);
+    const result = await mediaApi.uploadBusinessImage(businessId, videoUri, `business-video-${businessId}-${Date.now()}.${fileExt}`);
     
     if (result.error) throw new Error(result.error.error);
     if (!result.data) throw new Error('Upload failed');
@@ -374,12 +382,55 @@ export const setCoverImage = async (
   };
 };
 
+/**
+ * Fetch detailed information for a specific business.
+ *
+ * This function calls the vendor-businesses-get API which requires an OBJECT
+ * payload containing the business_id. Sending a raw string will cause a
+ * 500 INTERNAL_ERROR from the backend.
+ *
+ * @param businessId - The UUID of the business to fetch
+ * @returns Object containing business data or error
+ */
 export const getBusinessDetails = async (
   businessId: string
 ): Promise<{ data: any | null; error: Error | null }> => {
-  const { data, error } = await vendorBusinessApi.getVendorBusiness(businessId);
-  if (error) return { data: null, error: new Error(error.error) };
-  return { data: data ?? null, error: null };
+  // Input validation
+  if (!businessId) {
+    console.error('[getBusinessDetails] businessId is missing or empty');
+    return { data: null, error: new Error('Business ID is required') };
+  }
+
+  if (typeof businessId !== 'string') {
+    console.error('[getBusinessDetails] businessId must be a string, got:', typeof businessId);
+    return { data: null, error: new Error('Business ID must be a string') };
+  }
+
+  // UUID format validation (basic check)
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(businessId)) {
+    console.error('[getBusinessDetails] businessId is not a valid UUID format:', businessId);
+    return { data: null, error: new Error('Business ID must be a valid UUID') };
+  }
+
+  console.log(`[getBusinessDetails] Fetching details for businessId: ${businessId}`);
+
+  try {
+    const { data, error } = await vendorBusinessApi.getVendorBusiness(businessId);
+
+    if (error) {
+      console.error(`[getBusinessDetails] API error for businessId ${businessId}:`, error);
+      return { data: null, error: new Error(error.error || 'Failed to fetch business details') };
+    }
+
+    console.log(`[getBusinessDetails] Successfully fetched details for businessId: ${businessId}`);
+
+    // Normalize null/undefined to null safely
+    return { data: data ?? null, error: null };
+  } catch (err: any) {
+    console.error(`[getBusinessDetails] Unexpected error for businessId ${businessId}:`, err);
+    return { data: null, error: new Error(err?.message || 'An unexpected error occurred') };
+  }
 };
 
 export const updateBusinessDetails = async (

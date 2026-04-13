@@ -123,8 +123,12 @@ export default function LeadsScreen() {
       }
 
       const { data: businessData, error: businessError } = await getVendorBusinesses(user?.id!);
-      if (businessError) throw new Error(businessError.error);
-      const businessList = businessData || [];
+      if (businessError) {
+        console.error('❌ Error fetching businesses in leads:', businessError.error);
+        throw new Error(businessError.error);
+      }
+      
+      const businessList = Array.isArray(businessData) ? businessData : [];
       if (businessList.length === 0) {
         setLeads([]);
         if (showLoading) setLoading(false);
@@ -132,9 +136,15 @@ export default function LeadsScreen() {
         setIsOffline(false);
         return;
       }
+      
+      // Safety check: Filter out any invalid business items before mapping
+      const validatedBusinesses = businessList.filter((b: any) => b && (b.id || b.business_id));
 
       const businessMap = new Map(
-        businessList.map((b: any) => [b.id, { name: b.business_name, city: b.city }])
+        validatedBusinesses.map((b: any) => [
+          b.id || b.business_id, 
+          { name: b.business_name || b.name || 'Unknown Business', city: b.city || '' }
+        ])
       );
 
       const { data: leadsData, error } = await getLeads({ vendor_id: user?.id! });

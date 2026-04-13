@@ -1,9 +1,10 @@
-import { apiFetch, functionsCall } from '../apiClient';
+import { apiFetch } from '../apiClient';
+import { axiosFunctionsCall } from '../axiosClient';
 import { getAuthFunctionsBaseUrl } from '../apiConfig';
 
 /** Spec: push-register-token { pushToken, platform, deviceId? } */
 export async function registerPushToken(pushToken: string, platform: string, deviceId?: string) {
-  return functionsCall<unknown>('push-register-token', { pushToken, platform, deviceId });
+  return axiosFunctionsCall<unknown>('push-register-token', { pushToken, platform, deviceId });
 }
 
 export interface SendPushRequest {

@@ -183,18 +183,9 @@ export default function CompleteProfileScreen() {
       let fileDataId: string | undefined;
 
       if (photoUri && !photoUri.startsWith('http')) {
-        const formData = new FormData();
-        if (Platform.OS === 'web') {
-          const response = await fetch(photoUri);
-          if (!response.ok) throw new Error('Failed to load image');
-          const blob = await response.blob();
-          const ext = blob.type?.includes('png') ? 'png' : 'jpg';
-          formData.append('image', new File([blob], `${user.id}-${Date.now()}.${ext}`, { type: blob.type || 'image/jpeg' }));
-        } else {
-          const ext = photoUri.split('.').pop() || 'jpg';
-          formData.append('image', { uri: photoUri, name: `${user.id}-${Date.now()}.${ext}`, type: `image/${ext === 'jpg' ? 'jpeg' : ext}` } as any);
-        }
-        const uploadResult = await uploadProfilePhoto(formData);
+        const fileExt = photoUri.split('.').pop() || 'jpg';
+        const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+        const uploadResult = await uploadProfilePhoto(photoUri, fileName);
         if (uploadResult.error) throw new Error(uploadResult.error.error);
         if (uploadResult.data?.file_id) fileDataId = uploadResult.data.file_id;
       }

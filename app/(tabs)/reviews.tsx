@@ -32,8 +32,8 @@ import {
 } from 'lucide-react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { getReviews, updateReview } from '../../lib/api/reviews';
-import FilterModal from '../../components/FilterModal';
-import SortModal from '../../components/SortModal';
+import { getVendorBusinesses } from '../../lib/api/vendorBusinesses';
+import FilterSortModal from '../../components/FilterSortModal';
 import ReplyModal from '../../components/ReplyModal';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
 import ScreenBackground from '../../components/ScreenBackground';
@@ -49,9 +49,9 @@ interface Review {
   vendor_response: string | null;
   responded_at: string | null;
   created_at: string;
-  businesses: {
+  businesses?: {
     business_name: string;
-  };
+  } | null;
   mediaItems?: { url: string; mimeType?: string }[];
 }
 
@@ -103,9 +103,75 @@ export default function ReviewsScreen() {
         if (cachedReviews) setReviews(JSON.parse(cachedReviews));
       } catch { }
 
+      let apiList: any[] = [];
       const { data, error } = await getReviews();
-      if (error) throw new Error(error.error);
-      const list = (data || []) as Review[];
+      console.log('[BizDebug][Reviews] getReviews(all) response', {
+        hasError: !!error,
+        error: error?.error ?? null,
+        count: Array.isArray(data) ? data.length : 0,
+      });
+
+      if (error && /internal error/i.test(error.error || '')) {
+        console.log('[BizDebug][Reviews] Falling back to business-wise reviews fetch');
+        const { data: businesses, error: businessError } = await getVendorBusinesses();
+        console.log('[BizDebug][Reviews] getVendorBusinesses for fallback', {
+          hasError: !!businessError,
+          error: businessError?.error ?? null,
+          businessCount: Array.isArray(businesses) ? businesses.length : 0,
+        });
+
+        if (businessError) {
+          throw new Error(businessError.error);
+        }
+
+        const businessIds = (businesses || []).map((b: any) => b.id).filter(Boolean);
+        const reviewResponses = await Promise.all(
+          businessIds.map((businessId) => getReviews({ business_id: businessId, limit: 100 }))
+        );
+
+        const fallbackErrors = reviewResponses
+          .map((response) => response.error?.error)
+          .filter((message): message is string => !!message);
+        const merged = reviewResponses.flatMap((response) => (Array.isArray(response.data) ? response.data : []));
+        const deduped = Array.from(
+          merged.reduce((map, item: any) => {
+            if (item?.id) map.set(item.id, item);
+            return map;
+          }, new Map<string, any>()).values()
+        );
+
+        console.log('[BizDebug][Reviews] Fallback reviews result', {
+          requestedBusinessCount: businessIds.length,
+          mergedCount: merged.length,
+          dedupedCount: deduped.length,
+          errorCount: fallbackErrors.length,
+        });
+
+        if (deduped.length === 0 && fallbackErrors.length > 0) {
+          throw new Error(fallbackErrors[0]);
+        }
+
+        apiList = deduped;
+      } else {
+        if (error) throw new Error(error.error);
+        apiList = (data || []) as any[];
+      }
+
+      const list = apiList.map(item => ({
+        id: item.id,
+        customer_name: item.customers?.name || item.customer_name || 'Anonymous',
+        profile_photo_url: item.profile_photo_url || null,
+        rating: item.rating || 0,
+        comment: item.review_text || item.comment || '',
+        event_type: item.event_type || null,
+        is_flagged: !!item.is_flagged,
+        vendor_response: item.vendor_response || null,
+        responded_at: item.vendor_response_date || item.responded_at || null,
+        created_at: item.created_at,
+        businesses: item.businesses || null,
+        mediaItems: item.mediaItems || []
+      })) as Review[];
+
       setReviews(list);
       try {
         AsyncStorage.setItem(`vendor_reviews_${user.id}`, JSON.stringify(list));
