@@ -187,8 +187,18 @@ export default function ProfileScreen() {
   useEffect(() => {
     const fetchImageUrl = async () => {
       if (profile?.image_file_id) {
-        const { data } = await getFileUrl(profile.image_file_id);
-        if (data?.url) setPhotoUri(data.url);
+        try {
+          const result = await getFileUrl(profile.image_file_id);
+          if (result.error) {
+            console.error('Error fetching file URL:', result.error);
+            return;
+          }
+          if (result.data?.url) {
+            setPhotoUri(result.data.url);
+          }
+        } catch (err) {
+          console.error('Failed to fetch image URL:', err);
+        }
       }
     };
     fetchImageUrl();
@@ -423,7 +433,12 @@ export default function ProfileScreen() {
                   onPress={showImageOptions}
                 >
                   {photoUri ? (
-                    <Image source={{ uri: photoUri }} style={styles.photo} />
+                    <Image
+                      key={photoUri}
+                      source={{ uri: photoUri }}
+                      style={styles.photo}
+                      onError={(e) => console.error('Image load error:', e.nativeEvent.error)}
+                    />
                   ) : values.firstName || values.lastName ? (
                     <View style={[styles.photo, styles.initialsContainer]}>
                       <Text style={styles.initialsText}>

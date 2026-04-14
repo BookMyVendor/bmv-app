@@ -29,6 +29,7 @@ import {
 } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { getVendorBusiness } from '../lib/api/vendorBusinesses';
+import { getPublicUrl } from '../lib/businessApi';
 import { getCategoryTree } from '../lib/api/categories';
 import { getLeads } from '../lib/api/leads';
 import { getReviews } from '../lib/api/reviews';
@@ -45,12 +46,66 @@ interface Business {
     cover_photo_url: string | null;
 }
 
+/**
+ * Helper to convert a file path to a full URL.
+ * If the input is already a full URL (starts with http), return as-is.
+ * If it's a file path, prepend the API base URL.
+ */
+function getFullImageUrl(filePathOrUrl: string | null | undefined): string | null {
+    if (!filePathOrUrl) return null;
+
+    // If it's already a full URL, return it
+    if (filePathOrUrl.startsWith('http://') || filePathOrUrl.startsWith('https://')) {
+        return filePathOrUrl;
+    }
+
+    // It's a file path, convert to full URL using the business-images bucket
+    return getPublicUrl('business-images', filePathOrUrl);
+}
+
 interface Review {
     id: string;
     customer_name: string;
     rating: number;
     comment: string | null;
     created_at: string;
+}
+
+/**
+ * Image component with fallback to gradient avatar on error
+ */
+function ImageWithFallback({
+    uri,
+    style,
+    fallbackLetter,
+}: {
+    uri: string;
+    style: any;
+    fallbackLetter: string;
+}) {
+    const [hasError, setHasError] = useState(false);
+
+    if (hasError) {
+        return (
+            <LinearGradient
+                colors={['#6c7ef7', '#8b9dff']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={style}
+            >
+                <Text style={styles.coverAvatarLetter}>{fallbackLetter}</Text>
+            </LinearGradient>
+        );
+    }
+
+    return (
+        <Image
+            source={{ uri }}
+            style={style}
+            resizeMode="cover"
+            onError={() => setHasError(true)}
+        />
+    );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -221,11 +276,14 @@ export default function BusinessProfileScreen() {
                     category = categoryMap.get(foundCatId)?.name || 'General';
                 }
 
+                // Get full URL for cover photo (API returns full MinIO/S3 URLs or file paths)
+                const coverPhotoUrl = getFullImageUrl(data.cover_photo_url || data.cover_image_file_id);
+
                 const businessData: Business = {
                     id: data.id,
                     business_name: data.business_name || data.name || 'Unnamed Business',
                     business_category: category,
-                    cover_photo_url: data.cover_photo_url ?? null,
+                    cover_photo_url: coverPhotoUrl,
                 };
                 setBusiness(businessData);
                 setIsOffline(false);
@@ -497,10 +555,10 @@ export default function BusinessProfileScreen() {
                 {/* ── Business Header ── */}
                 <View style={styles.businessHeader}>
                     {business?.cover_photo_url ? (
-                        <Image
-                            source={{ uri: business.cover_photo_url }}
+                        <ImageWithFallback
+                            uri={business.cover_photo_url}
                             style={styles.coverAvatar}
-                            resizeMode="cover"
+                            fallbackLetter={coverLetter}
                         />
                     ) : (
                         <LinearGradient

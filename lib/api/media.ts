@@ -3,15 +3,17 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { SaveFormat } from 'expo-image-manipulator';
 import { getAuthFunctionsBaseUrl } from '../apiConfig';
 import { apiFetch } from '../apiClient';
-import { axiosFunctionsCall } from '../axiosClient';
+import { axiosFunctionsCall, axiosMultipartUpload } from '../axiosClient';
 
 export interface PortfolioImage {
   id: string;
   business_id: string;
   image_url: string | null;
+  file_id?: string | null;
   display_order: number;
   created_at: string;
   image_type?: string;
+  mime_type?: string;
 }
 
 const ALLOWED_IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp']);
@@ -36,11 +38,24 @@ function normalizeFileName(fileName: string | undefined, fallbackPrefix: string,
   return `${baseName}.${extension}`;
 }
 
+export interface BusinessMediaItem {
+  id: string;
+  business_id: string;
+  url: string | null;
+  image_url?: string | null;
+  file_id?: string | null;
+  display_order: number;
+  sort_order?: number;
+  created_at: string;
+  image_type?: string;
+  mime_type?: string;
+}
+
 /** Spec: vendor-businesses-media-list { business_id } */
 export async function getBusinessMedia(businessId: string) {
   console.log('[getBusinessMedia] Request - Function: vendor-businesses-media-list');
   console.log('[getBusinessMedia] Request - Payload:', JSON.stringify({ business_id: businessId }, null, 2));
-  const result = await axiosFunctionsCall<PortfolioImage[]>('vendor-businesses-media-list', { business_id: businessId }, 'media');
+  const result = await axiosFunctionsCall<BusinessMediaItem[]>('vendor-businesses-media-list', { business_id: businessId }, 'media');
   console.log('[getBusinessMedia] Response - Error:', result.error ? JSON.stringify(result.error, null, 2) : null);
   console.log('[getBusinessMedia] Response - Data Count:', result.data?.length ?? 0);
   return result;
@@ -82,22 +97,37 @@ export async function uploadBusinessImage(
 
 /** Spec: vendor-businesses-media-set-cover { business_id, media_id } */
 export async function setCoverImage(businessId: string, mediaId: string) {
+  const timestamp = new Date().toISOString();
   const payload = { business_id: businessId, media_id: mediaId };
-  console.log('[setCoverImage] Request - Function: vendor-businesses-media-set-cover');
-  console.log('[setCoverImage] Request - Payload:', JSON.stringify(payload, null, 2));
+  console.log(`[setCoverImage][${timestamp}] START`);
+  console.log(`[setCoverImage][${timestamp}] Request - Function: vendor-businesses-media-set-cover`);
+  console.log(`[setCoverImage][${timestamp}] Request - Payload:`, JSON.stringify(payload, null, 2));
+  
   const res = await axiosFunctionsCall<unknown>('vendor-businesses-media-set-cover', payload);
-  console.log('[setCoverImage] Response - Error:', res.error ? JSON.stringify(res.error, null, 2) : null);
-  console.log('[setCoverImage] Response - Data:', res.data ? JSON.stringify(res.data, null, 2) : null);
+  
+  if (res.error) {
+    console.error(`[setCoverImage][${timestamp}] ERROR:`, JSON.stringify(res.error, null, 2));
+  } else {
+    console.log(`[setCoverImage][${timestamp}] SUCCESS:`, res.data ? JSON.stringify(res.data, null, 2) : null);
+  }
   return { data: res.data, error: res.error };
 }
 
 /** Spec: vendor-businesses-media-delete { business_id, media_id } */
 export async function deleteBusinessImage(businessId: string, mediaId: string) {
+  const timestamp = new Date().toISOString();
   const payload = { business_id: businessId, media_id: mediaId };
-  console.log('[deleteBusinessImage] Request - Function: vendor-businesses-media-delete');
-  console.log('[deleteBusinessImage] Request - Payload:', JSON.stringify(payload, null, 2));
+  console.log(`[deleteBusinessImage][${timestamp}] START`);
+  console.log(`[deleteBusinessImage][${timestamp}] Request - Function: vendor-businesses-media-delete`);
+  console.log(`[deleteBusinessImage][${timestamp}] Request - Payload:`, JSON.stringify(payload, null, 2));
+  
   const result = await axiosFunctionsCall<void>('vendor-businesses-media-delete', payload);
-  console.log('[deleteBusinessImage] Response - Error:', result.error ? JSON.stringify(result.error, null, 2) : null);
+  
+  if (result.error) {
+    console.error(`[deleteBusinessImage][${timestamp}] ERROR:`, JSON.stringify(result.error, null, 2));
+  } else {
+    console.log(`[deleteBusinessImage][${timestamp}] SUCCESS`);
+  }
   return result;
 }
 
@@ -110,6 +140,165 @@ export interface CreateMediaRequest {
 /** Spec: vendor-businesses-media-create { business_id, file_id, sort_order? } */
 export async function createBusinessMedia(body: CreateMediaRequest) {
   return axiosFunctionsCall<PortfolioImage>('vendor-businesses-media-create', body as any, 'media');
+}
+
+export interface DirectMediaUploadRequest {
+  business_id: string;
+  file: string;
+  image_type: 'gallery' | 'cover' | 'portfolio';
+  sort_order?: number;
+  file_name?: string;
+}
+
+export interface DirectMediaUploadResponse extends PortfolioImage {
+  cover_photo_url?: string | null;
+  url?: string | null;
+}
+
+/**
+ * Direct multipart upload to vendor-businesses-media-create
+ * Supports gallery images, cover photos, and portfolio videos
+ * 
+ * For cover photos: also updates cover_photo_url on the business
+ */
+export async function uploadBusinessMediaDirect(
+  request: DirectMediaUploadRequest
+): Promise<{ data?: DirectMediaUploadResponse; error?: { success: false; error: string; code?: string } }> {
+  const timestamp = new Date().toISOString();
+  console.log(`[uploadBusinessMediaDirect][${timestamp}] START`);
+  console.log(`[uploadBusinessMediaDirect][${timestamp}] Request:`, {
+    business_id: request.business_id,
+    image_type: request.image_type,
+    sort_order: request.sort_order,
+    file_name: request.file_name,
+    file_uri: request.file?.substring(0, 50) + '...',
+  });
+
+  try {
+    if (!request.file) {
+      console.error(`[uploadBusinessMediaDirect][${timestamp}] ERROR: File URI is required`);
+      return { error: { success: false, error: 'File URI is required' } };
+    }
+
+    if (!request.business_id) {
+      console.error(`[uploadBusinessMediaDirect][${timestamp}] ERROR: Business ID is required`);
+      return { error: { success: false, error: 'Business ID is required' } };
+    }
+
+    const formData = new FormData();
+    formData.append('business_id', request.business_id);
+    formData.append('image_type', request.image_type);
+
+    if (request.sort_order !== undefined) {
+      formData.append('sort_order', request.sort_order.toString());
+    }
+
+    const fileExt = request.file.split('.').pop()?.toLowerCase() || 'jpg';
+    const isVideo = ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(fileExt);
+    const fileName = request.file_name || `business-${request.image_type}-${Date.now()}.${fileExt}`;
+
+    console.log(`[uploadBusinessMediaDirect][${timestamp}] File details:`, {
+      fileExt,
+      isVideo,
+      fileName,
+      platform: Platform.OS,
+    });
+
+    if (Platform.OS === 'web') {
+      console.log(`[uploadBusinessMediaDirect][${timestamp}] Web platform: fetching blob...`);
+      const response = await fetch(request.file);
+      if (!response.ok) throw new Error('Failed to load file for upload');
+      const blob = await response.blob();
+      const contentType = isVideo ? `video/${fileExt === 'mov' ? 'quicktime' : fileExt}` : `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`;
+      formData.append('file', new File([blob], fileName, { type: contentType }));
+      console.log(`[uploadBusinessMediaDirect][${timestamp}] Web blob created, size:`, blob.size);
+    } else {
+      const contentType = isVideo
+        ? fileExt === 'mov' ? 'video/quicktime' : `video/${fileExt}`
+        : fileExt === 'png' ? 'image/png' : fileExt === 'webp' ? 'image/webp' : 'image/jpeg';
+
+      formData.append('file', {
+        uri: request.file,
+        name: fileName,
+        type: contentType,
+      } as any);
+      console.log(`[uploadBusinessMediaDirect][${timestamp}] Native form data appended`);
+    }
+
+    console.log(`[uploadBusinessMediaDirect][${timestamp}] Calling axiosMultipartUpload...`);
+    const result = await axiosMultipartUpload<DirectMediaUploadResponse>(
+      'vendor-businesses-media-create',
+      formData,
+      'media'
+    );
+
+    if (result.error) {
+      console.error(`[uploadBusinessMediaDirect][${timestamp}] ERROR from API:`, result.error);
+      return { error: result.error };
+    }
+
+    console.log(`[uploadBusinessMediaDirect][${timestamp}] SUCCESS:`, {
+      id: result.data?.id,
+      image_url: result.data?.image_url?.substring(0, 50) + '...',
+      image_type: result.data?.image_type,
+      display_order: result.data?.display_order,
+      cover_photo_url: result.data?.cover_photo_url?.substring(0, 50) + '...',
+    });
+    return { data: result.data };
+  } catch (e: any) {
+    console.error(`[uploadBusinessMediaDirect][${timestamp}] EXCEPTION:`, e?.message || e);
+    return { error: { success: false, error: e?.message || 'Upload failed', code: 'NETWORK_ERROR' } };
+  }
+}
+
+/**
+ * Upload gallery image with sort_order
+ */
+export async function uploadGalleryImage(
+  businessId: string,
+  imageUri: string,
+  sortOrder: number,
+  fileName?: string
+): Promise<{ data?: DirectMediaUploadResponse; error?: { success: false; error: string; code?: string } }> {
+  return uploadBusinessMediaDirect({
+    business_id: businessId,
+    file: imageUri,
+    image_type: 'gallery',
+    sort_order: sortOrder,
+    file_name: fileName,
+  });
+}
+
+/**
+ * Upload cover photo (also updates cover_photo_url on the business)
+ */
+export async function uploadCoverImage(
+  businessId: string,
+  imageUri: string,
+  fileName?: string
+): Promise<{ data?: DirectMediaUploadResponse; error?: { success: false; error: string; code?: string } }> {
+  return uploadBusinessMediaDirect({
+    business_id: businessId,
+    file: imageUri,
+    image_type: 'cover',
+    file_name: fileName,
+  });
+}
+
+/**
+ * Upload portfolio video
+ */
+export async function uploadPortfolioVideo(
+  businessId: string,
+  videoUri: string,
+  fileName?: string
+): Promise<{ data?: DirectMediaUploadResponse; error?: { success: false; error: string; code?: string } }> {
+  return uploadBusinessMediaDirect({
+    business_id: businessId,
+    file: videoUri,
+    image_type: 'portfolio',
+    file_name: fileName,
+  });
 }
 
 /** Spec: file-storage-url { file_id or id } -> { success, file_id, url } */

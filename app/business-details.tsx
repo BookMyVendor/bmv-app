@@ -71,6 +71,7 @@ import {
   VerificationDocument,
   Offer,
   PortfolioImage,
+  getPublicUrl,
 } from '../lib/businessApi';
 import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '../lib/documentUpload';
 import { validatePincode } from '../lib/pincodeValidation';
@@ -86,6 +87,23 @@ const EXPERIENCE_OPTIONS = [
   '5-10 years',
   'More than 10 years',
 ];
+
+/**
+ * Helper to convert a file path to a full URL.
+ * If the input is already a full URL (starts with http), return as-is.
+ * If it's a file path, prepend the API base URL.
+ */
+function getFullImageUrl(filePathOrUrl: string | null | undefined): string | null {
+  if (!filePathOrUrl) return null;
+
+  // If it's already a full URL, return it
+  if (filePathOrUrl.startsWith('http://') || filePathOrUrl.startsWith('https://')) {
+    return filePathOrUrl;
+  }
+
+  // It's a file path, convert to full URL using the business-images bucket
+  return getPublicUrl('business-images', filePathOrUrl);
+}
 
 // Helper to convert numeric years to display string
 const getExperienceDisplayValue = (years: number | null | undefined): string => {
@@ -213,6 +231,137 @@ const OPERATING_CITIES = [
 ];
 
 type SectionType = 'offers' | 'gallery' | 'packages' | 'edit';
+
+// Separate component for image grid item to avoid hooks violation
+interface ImageGridItemProps {
+  item: PortfolioImage;
+  index: number;
+  activeMenuImageId: string | null;
+  setActiveMenuImageId: (id: string | null) => void;
+  setPreviewInitialIndex: (index: number) => void;
+  setCurrentPreviewIndex: (index: number) => void;
+  setShowImagePreview: (show: boolean) => void;
+  handleSetCoverImage: (item: PortfolioImage) => void;
+  handleDeleteImage: (item: PortfolioImage) => void;
+}
+
+const ImageGridItem: React.FC<ImageGridItemProps> = ({
+  item,
+  index,
+  activeMenuImageId,
+  setActiveMenuImageId,
+  setPreviewInitialIndex,
+  setCurrentPreviewIndex,
+  setShowImagePreview,
+  handleSetCoverImage,
+  handleDeleteImage,
+}) => {
+  const imageSource = item.image_base64 || item.image_url;
+  const isCover = item.image_type === 'cover';
+  const isVideo = item.image_type === 'video';
+  const isMenuOpen = activeMenuImageId === item.id;
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageError, setImageError] = useState(false);
+
+  return (
+    <View style={styles.imageGridItemContainer}>
+      <TouchableOpacity
+        style={styles.imageGridItem}
+        activeOpacity={0.9}
+        onPress={() => {
+          if (activeMenuImageId) {
+            setActiveMenuImageId(null);
+          } else {
+            setPreviewInitialIndex(index);
+            setCurrentPreviewIndex(index);
+            setShowImagePreview(true);
+          }
+        }}
+      >
+        {isVideo ? (
+          <View style={styles.galleryImage}>
+            <ExpoVideo
+              source={{ uri: imageSource ?? '' }}
+              style={styles.galleryImage}
+              resizeMode={ResizeMode.COVER}
+              shouldPlay={false}
+              useNativeControls={false}
+              isMuted={true}
+            />
+            <View style={styles.videoBadge}>
+              <Video size={16} color="#fff" />
+            </View>
+          </View>
+        ) : (
+          <View style={styles.galleryImage}>
+            {!imageLoaded && !imageError && (
+              <View style={styles.imageLoadingContainer}>
+                <ActivityIndicator size="small" color="#6aa3ce" />
+              </View>
+            )}
+            {imageError ? (
+              <View style={styles.imageErrorContainer}>
+                <ImageIcon size={32} color="#ccc" />
+              </View>
+            ) : (
+              <Image
+                source={{ uri: imageSource ?? '' }}
+                style={[styles.galleryImage, !imageLoaded && styles.imageHidden]}
+                resizeMode="cover"
+                onLoad={() => setImageLoaded(true)}
+                onError={() => {
+                  setImageError(true);
+                  setImageLoaded(true);
+                  console.error(`[ImageGridItem] Failed to load image: ${imageSource}`);
+                }}
+              />
+            )}
+          </View>
+        )}
+
+        {isCover && (
+          <View style={styles.coverBadge}>
+            <Text style={styles.coverBadgeText}>Cover</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.menuButton}
+        onPress={() => setActiveMenuImageId(isMenuOpen ? null : item.id)}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      >
+        <View style={styles.menuButtonCircle}>
+          <MoreVertical size={18} color="#fff" />
+        </View>
+      </TouchableOpacity>
+
+      {isMenuOpen && (
+        <View style={styles.menuOptions}>
+          <TouchableOpacity
+            style={styles.menuOptionItem}
+            onPress={() => {
+              setActiveMenuImageId(null);
+              handleSetCoverImage(item);
+            }}
+          >
+            <Text style={styles.menuOptionText}>Set Cover Image</Text>
+          </TouchableOpacity>
+          <View style={styles.menuDivider} />
+          <TouchableOpacity
+            style={styles.menuOptionItem}
+            onPress={() => {
+              setActiveMenuImageId(null);
+              handleDeleteImage(item);
+            }}
+          >
+            <Text style={[styles.menuOptionText, styles.menuDeleteText]}>Delete</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+};
 
 export default function BusinessDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -428,6 +577,12 @@ export default function BusinessDetailsScreen() {
         category_ids: rawBusiness.category_ids || [],
       } : {};
 
+      // Get full URL for cover photo (API returns full MinIO/S3 URLs or file paths)
+      const coverPhotoUrl = getFullImageUrl(rawBusiness?.cover_photo_url || rawBusiness?.cover_image_file_id);
+      if (coverPhotoUrl && normalizedBusiness) {
+        normalizedBusiness.cover_photo_url = coverPhotoUrl;
+      }
+
       console.log('[loadData] DEBUG - Normalized business:', {
         business_name: normalizedBusiness.business_name,
         contact_person_name: normalizedBusiness.contact_person_name,
@@ -472,26 +627,21 @@ export default function BusinessDetailsScreen() {
       let allImages = imagesRes.data || [];
 
       // If business has cover_photo_url and it's not already in images, add it
-      if (businessRes.data?.cover_photo_url) {
-        const coverExists = allImages.some(
-          (img) => img.image_url === businessRes.data.cover_photo_url || img.image_type === 'cover'
-        );
-
-        if (!coverExists) {
-          // Add cover photo as the first image
-          allImages = [
-            {
-              id: `cover-${id}`, // Temporary ID for cover photo
-              business_id: id,
-              image_url: businessRes.data.cover_photo_url,
-              image_base64: null,
-              display_order: 0,
-              created_at: businessRes.data.created_at || new Date().toISOString(),
-              image_type: 'cover',
-            },
-            ...allImages,
-          ];
-        }
+      // Note: coverPhotoUrl is already fetched above, reuse it
+      if (coverPhotoUrl && !allImages.some(img => img.image_type === 'cover' || img.image_url === coverPhotoUrl)) {
+        // Add cover photo as the first image
+        allImages = [
+          {
+            id: `cover-${id}`, // Temporary ID for cover photo
+            business_id: id,
+            image_url: coverPhotoUrl,
+            image_base64: null,
+            display_order: 0,
+            created_at: businessRes.data.created_at || new Date().toISOString(),
+            image_type: 'cover',
+          },
+          ...allImages,
+        ];
       }
 
       setImages(allImages);
@@ -1822,98 +1972,148 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleUploadImage = async () => {
+    const timestamp = new Date().toISOString();
+    console.log(`[handleUploadImage][${timestamp}] START - businessId: ${id}`);
+    
     const imagesOnly = images.filter(img => img.image_type !== 'video');
+    console.log(`[handleUploadImage][${timestamp}] Current gallery images: ${imagesOnly.length}/10`);
+    
     if (imagesOnly.length >= 10) {
+      console.log(`[handleUploadImage][${timestamp}] LIMIT REACHED - Max 10 images`);
       Alert.alert('Limit Reached', 'Maximum 10 images allowed per business');
       return;
     }
 
+    console.log(`[handleUploadImage][${timestamp}] Opening image picker...`);
     const { uri, error } = await pickImage();
+    
     if (error) {
+      console.error(`[handleUploadImage][${timestamp}] Image picker error:`, error.message);
       Alert.alert('Error', error.message);
       return;
     }
 
     if (uri) {
+      console.log(`[handleUploadImage][${timestamp}] Image selected, URI: ${uri.substring(0, 50)}...`);
       try {
         setUploading(true);
-        console.log('Starting image upload, URI:', uri);
+        console.log(`[handleUploadImage][${timestamp}] Calling uploadBusinessImage...`);
+        
         const { data, error: uploadError } = await uploadBusinessImage(id, uri);
+        
         if (uploadError) {
-          console.error('Upload error:', uploadError);
+          console.error(`[handleUploadImage][${timestamp}] Upload error:`, uploadError);
           throw uploadError;
         }
-        console.log('Upload successful, data:', data);
+        
+        console.log(`[handleUploadImage][${timestamp}] Upload successful, data:`, {
+          id: data?.id,
+          image_type: data?.image_type,
+          image_url: data?.image_url?.substring(0, 50) + '...',
+        });
 
-        // Reload data to refresh calculations
         await loadData();
-
         Alert.alert('Success', 'Image uploaded successfully');
       } catch (error: any) {
-        console.error('Upload failed:', error);
+        console.error(`[handleUploadImage][${timestamp}] Upload failed:`, error);
         Alert.alert('Error', error.message || 'Failed to upload image');
       } finally {
         setUploading(false);
+        console.log(`[handleUploadImage][${timestamp}] END`);
       }
+    } else {
+      console.log(`[handleUploadImage][${timestamp}] No image selected (cancelled)`);
     }
   };
 
   const handleUploadVideo = async () => {
+    const timestamp = new Date().toISOString();
+    console.log(`[handleUploadVideo][${timestamp}] START - businessId: ${id}`);
+    
     const videosOnly = images.filter(img => img.image_type === 'video');
+    console.log(`[handleUploadVideo][${timestamp}] Current videos: ${videosOnly.length}/5`);
+    
     if (videosOnly.length >= 5) {
+      console.log(`[handleUploadVideo][${timestamp}] LIMIT REACHED - Max 5 videos`);
       Alert.alert('Limit Reached', 'Maximum 5 videos allowed per business');
       return;
     }
 
+    console.log(`[handleUploadVideo][${timestamp}] Opening video picker...`);
     const { uri, error } = await pickVideo();
+    
     if (error) {
+      console.error(`[handleUploadVideo][${timestamp}] Video picker error:`, error.message);
       Alert.alert('Error', error.message);
       return;
     }
 
     if (uri) {
+      console.log(`[handleUploadVideo][${timestamp}] Video selected, URI: ${uri.substring(0, 50)}...`);
       try {
         setUploading(true);
-        console.log('Starting video upload, URI:', uri);
+        console.log(`[handleUploadVideo][${timestamp}] Calling uploadBusinessVideo...`);
+        
         const { data, error: uploadError } = await uploadBusinessVideo(id, uri);
+        
         if (uploadError) {
-          console.error('Upload error:', uploadError);
+          console.error(`[handleUploadVideo][${timestamp}] Upload error:`, uploadError);
           throw uploadError;
         }
-        console.log('Upload successful, data:', data);
+        
+        console.log(`[handleUploadVideo][${timestamp}] Upload successful, data:`, {
+          id: data?.id,
+          image_type: data?.image_type,
+          image_url: data?.image_url?.substring(0, 50) + '...',
+        });
 
-        // Reload data
         await loadData();
-
         Alert.alert('Success', 'Video uploaded successfully');
       } catch (error: any) {
-        console.error('Upload failed:', error);
+        console.error(`[handleUploadVideo][${timestamp}] Upload failed:`, error);
         Alert.alert('Error', error.message || 'Failed to upload video');
       } finally {
         setUploading(false);
+        console.log(`[handleUploadVideo][${timestamp}] END`);
       }
+    } else {
+      console.log(`[handleUploadVideo][${timestamp}] No video selected (cancelled)`);
     }
   };
 
   const handleUploadMultipleImages = async () => {
+    const timestamp = new Date().toISOString();
+    console.log(`[handleUploadMultipleImages][${timestamp}] START - businessId: ${id}`);
+    
     const imagesOnly = images.filter(img => img.image_type !== 'video');
     const availableSlots = 10 - imagesOnly.length;
+    console.log(`[handleUploadMultipleImages][${timestamp}] Current images: ${imagesOnly.length}/10, Available slots: ${availableSlots}`);
+    
     if (availableSlots <= 0) {
+      console.log(`[handleUploadMultipleImages][${timestamp}] LIMIT REACHED - Max 10 images`);
       Alert.alert('Limit Reached', 'Maximum 10 images allowed per business');
       return;
     }
 
+    console.log(`[handleUploadMultipleImages][${timestamp}] Opening multiple image picker...`);
     const { uris, error } = await pickMultipleImages();
+    
     if (error) {
+      console.error(`[handleUploadMultipleImages][${timestamp}] Image picker error:`, error.message);
       Alert.alert('Error', error.message);
       return;
     }
 
+    console.log(`[handleUploadMultipleImages][${timestamp}] Selected ${uris.length} images`);
+    console.log(`[handleUploadMultipleImages][${timestamp}] URIs:`, uris.map(u => u.substring(0, 30) + '...'));
+
     if (uris.length === 0) {
+      console.log(`[handleUploadMultipleImages][${timestamp}] No images selected (cancelled)`);
       return;
     }
 
     if (uris.length > availableSlots) {
+      console.error(`[handleUploadMultipleImages][${timestamp}] TOO MANY IMAGES - Selected: ${uris.length}, Available: ${availableSlots}`);
       Alert.alert(
         'Too Many Images',
         `You can only upload ${availableSlots} more image(s). Currently at ${imagesOnly.length}/10.`
@@ -1924,55 +2124,83 @@ export default function BusinessDetailsScreen() {
     try {
       setUploadingMultiple(true);
       setUploadProgress({ current: 0, total: uris.length });
+      console.log(`[handleUploadMultipleImages][${timestamp}] Starting bulk upload...`);
 
       const { results, successCount, error: uploadError } =
         await uploadMultipleBusinessImages(id, uris, (current, total) => {
+          console.log(`[handleUploadMultipleImages][${timestamp}] Progress: ${current}/${total}`);
           setUploadProgress({ current, total });
         });
 
-      if (uploadError) throw uploadError;
+      console.log(`[handleUploadMultipleImages][${timestamp}] Bulk upload complete - Success: ${successCount}/${uris.length}`);
+      console.log(`[handleUploadMultipleImages][${timestamp}] Results:`, results.map(r => ({ success: r.success, error: r.error?.substring(0, 50) })));
+
+      if (uploadError) {
+        console.error(`[handleUploadMultipleImages][${timestamp}] Upload error:`, uploadError);
+        throw uploadError;
+      }
 
       await loadData();
 
       const failCount = results.length - successCount;
       if (failCount === 0) {
+        console.log(`[handleUploadMultipleImages][${timestamp}] All uploads successful!`);
         Alert.alert(
           'Success',
           `All ${successCount} images uploaded successfully!`
         );
       } else if (successCount === 0) {
+        console.error(`[handleUploadMultipleImages][${timestamp}] ALL UPLOADS FAILED`);
         Alert.alert('Error', 'All uploads failed. Please try again.');
       } else {
+        console.log(`[handleUploadMultipleImages][${timestamp}] Partial success - ${successCount} succeeded, ${failCount} failed`);
         Alert.alert(
           'Partial Success',
           `${successCount} of ${results.length} images uploaded successfully. ${failCount} failed.`
         );
       }
     } catch (error: any) {
+      console.error(`[handleUploadMultipleImages][${timestamp}] EXCEPTION:`, error);
       Alert.alert('Error', error.message || 'Failed to upload images');
     } finally {
       setUploadingMultiple(false);
       setUploadProgress({ current: 0, total: 0 });
+      console.log(`[handleUploadMultipleImages][${timestamp}] END`);
     }
   };
 
   const handleDeleteImage = (image: PortfolioImage) => {
+    const timestamp = new Date().toISOString();
     const isVideo = image.image_type === 'video';
+    console.log(`[handleDeleteImage][${timestamp}] START - imageId: ${image.id}, type: ${image.image_type}`);
+    
     Alert.alert(
       `Delete ${isVideo ? 'Video' : 'Image'}`,
       `Are you sure you want to delete this ${isVideo ? 'video' : 'image'}?`,
       [
-        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Cancel', 
+          style: 'cancel',
+          onPress: () => {
+            console.log(`[handleDeleteImage][${timestamp}] Cancelled by user`);
+          }
+        },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
             try {
+              console.log(`[handleDeleteImage][${timestamp}] Confirming delete...`);
               const { error } = await deleteBusinessImage(image.id, id);
-              if (error) throw error;
-              await loadData(); // Reload to get updated list
+              if (error) {
+                console.error(`[handleDeleteImage][${timestamp}] Delete error:`, error);
+                throw error;
+              }
+              console.log(`[handleDeleteImage][${timestamp}] Delete successful`);
+              await loadData();
               Alert.alert('Success', `${isVideo ? 'Video' : 'Image'} deleted successfully`);
             } catch (error: any) {
+              console.error(`[handleDeleteImage][${timestamp}] EXCEPTION:`, error);
               Alert.alert('Error', error.message || `Failed to delete ${isVideo ? 'video' : 'image'}`);
             }
           },
@@ -1982,16 +2210,27 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleSetCoverImage = async (image: PortfolioImage) => {
+    const timestamp = new Date().toISOString();
+    console.log(`[handleSetCoverImage][${timestamp}] START - imageId: ${image.id}, currentType: ${image.image_type}`);
+    
     if (image.image_type === 'video') {
+      console.error(`[handleSetCoverImage][${timestamp}] ERROR: Videos cannot be set as cover`);
       Alert.alert('Error', 'Videos cannot be set as cover image.');
       return;
     }
+    
     try {
+      console.log(`[handleSetCoverImage][${timestamp}] Calling setCoverImage...`);
       const { error } = await setCoverImage(id, image.id);
-      if (error) throw error;
-      await loadData(); // Reload to get updated list with cover status
+      if (error) {
+        console.error(`[handleSetCoverImage][${timestamp}] ERROR:`, error);
+        throw error;
+      }
+      console.log(`[handleSetCoverImage][${timestamp}] SUCCESS - Cover image updated`);
+      await loadData();
       Alert.alert('Success', 'Cover image updated successfully');
     } catch (error: any) {
+      console.error(`[handleSetCoverImage][${timestamp}] EXCEPTION:`, error);
       Alert.alert('Error', error.message || 'Failed to set cover image');
     }
   };
@@ -2156,14 +2395,22 @@ export default function BusinessDetailsScreen() {
         }
       });
 
+      // Collect errors from each operation to report at the end
+      const operationErrors: string[] = [];
+
       // Update business details if changes exist
       if (hasBusinessChanges) {
         const { data, error } = await updateBusinessDetails(id, businessUpdates);
-        if (error) throw error;
-        setBusiness(data);
+        if (error) {
+          console.error('[handleSaveDetails] Business update failed:', error);
+          operationErrors.push(`Business update failed: ${error.message}`);
+        } else {
+          setBusiness(data);
+        }
       }
 
       // Handle Package Update/Creation using the extracted price fields
+      // This runs INDEPENDENTLY of business update - even if business update fails, pricing should still save
       const packageChanged =
         String(base_price) !== String(editData.initial_base_price ?? '') ||
         pricing_unit !== (editData.initial_pricing_unit ?? '');
@@ -2173,26 +2420,40 @@ export default function BusinessDetailsScreen() {
 
         console.log('[handleSaveDetails] Saving package with price:', base_price, 'unit:', pricing_unit);
 
-        if (defaultPackageId) {
-          // Update existing package - backend expects 'price' not 'base_price'
-          await updatePackage(defaultPackageId, {
-            price: parseFloat(base_price),
-            price_unit: pricing_unit
-          });
-        } else {
-          // Create new default package - backend expects 'price' not 'base_price'
-          const { data: newPkg } = await createPackage({
-            business_id: id,
-            package_name: 'Standard Package',
-            package_type: 'fixed',
-            price: parseFloat(base_price),
-            price_unit: pricing_unit,
-            included_services: [],
-            is_active: true,
-            sort_order: 0
-          });
-          console.log('[handleSaveDetails] Created new package:', newPkg);
-          if (newPkg) setDefaultPackageId(newPkg.id ?? null);
+        try {
+          if (defaultPackageId) {
+            // Update existing package - backend expects 'price' not 'base_price'
+            const { error: pkgError } = await updatePackage(defaultPackageId, {
+              price: parseFloat(base_price),
+              price_unit: pricing_unit
+            });
+            if (pkgError) {
+              console.error('[handleSaveDetails] Package update failed:', pkgError);
+              operationErrors.push(`Pricing update failed: ${pkgError.message}`);
+            }
+          } else {
+            // Create new default package - backend expects 'price' not 'base_price'
+            const { data: newPkg, error: pkgError } = await createPackage({
+              business_id: id,
+              package_name: 'Standard Package',
+              package_type: 'fixed',
+              price: parseFloat(base_price),
+              price_unit: pricing_unit,
+              included_services: [],
+              is_active: true,
+              sort_order: 0
+            });
+            if (pkgError) {
+              console.error('[handleSaveDetails] Package create failed:', pkgError);
+              operationErrors.push(`Pricing save failed: ${pkgError.message}`);
+            } else {
+              console.log('[handleSaveDetails] Created new package:', newPkg);
+              if (newPkg) setDefaultPackageId(newPkg.id ?? null);
+            }
+          }
+        } catch (pkgErr: any) {
+          console.error('[handleSaveDetails] Package operation error:', pkgErr);
+          operationErrors.push(`Pricing save failed: ${pkgErr.message}`);
         }
       }
 
@@ -2205,14 +2466,27 @@ export default function BusinessDetailsScreen() {
 
       if (categoriesChanged && currentCategoryIds.length > 0) {
         const { error: mappingError } = await updateBusinessCategoryMappings(id, currentCategoryIds);
-        if (mappingError) console.error('Error updating category mappings:', mappingError);
+        if (mappingError) {
+          console.error('Error updating category mappings:', mappingError);
+          operationErrors.push(`Category update failed: ${mappingError.message}`);
+        }
       }
 
-      Alert.alert(
-        'Success',
-        'Business details updated successfully',
-        [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
-      );
+      // Show appropriate message based on results
+      if (operationErrors.length > 0) {
+        // Some operations failed - show partial success warning
+        const hasSuccess = !hasBusinessChanges || (hasBusinessChanges && !operationErrors.some(e => e.includes('Business update failed')));
+        const title = hasSuccess ? 'Partially Saved' : 'Save Failed';
+        const message = operationErrors.join('\n');
+        Alert.alert(title, message, [{ text: 'OK' }]);
+      } else {
+        // All operations succeeded
+        Alert.alert(
+          'Success',
+          'Business details updated successfully',
+          [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
+        );
+      }
       await loadData(); // Reload to refresh the display
       await loadVerificationDocuments(); // Reload documents
     } catch (error: any) {
@@ -2283,92 +2557,6 @@ export default function BusinessDetailsScreen() {
       </View>
     </View>
   );
-
-  const renderImageItem = ({ item, index }: { item: PortfolioImage; index: number }) => {
-    const imageSource = item.image_base64 || item.image_url;
-    const isCover = item.image_type === 'cover';
-    const isVideo = item.image_type === 'video';
-    const isMenuOpen = activeMenuImageId === item.id;
-
-    return (
-      <View style={styles.imageGridItemContainer}>
-        <TouchableOpacity
-          style={styles.imageGridItem}
-          activeOpacity={0.9}
-          onPress={() => {
-            if (activeMenuImageId) {
-              setActiveMenuImageId(null);
-            } else {
-              setPreviewInitialIndex(index);
-              setCurrentPreviewIndex(index);
-              setShowImagePreview(true);
-            }
-          }}
-        >
-          {isVideo ? (
-            <View style={styles.galleryImage}>
-              <ExpoVideo
-                source={{ uri: imageSource ?? '' }}
-                style={styles.galleryImage}
-                resizeMode={ResizeMode.COVER}
-                shouldPlay={false}
-                useNativeControls={false}
-                isMuted={true}
-              />
-              <View style={styles.videoBadge}>
-                <Video size={16} color="#fff" />
-              </View>
-            </View>
-          ) : (
-            <Image source={{ uri: imageSource ?? '' }} style={styles.galleryImage} resizeMode="cover" />
-          )}
-
-          {isCover && (
-            <View style={styles.coverBadge}>
-              <Text style={styles.coverBadgeText}>Cover</Text>
-            </View>
-          )}
-
-          {/* Gradient overlay for text readability if needed, but kept clean for now */}
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.menuButton}
-          onPress={() => setActiveMenuImageId(isMenuOpen ? null : item.id)}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <View style={styles.menuButtonCircle}>
-            <MoreVertical size={18} color="#fff" />
-          </View>
-        </TouchableOpacity>
-
-        {isMenuOpen && (
-          <View style={styles.menuOptions}>
-            <TouchableOpacity
-              style={styles.menuOptionItem}
-              onPress={() => {
-                setActiveMenuImageId(null);
-                handleSetCoverImage(item);
-              }}
-            >
-              <Text style={styles.menuOptionText}>Set Cover Image</Text>
-            </TouchableOpacity>
-            <View style={styles.menuDivider} />
-            <TouchableOpacity
-              style={styles.menuOptionItem}
-              onPress={() => {
-                setActiveMenuImageId(null);
-                handleDeleteImage(item);
-              }}
-            >
-              <Text style={[styles.menuOptionText, styles.menuDeleteText]}>Delete</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-    );
-  };
-
 
   if (loading) {
     return (
@@ -2593,7 +2781,19 @@ export default function BusinessDetailsScreen() {
               ) : (
                 <FlatList
                   data={images}
-                  renderItem={renderImageItem}
+                  renderItem={({ item, index }) => (
+                    <ImageGridItem
+                      item={item}
+                      index={index}
+                      activeMenuImageId={activeMenuImageId}
+                      setActiveMenuImageId={setActiveMenuImageId}
+                      setPreviewInitialIndex={setPreviewInitialIndex}
+                      setCurrentPreviewIndex={setCurrentPreviewIndex}
+                      setShowImagePreview={setShowImagePreview}
+                      handleSetCoverImage={handleSetCoverImage}
+                      handleDeleteImage={handleDeleteImage}
+                    />
+                  )}
                   keyExtractor={(item) => item.id}
                   numColumns={2}
                   columnWrapperStyle={styles.imageRow}
@@ -4391,6 +4591,29 @@ const styles = StyleSheet.create({
   galleryImage: {
     width: '100%',
     height: '100%',
+  },
+  imageHidden: {
+    opacity: 0,
+  },
+  imageLoadingContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+  },
+  imageErrorContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
   },
   menuButton: {
     position: 'absolute',

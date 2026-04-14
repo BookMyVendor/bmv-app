@@ -81,11 +81,15 @@ export default function LeadDetailScreen() {
         router.back();
         return;
       }
-      const businessMap = new Map(businessList.map((b: any) => [b.id, b.business_name]));
+      const businessMap = new Map(businessList.map((b: any) => [b.id, b.business_name || b.name]));
+      console.log('[LeadDetail] Business map keys:', Array.from(businessMap.keys()));
+      console.log('[LeadDetail] Business list sample:', businessList.slice(0, 2));
       const { data, error } = await getLead(id);
       if (error) throw new Error(error.error);
       if (data) {
         const d = data as any;
+        console.log('[LeadDetail] Lead business_id:', d.business_id);
+        console.log('[LeadDetail] Matched business name:', businessMap.get(d.business_id));
         let eventType = d.event_type || 'Unknown Event';
         if (d.category_id) {
           const { data: categories } = await getCategories();
@@ -155,7 +159,8 @@ export default function LeadDetailScreen() {
 
   const logActivity = async (type: string, _title: string, description: string) => {
     try {
-      await createLeadCommunication(id, {
+      await createLeadCommunication({
+        lead_id: id,
         vendor_id: user?.id,
         communication_type: type,
         message: description,
@@ -216,7 +221,6 @@ export default function LeadDetailScreen() {
     try {
       const { error } = await updateLead(lead.id, { lead_status: newStatus });
       if (error) throw new Error(error.error);
-      await logActivity('status_change', 'Status changed', `Status changed from ${lead.lead_status} to ${newStatus}`);
       setLead({ ...lead, lead_status: newStatus as any });
       Alert.alert('Success', 'Status updated successfully');
     } catch (error) {
@@ -229,7 +233,8 @@ export default function LeadDetailScreen() {
     if (!newNote.trim() || !lead) return;
     try {
       setSavingNote(true);
-      const { error } = await createLeadCommunication(lead.id, {
+      const { error } = await createLeadCommunication({
+        lead_id: lead.id,
         vendor_id: user?.id,
         communication_type: 'message',
         message: `[NOTE] ${newNote.trim()}`,

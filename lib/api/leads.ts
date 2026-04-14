@@ -43,9 +43,13 @@ export async function getLeads(params: ListLeadsRequest = {}) {
   return axiosFunctionsCall<Lead[]>('leads-list', body, 'leads');
 }
 
-/** Helper to fetch a single lead by ID. */
+/** Helper to fetch a single lead by ID using leads-list. */
 export async function getLead(id: string) {
-  return axiosFunctionsCall<Lead>('lead-get', { lead_id: id }, 'lead');
+  const res = await axiosFunctionsCall<Lead[]>('leads-list', { lead_id: id }, 'leads');
+  if (res.error || !res.data || !Array.isArray(res.data) || res.data.length === 0) {
+    return { data: null, error: res.error || new Error('Lead not found') };
+  }
+  return { data: res.data[0], error: undefined };
 }
 
 /** Spec: submit-customer-lead { business_id, customer_name, ... } -> { success: true, leadId: string } */

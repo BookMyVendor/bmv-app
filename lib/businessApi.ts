@@ -32,6 +32,7 @@ export interface PortfolioImage {
   display_order: number;
   created_at: string;
   image_type?: string; // 'gallery', 'cover', 'portfolio', or 'video'
+  mime_type?: string;
 }
 
 export interface CreateOfferData {
@@ -80,7 +81,7 @@ export const validateImageSize = async (
     // which can throw generic "Internal error" on some Android devices.
     const isLocalUri = uri.startsWith('file://') || uri.startsWith('content://');
     if (isLocalUri) {
-      const info = await FileSystem.getInfoAsync(uri, { size: true });
+      const info = await FileSystem.getInfoAsync(uri);
       if (info.exists && typeof (info as any).size === 'number') {
         return ((info as any).size as number) <= maxSize;
       }
@@ -109,6 +110,21 @@ export const uploadImageToStorage = async (
 
 export const getPublicUrl = (_bucket: string, path: string): string => {
   return path ? `${getApiBaseUrl()}/files/${_bucket}/${path}` : '';
+};
+
+// Helper to rewrite MinIO URLs for local development
+// Replace the internal IP with your computer's WiFi IP or ngrok URL
+const rewriteMinioUrl = (url: string | null | undefined): string | null => {
+  if (!url) return null;
+  
+  // TODO: Replace with your computer's WiFi IP or ngrok URL
+  // Example: 'http://192.168.1.xxx:9000' or 'https://your-ngrok-url.ngrok-free.app'
+  const REPLACEMENT_BASE_URL = 'http://192.168.1.100:9000'; // <-- CHANGE THIS
+  
+  if (url.includes('49.248.202.218:9000')) {
+    return url.replace('http://49.248.202.218:9000', REPLACEMENT_BASE_URL);
+  }
+  return url;
 };
 
 export const deleteImageFromStorage = async (
@@ -183,17 +199,35 @@ export const deleteOffer = async (
 export const getBusinessImages = async (
   businessId: string
 ): Promise<{ data: PortfolioImage[] | null; error: Error | null }> => {
+  console.log(`[getBusinessImages] START - businessId: ${businessId}`);
   const { data, error } = await mediaApi.getBusinessMedia(businessId);
-  if (error) return { data: null, error: new Error(error.error) };
-  const transformedData = (data || []).map((item: any) => ({
+  if (error) {
+    console.error(`[getBusinessImages] ERROR:`, error);
+    return { data: null, error: new Error(error.error) };
+  }
+  console.log(`[getBusinessImages] Raw response count: ${data?.length || 0}`);
+  const firstItem = data?.[0];
+  console.log(`[getBusinessImages] First item sample:`, firstItem ? {
+    id: firstItem.id,
+    url: firstItem.url,
+    image_url: firstItem.image_url,
+    image_type: firstItem.image_type,
+    mime_type: firstItem.mime_type,
+  } : 'no data');
+
+  // Use the direct URL from the API response (the API returns full MinIO/S3 URLs)
+  const transformedData = (data || []).map((item) => ({
     id: item.id,
     business_id: item.business_id,
-    image_url: item.image_url ?? null,
+    image_url: rewriteMinioUrl(item.url ?? item.image_url ?? null),
     image_base64: null,
     display_order: item.display_order ?? item.sort_order ?? 0,
     created_at: item.created_at,
     image_type: item.image_type || 'gallery',
+    mime_type: item.mime_type,
   }));
+
+  console.log(`[getBusinessImages] Transformed ${transformedData.length} items`);
   return { data: transformedData, error: null };
 };
 
@@ -201,35 +235,72 @@ export const uploadBusinessImage = async (
   businessId: string,
   imageUri: string
 ): Promise<{ data: PortfolioImage | null; error: Error | null }> => {
+  const timestamp = new Date().toISOString();
+  console.log(`[uploadBusinessImage][${timestamp}] START - businessId: ${businessId}`);
+  console.log(`[uploadBusinessImage][${timestamp}] imageUri: ${imageUri?.substring(0, 50)}...`);
+  
   try {
     const { data: existingImages } = await getBusinessImages(businessId);
+    console.log(`[uploadBusinessImage][${timestamp}] Existing images count: ${existingImages?.length || 0}`);
+    
     if (existingImages && existingImages.length >= MAX_IMAGES_PER_BUSINESS) {
+      console.error(`[uploadBusinessImage][${timestamp}] ERROR: Maximum images limit reached`);
       throw new Error(`Maximum ${MAX_IMAGES_PER_BUSINESS} images allowed per business`);
     }
-    if (!validateImageUri(imageUri)) throw new Error('Invalid image URI');
+    if (!validateImageUri(imageUri)) {
+      console.error(`[uploadBusinessImage][${timestamp}] ERROR: Invalid image URI`);
+      throw new Error('Invalid image URI');
+    }
+    
     const stripped = imageUri.split('?')[0].split('#')[0];
     const extractedExt = stripped.split('.').pop()?.toLowerCase() || 'jpg';
     const safeExt = ['jpg', 'jpeg', 'png', 'webp'].includes(extractedExt) ? extractedExt : 'jpg';
-    const result = await mediaApi.uploadBusinessImage(
+    
+    // Calculate sort_order as next available position
+    const galleryImages = existingImages?.filter(img => img.image_type !== 'video') || [];
+    const sortOrder = galleryImages.length;
+    console.log(`[uploadBusinessImage][${timestamp}] Calculated sortOrder: ${sortOrder}`);
+    
+    // Use new direct multipart upload with image_type='gallery'
+    console.log(`[uploadBusinessImage][${timestamp}] Calling mediaApi.uploadGalleryImage...`);
+    const result = await mediaApi.uploadGalleryImage(
       businessId,
       imageUri,
+      sortOrder,
       `business-${businessId}-${Date.now()}.${safeExt}`
     );
-    if (result.error) throw new Error(result.error.error);
-    if (!result.data) throw new Error('Upload failed');
+    
+    if (result.error) {
+      console.error(`[uploadBusinessImage][${timestamp}] ERROR from mediaApi:`, result.error);
+      throw new Error(result.error.error);
+    }
+    if (!result.data) {
+      console.error(`[uploadBusinessImage][${timestamp}] ERROR: No data returned`);
+      throw new Error('Upload failed');
+    }
+    
+    console.log(`[uploadBusinessImage][${timestamp}] SUCCESS:`, {
+      id: result.data.id,
+      image_type: result.data.image_type,
+      display_order: result.data.display_order,
+      url: result.data.url?.substring(0, 50) + '...',
+    });
+    
     return {
       data: {
         id: result.data.id,
         business_id: businessId,
-        image_url: result.data.image_url ?? null,
+        image_url: result.data.url ?? result.data.image_url ?? null,
         image_base64: null,
-        display_order: result.data.display_order ?? 0,
+        display_order: result.data.display_order ?? sortOrder,
         created_at: result.data.created_at,
         image_type: result.data.image_type || 'gallery',
+        mime_type: result.data.mime_type,
       },
       error: null,
     };
   } catch (error) {
+    console.error(`[uploadBusinessImage][${timestamp}] EXCEPTION:`, (error as Error)?.message);
     return { data: null, error: error as Error };
   }
 };
@@ -238,35 +309,64 @@ export const uploadBusinessVideo = async (
   businessId: string,
   videoUri: string
 ): Promise<{ data: PortfolioImage | null; error: Error | null }> => {
+  const timestamp = new Date().toISOString();
+  console.log(`[uploadBusinessVideo][${timestamp}] START - businessId: ${businessId}`);
+  console.log(`[uploadBusinessVideo][${timestamp}] videoUri: ${videoUri?.substring(0, 50)}...`);
+  
   try {
     const { data: existingMedia } = await getBusinessImages(businessId);
+    console.log(`[uploadBusinessVideo][${timestamp}] Existing media count: ${existingMedia?.length || 0}`);
     
     // Check video limit
     const existingVideos = existingMedia?.filter(img => img.image_type === 'video') || [];
+    console.log(`[uploadBusinessVideo][${timestamp}] Existing videos count: ${existingVideos.length}`);
+    
     if (existingVideos.length >= MAX_VIDEOS_PER_BUSINESS) {
+      console.error(`[uploadBusinessVideo][${timestamp}] ERROR: Maximum videos limit reached`);
       throw new Error(`Maximum ${MAX_VIDEOS_PER_BUSINESS} videos allowed per business`);
     }
 
-    // Prepare form data
+    // Use new direct multipart upload with image_type='portfolio'
     const fileExt = videoUri.split('.').pop()?.toLowerCase() || 'mp4';
-    const result = await mediaApi.uploadBusinessImage(businessId, videoUri, `business-video-${businessId}-${Date.now()}.${fileExt}`);
+    console.log(`[uploadBusinessVideo][${timestamp}] Calling mediaApi.uploadPortfolioVideo...`);
     
-    if (result.error) throw new Error(result.error.error);
-    if (!result.data) throw new Error('Upload failed');
+    const result = await mediaApi.uploadPortfolioVideo(
+      businessId,
+      videoUri,
+      `business-video-${businessId}-${Date.now()}.${fileExt}`
+    );
+    
+    if (result.error) {
+      console.error(`[uploadBusinessVideo][${timestamp}] ERROR from mediaApi:`, result.error);
+      throw new Error(result.error.error);
+    }
+    if (!result.data) {
+      console.error(`[uploadBusinessVideo][${timestamp}] ERROR: No data returned`);
+      throw new Error('Upload failed');
+    }
+
+    console.log(`[uploadBusinessVideo][${timestamp}] SUCCESS:`, {
+      id: result.data.id,
+      image_type: result.data.image_type,
+      display_order: result.data.display_order,
+      url: result.data.url?.substring(0, 50) + '...',
+    });
 
     return {
       data: {
         id: result.data.id,
         business_id: businessId,
-        image_url: result.data.image_url ?? null,
+        image_url: result.data.url ?? result.data.image_url ?? null,
         image_base64: null,
         display_order: result.data.display_order ?? 0,
         created_at: result.data.created_at,
         image_type: result.data.image_type || 'video',
+        mime_type: result.data.mime_type,
       },
       error: null,
     };
   } catch (error) {
+    console.error(`[uploadBusinessVideo][${timestamp}] EXCEPTION:`, (error as Error)?.message);
     return { data: null, error: error as Error };
   }
 };
@@ -319,35 +419,56 @@ export const uploadMultipleBusinessImages = async (
   successCount: number;
   error: Error | null;
 }> => {
+  const timestamp = new Date().toISOString();
+  console.log(`[uploadMultipleBusinessImages][${timestamp}] START - businessId: ${businessId}`);
+  console.log(`[uploadMultipleBusinessImages][${timestamp}] Total images to upload: ${imageUris.length}`);
+  console.log(`[uploadMultipleBusinessImages][${timestamp}] Image URIs:`, imageUris.map(u => u.substring(0, 30) + '...'));
+  
   const results: UploadResult[] = [];
   let successCount = 0;
+  
   try {
     const { data: existingImages } = await getBusinessImages(businessId);
     const currentCount = existingImages?.length || 0;
     const availableSlots = MAX_IMAGES_PER_BUSINESS - currentCount;
+    
+    console.log(`[uploadMultipleBusinessImages][${timestamp}] Existing images: ${currentCount}, Available slots: ${availableSlots}`);
+    
     if (imageUris.length > availableSlots) {
+      console.error(`[uploadMultipleBusinessImages][${timestamp}] ERROR: Too many images. Requested: ${imageUris.length}, Available: ${availableSlots}`);
       throw new Error(
         `Can only upload ${availableSlots} more images. Current: ${currentCount}/${MAX_IMAGES_PER_BUSINESS}`
       );
     }
 
     const hasCover = existingImages?.some(img => img.image_type === 'cover');
-    let coverFound = hasCover;
+    console.log(`[uploadMultipleBusinessImages][${timestamp}] Has existing cover: ${hasCover}`);
 
     for (let i = 0; i < imageUris.length; i++) {
+      console.log(`[uploadMultipleBusinessImages][${timestamp}] Processing image ${i + 1}/${imageUris.length}...`);
       onProgress?.(i + 1, imageUris.length);
+      
       const { data, error } = await uploadBusinessImage(businessId, imageUris[i]);
+      
       if (error) {
+        console.error(`[uploadMultipleBusinessImages][${timestamp}] Image ${i + 1} FAILED:`, error.message);
         results.push({ success: false, error: error.message });
       } else if (data?.image_url) {
+        console.log(`[uploadMultipleBusinessImages][${timestamp}] Image ${i + 1} SUCCESS:`, data.id);
         results.push({ success: true, imageUrl: data.image_url });
         successCount++;
       } else {
-        results.push({ success: false, error: 'Upload failed' });
+        console.error(`[uploadMultipleBusinessImages][${timestamp}] Image ${i + 1} FAILED: No data returned`);
+        results.push({ success: false, error: 'Upload failed - no data returned' });
       }
     }
+    
+    console.log(`[uploadMultipleBusinessImages][${timestamp}] COMPLETE - Success: ${successCount}/${imageUris.length}`);
+    console.log(`[uploadMultipleBusinessImages][${timestamp}] Results summary:`, results.map(r => ({ success: r.success, error: r.error?.substring(0, 50) })));
+    
     return { results, successCount, error: null };
   } catch (error) {
+    console.error(`[uploadMultipleBusinessImages][${timestamp}] EXCEPTION:`, (error as Error)?.message);
     return { results, successCount, error: error as Error };
   }
 };
@@ -356,8 +477,17 @@ export const deleteBusinessImage = async (
   imageId: string,
   businessId: string
 ): Promise<{ error: Error | null }> => {
+  const timestamp = new Date().toISOString();
+  console.log(`[deleteBusinessImage][${timestamp}] START - imageId: ${imageId}, businessId: ${businessId}`);
+  
   const { error } = await mediaApi.deleteBusinessImage(businessId, imageId);
-  if (error) return { error: new Error(error.error) };
+  
+  if (error) {
+    console.error(`[deleteBusinessImage][${timestamp}] ERROR:`, error.error);
+    return { error: new Error(error.error) };
+  }
+  
+  console.log(`[deleteBusinessImage][${timestamp}] SUCCESS`);
   return { error: null };
 };
 
@@ -365,9 +495,23 @@ export const setCoverImage = async (
   businessId: string,
   imageId: string
 ): Promise<{ data: PortfolioImage | null; error: Error | null }> => {
+  const timestamp = new Date().toISOString();
+  console.log(`[setCoverImage][${timestamp}] START - businessId: ${businessId}, imageId: ${imageId}`);
+  
   const { data, error } = await mediaApi.setCoverImage(businessId, imageId);
-  if (error) return { data: null, error: new Error(error.error) };
+  
+  if (error) {
+    console.error(`[setCoverImage][${timestamp}] ERROR:`, error.error);
+    return { data: null, error: new Error(error.error) };
+  }
+  
   const d = data as any;
+  console.log(`[setCoverImage][${timestamp}] SUCCESS:`, {
+    id: d?.id,
+    image_type: 'cover',
+    image_url: d?.image_url?.substring(0, 50) + '...',
+  });
+  
   return {
     data: d ? {
       id: d.id,

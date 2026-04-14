@@ -46,10 +46,10 @@ export async function refreshAccessToken(): Promise<{ data?: RefreshTokenRespons
         return { error: { code: 'NO_REFRESH_TOKEN', message: 'No refresh token available' } };
       }
 
-      const url = `${getAuthFunctionsBaseUrl()}/auth-refresh-token`;
+      const url = `${getAuthFunctionsBaseUrl()}auth-refresh-token`;
       
       console.log('[REFRESH] 🔄 Refreshing access token...');
-      
+      console.log('[REFRESH] URL:', url);
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

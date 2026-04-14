@@ -9,6 +9,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useFrameworkReady } from '../hooks/useFrameworkReady';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { setupPushNotifications } from '../lib/pushNotifications';
+import { getVendorBusinesses } from '../lib/api/vendorBusinesses';
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
@@ -26,6 +27,7 @@ function RootLayoutNav() {
   const [termsAccepted, setTermsAccepted] = useState<boolean | null>(null);
   const [skipBusinessRegistration, setSkipBusinessRegistration] = useState<boolean | null>(null);
   const [isCheckingTerms, setIsCheckingTerms] = useState(false);
+  const [isVerifyingBusiness, setIsVerifyingBusiness] = useState(false);
 
   // Function to check storage values
   const checkStorage = useCallback(async () => {
@@ -87,6 +89,7 @@ function RootLayoutNav() {
     if (loading && initialLoad) return;
     if (hasSeenOnboarding === null || termsAccepted === null) return;
     if (isCheckingTerms) return;
+    if (isVerifyingBusiness) return;
 
     const inOnboarding = segments[0] === 'onboarding';
     const inAuthGroup = segments[0] === '(auth)';
@@ -179,7 +182,27 @@ function RootLayoutNav() {
 
       // EXISTING USER or PROFILE COMPLETE - check for business requirement
       if (session && isProfileComplete) {
-        const hasBusiness = profile?.has_business;
+        let hasBusiness = profile?.has_business;
+
+        // If profile says no business, verify by calling the API directly
+        // This handles the case where user reinstalls app and API cache is stale
+        if (!hasBusiness && !skipBusinessRegistration && !isVerifyingBusiness) {
+          setIsVerifyingBusiness(true);
+          try {
+            console.log('[NAV] Verifying business status via API...');
+            const { data: businesses, error } = await getVendorBusinesses();
+            if (!error && businesses && Array.isArray(businesses) && businesses.length > 0) {
+              console.log('[NAV] API verification found', businesses.length, 'business(es)');
+              hasBusiness = true;
+            } else {
+              console.log('[NAV] API verification confirmed no businesses');
+            }
+          } catch (e) {
+            console.error('[NAV] Error verifying business status:', e);
+          } finally {
+            setIsVerifyingBusiness(false);
+          }
+        }
 
         if (!hasBusiness && !skipBusinessRegistration) {
           // If profile is complete but no business exists, they must go to registration
@@ -200,7 +223,7 @@ function RootLayoutNav() {
     };
 
     hideSplashAndNavigate();
-  }, [session, profile?.id, profile?.first_name, profile?.last_name, loading, segments, hasSeenOnboarding, termsAccepted, skipBusinessRegistration, initialLoad]);
+  }, [session, profile?.id, profile?.first_name, profile?.last_name, profile?.has_business, loading, segments, hasSeenOnboarding, termsAccepted, skipBusinessRegistration, isVerifyingBusiness, initialLoad]);
 
   // Show gradient splash screen during initial load
   if (loading && initialLoad) {

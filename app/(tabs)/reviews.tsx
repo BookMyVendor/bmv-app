@@ -168,7 +168,7 @@ export default function ReviewsScreen() {
         vendor_response: item.vendor_response || null,
         responded_at: item.vendor_response_date || item.responded_at || null,
         created_at: item.created_at,
-        businesses: item.businesses || null,
+        businesses: item.business_name ? { business_name: item.business_name } : null,
         mediaItems: item.mediaItems || []
       })) as Review[];
 

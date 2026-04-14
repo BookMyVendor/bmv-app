@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TrendingUp, Calendar, Eye, X, ChevronRight, Bell, WifiOff } from 'lucide-react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { getVendorBusinesses } from '../../lib/api/vendorBusinesses';
+import { getPublicUrl } from '../../lib/businessApi';
 import { getLeads } from '../../lib/api/leads';
 import { getCategoryTree } from '../../lib/api/categories';
 import { checkNotificationPermission, requestNotificationPermission } from '../../lib/pushNotifications';
@@ -85,6 +86,62 @@ interface LeadStats {
   monthly: number;
   today: number;
   byStatus: Record<LeadStatus, number>;
+}
+
+/**
+ * Helper to convert a file path to a full URL.
+ * If the input is already a full URL (starts with http), return as-is.
+ * If it's a file path, prepend the API base URL.
+ */
+function getFullImageUrl(filePathOrUrl: string | null | undefined): string | null {
+  if (!filePathOrUrl) return null;
+
+  // If it's already a full URL, return it
+  if (filePathOrUrl.startsWith('http://') || filePathOrUrl.startsWith('https://')) {
+    return filePathOrUrl;
+  }
+
+  // It's a file path, convert to full URL using the business-images bucket
+  return getPublicUrl('business-images', filePathOrUrl);
+}
+
+/**
+ * Image component with fallback to gradient avatar on error
+ */
+function ImageWithFallback({
+  uri,
+  fallbackLetter,
+  gradientColors,
+  style,
+}: {
+  uri: string;
+  fallbackLetter: string;
+  gradientColors: readonly [string, string];
+  style: any;
+}) {
+  const [hasError, setHasError] = useState(false);
+
+  if (hasError) {
+    return (
+      <LinearGradient
+        colors={gradientColors}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={style}
+      >
+        <Text style={styles.businessAvatarLetter}>{fallbackLetter}</Text>
+      </LinearGradient>
+    );
+  }
+
+  return (
+    <Image
+      source={{ uri }}
+      style={style}
+      resizeMode="cover"
+      onError={() => setHasError(true)}
+    />
+  );
 }
 
 // Returns a 0-100 integer representing how complete the business profile is
@@ -386,6 +443,8 @@ export default function DashboardScreen() {
       console.log('[BizDebug][Dashboard] Category map size:', categoryMap.size);
 
       const businessesList = Array.isArray(data) ? data : [];
+
+      // Map API response to frontend format
       const formattedBusinesses = businessesList.map((business: any) => {
         // Try multiple possible API response structures for category
         let category = 'General';
@@ -416,6 +475,9 @@ export default function DashboardScreen() {
           category = categoryMap.get(foundCatId)?.name || 'General';
         }
 
+        // Get full URL for cover photo (API returns full MinIO/S3 URLs or file paths)
+        const coverPhotoUrl = getFullImageUrl(business.cover_photo_url || business.cover_image_file_id);
+
         // Map API field names to frontend field names
         return {
           ...business,
@@ -425,7 +487,7 @@ export default function DashboardScreen() {
           contact_person_name: business.contact_person_name || business.contact_name || '',
           contact_person_phone: business.contact_person_phone || business.phone || '',
           business_email: business.business_email || business.email || '',
-          cover_photo_url: business.cover_photo_url || business.cover_image_file_id || null,
+          cover_photo_url: coverPhotoUrl,
           business_category: category,
           city: business.city || '',
         };
@@ -826,10 +888,11 @@ export default function DashboardScreen() {
                     <View style={styles.businessRow}>
                       {/* Avatar */}
                       {business.cover_photo_url ? (
-                        <Image
-                          source={{ uri: business.cover_photo_url }}
+                        <ImageWithFallback
+                          uri={business.cover_photo_url}
+                          fallbackLetter={business.business_name.charAt(0).toUpperCase()}
+                          gradientColors={AVATAR_COLORS[index % AVATAR_COLORS.length]}
                           style={styles.businessAvatar}
-                          resizeMode="cover"
                         />
                       ) : (
                         <LinearGradient
