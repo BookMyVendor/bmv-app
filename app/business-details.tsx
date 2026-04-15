@@ -859,7 +859,6 @@ export default function BusinessDetailsScreen() {
 
   const handleBusinessTypeChange = (type: 'services' | 'rental') => {
     setBusinessType(type);
-    setEditData((prev: any) => ({ ...prev, businessType: type }));
     // Reset category selections when type changes
     setSelectedRootCategoryId(null);
     setSelectedCategoryIds([]);
@@ -1104,6 +1103,15 @@ export default function BusinessDetailsScreen() {
     setSelectedRootCategoryId(categoryId);
     setSelectedCategoryIds([]);
     setExpandedCategoryIds(new Set([categoryId]));
+    
+    // Determine business_type from selected category's business_model
+    const selectedCategory = allBusinessCategories.find(c => c.id === categoryId);
+    if (selectedCategory?.business_model === 'rental') {
+      setBusinessType('rental');
+    } else {
+      setBusinessType('services');
+    }
+    
     if (isCategoryModalOpen) {
       setIsCategoryModalOpen(false);
       setTempSelectedCategoryIds([]);
@@ -1655,6 +1663,15 @@ export default function BusinessDetailsScreen() {
     if (selectedRootCategoryId !== rootId) {
       setSelectedRootCategoryId(rootId);
       setSelectedCategoryIds([catId]);
+      
+      // Determine business_type from root category's business_model
+      const rootCategory = allBusinessCategories.find(c => c.id === rootId);
+      if (rootCategory?.business_model === 'rental') {
+        setBusinessType('rental');
+      } else {
+        setBusinessType('services');
+      }
+      
       setEditData((prev: any) => ({
         ...prev,
         selectedRootCategoryId: rootId,
@@ -1687,6 +1704,15 @@ export default function BusinessDetailsScreen() {
     if (selectedRootCategoryId !== targetRootId) {
       setSelectedRootCategoryId(targetRootId);
       setSelectedCategoryIds(newIds);
+      
+      // Determine business_type from root category's business_model
+      const rootCategory = allBusinessCategories.find(c => c.id === targetRootId);
+      if (rootCategory?.business_model === 'rental') {
+        setBusinessType('rental');
+      } else {
+        setBusinessType('services');
+      }
+      
       setEditData((prev: any) => ({
         ...prev,
         selectedRootCategoryId: targetRootId,
@@ -2351,7 +2377,7 @@ export default function BusinessDetailsScreen() {
 
       // 1. Identify purely business fields supported by the vendor-businesses-update API
       const SUPPORTED_BUSINESS_FIELDS = [
-        'business_name', 'description', 'business_type', 'address', 'locality', 'city',
+        'business_name', 'description', 'address', 'locality', 'city',
         'state', 'pincode', 'district', 'contact_person_name', 'contact_person_phone',
         'contact_person_role', 'business_email', 'website_url', 'instagram_url',
         'facebook_url', 'youtube_url', 'business_registration_number', 'gst_number',
