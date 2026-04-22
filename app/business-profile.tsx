@@ -29,7 +29,7 @@ import {
 } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { getVendorBusiness } from '../lib/api/vendorBusinesses';
-import { getPublicUrl } from '../lib/businessApi';
+import { resolveBusinessMediaUrl } from '../lib/businessApi';
 import { getCategoryTree } from '../lib/api/categories';
 import { getLeads } from '../lib/api/leads';
 import { getReviews } from '../lib/api/reviews';
@@ -52,15 +52,7 @@ interface Business {
  * If it's a file path, prepend the API base URL.
  */
 function getFullImageUrl(filePathOrUrl: string | null | undefined): string | null {
-    if (!filePathOrUrl) return null;
-
-    // If it's already a full URL, return it
-    if (filePathOrUrl.startsWith('http://') || filePathOrUrl.startsWith('https://')) {
-        return filePathOrUrl;
-    }
-
-    // It's a file path, convert to full URL using the business-images bucket
-    return getPublicUrl('business-images', filePathOrUrl);
+    return resolveBusinessMediaUrl(filePathOrUrl);
 }
 
 interface Review {

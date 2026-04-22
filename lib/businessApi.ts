@@ -112,6 +112,27 @@ export const getPublicUrl = (_bucket: string, path: string): string => {
   return path ? `${getApiBaseUrl()}/files/${_bucket}/${path}` : '';
 };
 
+export const resolveBusinessMediaUrl = (
+  filePathOrUrl: string | null | undefined,
+  bucket = 'vendor-media'
+): string | null => {
+  if (!filePathOrUrl) return null;
+  if (filePathOrUrl.startsWith('http://') || filePathOrUrl.startsWith('https://')) {
+    return filePathOrUrl;
+  }
+
+  const base = getApiBaseUrl().replace(/\/+$/, '');
+
+  // Proxy path from backend, e.g. /media/vendor-media/...
+  if (filePathOrUrl.startsWith('/')) {
+    return `${base}${filePathOrUrl}`;
+  }
+
+  // Raw storage key in bucket.
+  const key = filePathOrUrl.replace(/^\/+/, '');
+  return `${base}/storage/v1/object/public/${bucket}/${key}`;
+};
+
 // Helper to rewrite MinIO URLs for local development
 // Replace the internal IP with your computer's WiFi IP or ngrok URL
 const rewriteMinioUrl = (url: string | null | undefined): string | null => {

@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TrendingUp, Calendar, Eye, X, ChevronRight, Bell, WifiOff } from 'lucide-react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { getVendorBusinesses } from '../../lib/api/vendorBusinesses';
-import { getPublicUrl } from '../../lib/businessApi';
+import { resolveBusinessMediaUrl } from '../../lib/businessApi';
 import { getLeads } from '../../lib/api/leads';
 import { getCategoryTree } from '../../lib/api/categories';
 import { checkNotificationPermission, requestNotificationPermission } from '../../lib/pushNotifications';
@@ -94,15 +94,7 @@ interface LeadStats {
  * If it's a file path, prepend the API base URL.
  */
 function getFullImageUrl(filePathOrUrl: string | null | undefined): string | null {
-  if (!filePathOrUrl) return null;
-
-  // If it's already a full URL, return it
-  if (filePathOrUrl.startsWith('http://') || filePathOrUrl.startsWith('https://')) {
-    return filePathOrUrl;
-  }
-
-  // It's a file path, convert to full URL using the business-images bucket
-  return getPublicUrl('business-images', filePathOrUrl);
+  return resolveBusinessMediaUrl(filePathOrUrl);
 }
 
 /**

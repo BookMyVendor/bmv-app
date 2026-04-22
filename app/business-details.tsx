@@ -71,7 +71,7 @@ import {
   VerificationDocument,
   Offer,
   PortfolioImage,
-  getPublicUrl,
+  resolveBusinessMediaUrl,
 } from '../lib/businessApi';
 import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '../lib/documentUpload';
 import { validatePincode } from '../lib/pincodeValidation';
@@ -94,15 +94,7 @@ const EXPERIENCE_OPTIONS = [
  * If it's a file path, prepend the API base URL.
  */
 function getFullImageUrl(filePathOrUrl: string | null | undefined): string | null {
-  if (!filePathOrUrl) return null;
-
-  // If it's already a full URL, return it
-  if (filePathOrUrl.startsWith('http://') || filePathOrUrl.startsWith('https://')) {
-    return filePathOrUrl;
-  }
-
-  // It's a file path, convert to full URL using the business-images bucket
-  return getPublicUrl('business-images', filePathOrUrl);
+  return resolveBusinessMediaUrl(filePathOrUrl);
 }
 
 // Helper to convert numeric years to display string
