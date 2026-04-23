@@ -12,11 +12,12 @@ import {
   Pressable,
   Alert,
   Platform,
+  Image as RNImage,
 } from 'react-native';
 import { Check, ChevronRight, ChevronDown, X, Search, Plus, Star } from 'lucide-react-native';
-import { Image as RNImage } from 'react-native';
+import Dropdown from '../../components/Dropdown';
+import * as CategoriesAPI from '../../lib/api/categories';
 import { pickImage } from '../../lib/businessApi';
-import { supabaseCore } from '../../lib/supabase';
 
 interface ServicesExperienceStepProps {
   data: any;
@@ -32,10 +33,13 @@ export interface ServicesExperienceStepRef {
 interface Category {
   id: string;
   name: string;
-  icon?: string;
-  parent_category_id: string | null;
-  category_level: number;
+  slug?: string | null;
+  parent_category_id?: string | null;
+  category_type?: 'business' | 'event';
+  business_model?: 'service' | 'rental' | null;
+  category_level?: number;
   sort_order?: number;
+  children?: Category[];
 }
 
 interface CategoryNode extends Category {
@@ -184,40 +188,34 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   const fetchCategories = async (businessType?: string) => {
     try {
       setLoading(true);
-
-      let businessQuery = supabaseCore
-        .from('categories')
-        .select('id, name, icon, parent_category_id, category_level, sort_order')
-        .eq('category_type', 'business')
-        .eq('visible', true);
-
-      if (businessType === 'rental') {
-        businessQuery = businessQuery.eq('business_model', 'rental');
-      } else {
-        businessQuery = businessQuery.neq('business_model', 'rental');
+      const { data: treeData, error } = await CategoriesAPI.getCategoryTree();
+      
+      if (error) {
+        console.error('Error fetching category tree:', error);
+        return;
       }
 
-      const { data: businessCats, error: businessError } = await businessQuery
-        .order('sort_order', { ascending: true });
+      const tree = Array.isArray(treeData) ? treeData : [];
+      
+      // Flatten the tree for helper functions (searching, paths, etc.)
+      const flatList: Category[] = [];
+      const flatten = (nodes: Category[]) => {
+        nodes.forEach(node => {
+          flatList.push(node);
+          if (node.children && node.children.length > 0) {
+            flatten(node.children);
+          }
+        });
+      };
+      flatten(tree);
 
-      if (businessError) {
-        console.error('Error fetching business categories:', businessError);
-      } else {
-        setAllBusinessCategories(businessCats || []);
-      }
+      // Separate by category_type
+      const businessList = flatList.filter(c => c.category_type === 'business');
+      // Only include parent event categories (no children)
+      const eventsList = flatList.filter(c => c.category_type === 'event' && !c.parent_category_id);
 
-      const { data: eventCats, error: eventError } = await supabaseCore
-        .from('categories')
-        .select('id, name, icon, parent_category_id, category_level, sort_order')
-        .eq('category_type', 'event')
-        .eq('visible', true)
-        .order('sort_order', { ascending: true });
-
-      if (eventError) {
-        console.error('Error fetching event categories:', eventError);
-      } else {
-        setEventCategories((eventCats || []) as Category[]);
-      }
+      setAllBusinessCategories(businessList);
+      setEventCategories(eventsList);
     } catch (error) {
       console.error('Error fetching categories:', error);
     } finally {
@@ -228,18 +226,20 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   const buildCategoryTree = (categories: Category[]): CategoryNode[] => {
     const categoryMap = new Map<string, CategoryNode>();
     const rootCategories: CategoryNode[] = [];
+    const list = Array.isArray(categories) ? categories : [];
 
-    categories.forEach((cat) => {
+    list.forEach((cat) => {
       categoryMap.set(cat.id, {
         ...cat,
         children: [],
       });
     });
 
-    categories.forEach((cat) => {
+    list.forEach((cat) => {
       const node = categoryMap.get(cat.id)!;
-      if (cat.parent_category_id) {
-        const parent = categoryMap.get(cat.parent_category_id);
+      const parentId = cat.parent_category_id || (cat as any).parent_id;
+      if (parentId) {
+        const parent = categoryMap.get(parentId);
         if (parent) {
           parent.children.push(node);
         }
@@ -253,10 +253,11 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
   const getCategoryPath = (categoryId: string, categories: Category[]): string => {
     const categoryMap = new Map<string, Category>();
-    categories.forEach((cat) => categoryMap.set(cat.id, cat));
+    const list = Array.isArray(categories) ? categories : [];
+    list.forEach((cat) => categoryMap.set(cat.id, cat));
 
     const path: string[] = [];
-    let currentId: string | null = categoryId;
+    let currentId: string | null | undefined = categoryId;
 
     while (currentId) {
       const cat = categoryMap.get(currentId);
@@ -270,9 +271,10 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
 
   const getRootCategoryId = (categoryId: string, categories: Category[]): string => {
     const categoryMap = new Map<string, Category>();
-    categories.forEach((cat) => categoryMap.set(cat.id, cat));
+    const list = Array.isArray(categories) ? categories : [];
+    list.forEach((cat) => categoryMap.set(cat.id, cat));
     
-    let currentId: string | null = categoryId;
+    let currentId: string | null | undefined = categoryId;
     let rootId = categoryId;
     
     while (currentId) {
@@ -296,7 +298,8 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     };
 
     const filterNode = (node: CategoryNode): CategoryNode | null => {
-      const filteredChildren = node.children
+      const children = Array.isArray(node.children) ? node.children : [];
+      const filteredChildren = children
         .map(filterNode)
         .filter((n): n is CategoryNode => n !== null);
 
@@ -309,7 +312,8 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
       return null;
     };
 
-    nodes.forEach((node) => {
+    const list = Array.isArray(nodes) ? nodes : [];
+    list.forEach((node) => {
       const filteredNode = filterNode(node);
       if (filteredNode) {
         filtered.push(filteredNode);
@@ -336,10 +340,24 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   }, [subtreeForSelectedRoot, searchQuery]);
 
   const rootCategories = useMemo(() => {
-    return allBusinessCategories.filter(
-      (cat) => cat.category_level === 1 || cat.parent_category_id === null
-    );
-  }, [allBusinessCategories]);
+    if (allBusinessCategories.length === 0) return [];
+    
+    // Filter by category_level/parent AND business_model condition
+    const roots = allBusinessCategories.filter((cat) => {
+      const isRoot = cat.category_level === 1 || !cat.parent_category_id;
+      if (!isRoot) return false;
+
+      // Business Model Check
+      if (data.businessType === 'services') {
+        return cat.business_model === 'service';
+      } else if (data.businessType === 'rental') {
+        return cat.business_model !== 'service';
+      }
+      return true;
+    });
+
+    return roots;
+  }, [allBusinessCategories, data.businessType]);
 
   const handleRootSelection = (categoryId: string) => {
     if (selectedRootCategoryId !== categoryId) {
@@ -418,9 +436,10 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
     if (!subtreeForSelectedRoot) return [];
     const getAllIds = (nodes: CategoryNode[]): string[] => {
       let ids: string[] = [];
-      nodes.forEach((node) => {
+      const list = Array.isArray(nodes) ? nodes : [];
+      list.forEach((node) => {
         ids.push(node.id);
-        if (node.children?.length > 0) ids = [...ids, ...getAllIds(node.children)];
+        if (node.children && node.children.length > 0) ids = [...ids, ...getAllIds(node.children)];
       });
       return ids;
     };
@@ -639,7 +658,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   const handleRemoveCoverPhoto = () => setCoverPhotoUri(undefined);
 
   const handleSelectAllEvents = () => {
-    const allIds = eventCategories.filter(c => c.parent_category_id === null).map((c) => c.id);
+    const allIds = eventCategories.filter(c => !c.parent_category_id).map((c) => c.id);
     const currentEventIds = data.selectedEventIds || [];
     if (allIds.every(id => currentEventIds.includes(id))) {
       onUpdate({ selectedEventIds: [] });
@@ -655,7 +674,7 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
   };
 
   const isAllEventsSelected = () => {
-    const allIds = eventCategories.filter(c => c.parent_category_id === null).map((c) => c.id);
+    const allIds = eventCategories.filter(c => !c.parent_category_id).map((c) => c.id);
     const currentEventIds = data.selectedEventIds || [];
     return allIds.length > 0 && allIds.every(id => currentEventIds.includes(id));
   };
@@ -1070,7 +1089,6 @@ const ServicesExperienceStep = forwardRef<ServicesExperienceStepRef, ServicesExp
                 <ScrollView style={styles.modalCategoryTree}>
                   {eventCategories
                     .filter(cat => 
-                      cat.parent_category_id === null && 
                       cat.name.toLowerCase().includes(eventSearchQuery.toLowerCase())
                     )
                     .map(cat => (

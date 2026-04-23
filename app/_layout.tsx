@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -9,6 +9,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useFrameworkReady } from '../hooks/useFrameworkReady';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { setupPushNotifications } from '../lib/pushNotifications';
+import { getVendorBusinesses } from '../lib/api/vendorBusinesses';
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
@@ -26,6 +27,7 @@ function RootLayoutNav() {
   const [termsAccepted, setTermsAccepted] = useState<boolean | null>(null);
   const [skipBusinessRegistration, setSkipBusinessRegistration] = useState<boolean | null>(null);
   const [isCheckingTerms, setIsCheckingTerms] = useState(false);
+  const [isVerifyingBusiness, setIsVerifyingBusiness] = useState(false);
 
   // Function to check storage values
   const checkStorage = useCallback(async () => {
@@ -52,17 +54,16 @@ function RootLayoutNav() {
     checkStorage();
   }, [checkStorage]);
 
-  // Setup push notification listeners
+  // Setup push notification listeners (native only — Firebase/FCM not initialized on web)
   useEffect(() => {
-    if (session) {
-      console.log('[PUSH] Initializing notification listeners');
-      const unsubscribe = setupPushNotifications(router);
-      return () => {
-        if (typeof unsubscribe === 'function') {
-          unsubscribe();
-        }
-      };
-    }
+    if (!session || Platform.OS === 'web') return;
+    console.log('[PUSH] Initializing notification listeners');
+    const unsubscribe = setupPushNotifications(router);
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    };
   }, [session, router]);
 
   // Refresh terms acceptance state when session/profile changes
@@ -88,6 +89,7 @@ function RootLayoutNav() {
     if (loading && initialLoad) return;
     if (hasSeenOnboarding === null || termsAccepted === null) return;
     if (isCheckingTerms) return;
+    if (isVerifyingBusiness) return;
 
     const inOnboarding = segments[0] === 'onboarding';
     const inAuthGroup = segments[0] === '(auth)';
@@ -180,7 +182,27 @@ function RootLayoutNav() {
 
       // EXISTING USER or PROFILE COMPLETE - check for business requirement
       if (session && isProfileComplete) {
-        const hasBusiness = profile?.has_business;
+        let hasBusiness = profile?.has_business;
+
+        // If profile says no business, verify by calling the API directly
+        // This handles the case where user reinstalls app and API cache is stale
+        if (!hasBusiness && !skipBusinessRegistration && !isVerifyingBusiness) {
+          setIsVerifyingBusiness(true);
+          try {
+            console.log('[NAV] Verifying business status via API...');
+            const { data: businesses, error } = await getVendorBusinesses();
+            if (!error && businesses && Array.isArray(businesses) && businesses.length > 0) {
+              console.log('[NAV] API verification found', businesses.length, 'business(es)');
+              hasBusiness = true;
+            } else {
+              console.log('[NAV] API verification confirmed no businesses');
+            }
+          } catch (e) {
+            console.error('[NAV] Error verifying business status:', e);
+          } finally {
+            setIsVerifyingBusiness(false);
+          }
+        }
 
         if (!hasBusiness && !skipBusinessRegistration) {
           // If profile is complete but no business exists, they must go to registration
@@ -193,7 +215,7 @@ function RootLayoutNav() {
 
         // Only redirect to dashboard if they are coming from an setup/auth screen
         if (inAuthGroup || inTermsAndConditions || inOnboarding || inCompleteProfile) {
-          console.log('[NAV] User has profile and business - redirecting to dashboard');
+          console.log('[NAV] User has profile and completed setup - redirecting to dashboard');
           router.replace('/(tabs)');
         }
         return;
@@ -201,7 +223,7 @@ function RootLayoutNav() {
     };
 
     hideSplashAndNavigate();
-  }, [session, profile?.id, profile?.first_name, profile?.last_name, loading, segments, hasSeenOnboarding, termsAccepted, skipBusinessRegistration, initialLoad]);
+  }, [session, profile?.id, profile?.first_name, profile?.last_name, profile?.has_business, loading, segments, hasSeenOnboarding, termsAccepted, skipBusinessRegistration, isVerifyingBusiness, initialLoad]);
 
   // Show gradient splash screen during initial load
   if (loading && initialLoad) {

@@ -45,8 +45,9 @@ import {
   Video,
 } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
+import { updateBusinessCategoryMappings } from '../lib/api/packages';
+import { getCategories, getCategoryTree } from '../lib/api/categories';
 import { Video as ExpoVideo, ResizeMode } from 'expo-av';
-import { supabaseCore } from '../lib/supabase';
 import {
   getBusinessDetails,
   getOffers,
@@ -70,6 +71,7 @@ import {
   VerificationDocument,
   Offer,
   PortfolioImage,
+  resolveBusinessMediaUrl,
 } from '../lib/businessApi';
 import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '../lib/documentUpload';
 import { validatePincode } from '../lib/pincodeValidation';
@@ -86,6 +88,15 @@ const EXPERIENCE_OPTIONS = [
   'More than 10 years',
 ];
 
+/**
+ * Helper to convert a file path to a full URL.
+ * If the input is already a full URL (starts with http), return as-is.
+ * If it's a file path, prepend the API base URL.
+ */
+function getFullImageUrl(filePathOrUrl: string | null | undefined): string | null {
+  return resolveBusinessMediaUrl(filePathOrUrl);
+}
+
 // Helper to convert numeric years to display string
 const getExperienceDisplayValue = (years: number | null | undefined): string => {
   if (years === null || years === undefined) return '';
@@ -94,6 +105,38 @@ const getExperienceDisplayValue = (years: number | null | undefined): string => 
   if (years >= 3 && years < 5) return '3-5 years';
   if (years >= 5 && years < 10) return '5-10 years';
   return 'More than 10 years';
+};
+
+// Helper to convert experience display string to numeric years (highest in range)
+const parseExperienceToYears = (val: string | number | null | undefined): number | null => {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'number') return val;
+
+  const s = val.toLowerCase().trim();
+
+  // Direct numeric input
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+
+  // "Less than 1 year" -> 0
+  if (s.includes('less than') || s.includes('< 1')) return 0;
+
+  // "1-3 years" -> 3 (highest in range)
+  if (s.includes('1-3')) return 3;
+
+  // "3-5 years" -> 5 (highest in range)
+  if (s.includes('3-5')) return 5;
+
+  // "5-10 years" -> 10 (highest in range)
+  if (s.includes('5-10')) return 10;
+
+  // "More than 10 years" -> 15 (arbitrary high value)
+  if (s.includes('more than') || s.includes('> 10')) return 15;
+
+  // Fallback: try to extract any number
+  const match = s.match(/(\d+)/);
+  if (match) return parseInt(match[1], 10);
+
+  return null;
 };
 
 // Helper to convert display string to numeric years
@@ -180,6 +223,137 @@ const OPERATING_CITIES = [
 ];
 
 type SectionType = 'offers' | 'gallery' | 'packages' | 'edit';
+
+// Separate component for image grid item to avoid hooks violation
+interface ImageGridItemProps {
+  item: PortfolioImage;
+  index: number;
+  activeMenuImageId: string | null;
+  setActiveMenuImageId: (id: string | null) => void;
+  setPreviewInitialIndex: (index: number) => void;
+  setCurrentPreviewIndex: (index: number) => void;
+  setShowImagePreview: (show: boolean) => void;
+  handleSetCoverImage: (item: PortfolioImage) => void;
+  handleDeleteImage: (item: PortfolioImage) => void;
+}
+
+const ImageGridItem: React.FC<ImageGridItemProps> = ({
+  item,
+  index,
+  activeMenuImageId,
+  setActiveMenuImageId,
+  setPreviewInitialIndex,
+  setCurrentPreviewIndex,
+  setShowImagePreview,
+  handleSetCoverImage,
+  handleDeleteImage,
+}) => {
+  const imageSource = item.image_base64 || item.image_url;
+  const isCover = item.image_type === 'cover';
+  const isVideo = item.image_type === 'video';
+  const isMenuOpen = activeMenuImageId === item.id;
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageError, setImageError] = useState(false);
+
+  return (
+    <View style={styles.imageGridItemContainer}>
+      <TouchableOpacity
+        style={styles.imageGridItem}
+        activeOpacity={0.9}
+        onPress={() => {
+          if (activeMenuImageId) {
+            setActiveMenuImageId(null);
+          } else {
+            setPreviewInitialIndex(index);
+            setCurrentPreviewIndex(index);
+            setShowImagePreview(true);
+          }
+        }}
+      >
+        {isVideo ? (
+          <View style={styles.galleryImage}>
+            <ExpoVideo
+              source={{ uri: imageSource ?? '' }}
+              style={styles.galleryImage}
+              resizeMode={ResizeMode.COVER}
+              shouldPlay={false}
+              useNativeControls={false}
+              isMuted={true}
+            />
+            <View style={styles.videoBadge}>
+              <Video size={16} color="#fff" />
+            </View>
+          </View>
+        ) : (
+          <View style={styles.galleryImage}>
+            {!imageLoaded && !imageError && (
+              <View style={styles.imageLoadingContainer}>
+                <ActivityIndicator size="small" color="#6aa3ce" />
+              </View>
+            )}
+            {imageError ? (
+              <View style={styles.imageErrorContainer}>
+                <ImageIcon size={32} color="#ccc" />
+              </View>
+            ) : (
+              <Image
+                source={{ uri: imageSource ?? '' }}
+                style={[styles.galleryImage, !imageLoaded && styles.imageHidden]}
+                resizeMode="cover"
+                onLoad={() => setImageLoaded(true)}
+                onError={() => {
+                  setImageError(true);
+                  setImageLoaded(true);
+                  console.error(`[ImageGridItem] Failed to load image: ${imageSource}`);
+                }}
+              />
+            )}
+          </View>
+        )}
+
+        {isCover && (
+          <View style={styles.coverBadge}>
+            <Text style={styles.coverBadgeText}>Cover</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.menuButton}
+        onPress={() => setActiveMenuImageId(isMenuOpen ? null : item.id)}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      >
+        <View style={styles.menuButtonCircle}>
+          <MoreVertical size={18} color="#fff" />
+        </View>
+      </TouchableOpacity>
+
+      {isMenuOpen && (
+        <View style={styles.menuOptions}>
+          <TouchableOpacity
+            style={styles.menuOptionItem}
+            onPress={() => {
+              setActiveMenuImageId(null);
+              handleSetCoverImage(item);
+            }}
+          >
+            <Text style={styles.menuOptionText}>Set Cover Image</Text>
+          </TouchableOpacity>
+          <View style={styles.menuDivider} />
+          <TouchableOpacity
+            style={styles.menuOptionItem}
+            onPress={() => {
+              setActiveMenuImageId(null);
+              handleDeleteImage(item);
+            }}
+          >
+            <Text style={[styles.menuOptionText, styles.menuDeleteText]}>Delete</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+};
 
 export default function BusinessDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -360,13 +534,68 @@ export default function BusinessDetailsScreen() {
 
       if (businessRes.error) throw businessRes.error;
 
-      setBusiness(businessRes.data);
+      // DEBUG: Log raw API response
+      console.log('[loadData] DEBUG - Raw API response keys:', Object.keys(businessRes.data || {}));
+      console.log('[loadData] DEBUG - Raw category data:', {
+        business_category: businessRes.data?.business_category,
+        primary_category_id: businessRes.data?.primary_category_id,
+        category_ids: businessRes.data?.category_ids,
+        vendor_business_category_mappings: businessRes.data?.vendor_business_category_mappings,
+      });
+      console.log('[loadData] DEBUG - Raw contact data:', {
+        contact_person_name: businessRes.data?.contact_person_name,
+        contact_name: businessRes.data?.contact_name,
+        vendor: businessRes.data?.vendor,
+      });
+      console.log('[loadData] DEBUG - Raw location data:', {
+        operating_locations: businessRes.data?.operating_locations,
+        availability: businessRes.data?.availability,
+        cities: businessRes.data?.cities,
+      });
+
+      // Normalize business data keys with multiple fallback field names
+      const rawBusiness = businessRes.data;
+      const normalizedBusiness = rawBusiness ? {
+        ...rawBusiness,
+        business_name: rawBusiness.business_name || rawBusiness.name || '',
+        business_email: rawBusiness.business_email || rawBusiness.email || '',
+        contact_person_phone: rawBusiness.contact_person_phone || rawBusiness.phone || rawBusiness.contact_phone || '',
+        contact_person_name: rawBusiness.contact_person_name || rawBusiness.contact_name || rawBusiness.primary_contact_name ||
+          (rawBusiness.vendor?.first_name && rawBusiness.vendor?.last_name
+            ? `${rawBusiness.vendor.first_name} ${rawBusiness.vendor.last_name}`.trim()
+            : rawBusiness.vendor?.first_name || rawBusiness.vendor?.last_name || ''),
+        operating_locations: rawBusiness.operating_locations || rawBusiness.availability || rawBusiness.cities || rawBusiness.service_locations || [],
+        // Preserve category data from API
+        category_ids: rawBusiness.category_ids || [],
+      } : {};
+
+      // Get full URL for cover photo (API returns full MinIO/S3 URLs or file paths)
+      const coverPhotoUrl = getFullImageUrl(rawBusiness?.cover_photo_url || rawBusiness?.cover_image_file_id);
+      if (coverPhotoUrl && normalizedBusiness) {
+        normalizedBusiness.cover_photo_url = coverPhotoUrl;
+      }
+
+      console.log('[loadData] DEBUG - Normalized business:', {
+        business_name: normalizedBusiness.business_name,
+        contact_person_name: normalizedBusiness.contact_person_name,
+        operating_locations: normalizedBusiness.operating_locations,
+        business_category: normalizedBusiness.business_category,
+        category_ids: normalizedBusiness.category_ids,
+        years_experience: normalizedBusiness.years_experience,
+        cover_photo_url: normalizedBusiness.cover_photo_url,
+        city: normalizedBusiness.city,
+        locality: normalizedBusiness.locality,
+        state: normalizedBusiness.state,
+        address: normalizedBusiness.address,
+      });
+
+      setBusiness(normalizedBusiness);
       setIsOffline(false);
       try {
-        AsyncStorage.setItem(`business_details_${id}`, JSON.stringify(businessRes.data));
+        AsyncStorage.setItem(`business_details_${id}`, JSON.stringify(normalizedBusiness));
       } catch (e) { }
 
-      const dataToEdit = businessRes.data ? { ...businessRes.data } : {};
+      const dataToEdit = { ...normalizedBusiness };
       if (dataToEdit.contact_person_phone) {
         dataToEdit.contact_person_phone = stripCountryCode(dataToEdit.contact_person_phone);
       }
@@ -390,59 +619,30 @@ export default function BusinessDetailsScreen() {
       let allImages = imagesRes.data || [];
 
       // If business has cover_photo_url and it's not already in images, add it
-      if (businessRes.data?.cover_photo_url) {
-        const coverExists = allImages.some(
-          (img) => img.image_url === businessRes.data.cover_photo_url || img.image_type === 'cover'
-        );
-
-        if (!coverExists) {
-          // Add cover photo as the first image
-          allImages = [
-            {
-              id: `cover-${id}`, // Temporary ID for cover photo
-              business_id: id,
-              image_url: businessRes.data.cover_photo_url,
-              image_base64: null,
-              display_order: 0,
-              created_at: businessRes.data.created_at || new Date().toISOString(),
-              image_type: 'cover',
-            },
-            ...allImages,
-          ];
-        }
+      // Note: coverPhotoUrl is already fetched above, reuse it
+      if (coverPhotoUrl && !allImages.some(img => img.image_type === 'cover' || img.image_url === coverPhotoUrl)) {
+        // Add cover photo as the first image
+        allImages = [
+          {
+            id: `cover-${id}`, // Temporary ID for cover photo
+            business_id: id,
+            image_url: coverPhotoUrl,
+            image_base64: null,
+            display_order: 0,
+            created_at: businessRes.data.created_at || new Date().toISOString(),
+            image_type: 'cover',
+          },
+          ...allImages,
+        ];
       }
 
       setImages(allImages);
 
-      // Load existing category mappings (this will determine businessType)
-      const { businessIds, businessType: determinedType } = await loadCategoryMappings();
+      // Load existing category mappings
+      const { businessType: determinedType } = await loadCategoryMappings(normalizedBusiness);
 
       // Load categories using the determined businessType
-      const fetchedBusinessCategories = await loadCategories(determinedType);
-
-      // After mappings are loaded, determine root category
-      if (businessIds.length > 0) {
-        const selectedCats = fetchedBusinessCategories.filter((cat: any) =>
-          businessIds.includes(cat.id)
-        );
-
-        // Find the root parent for the first selected category
-        const firstSelectedCat = selectedCats[0];
-        if (firstSelectedCat) {
-          let current = firstSelectedCat;
-          // Traverse up to find the root
-          while (current.parent_category_id) {
-            const parent = fetchedBusinessCategories.find((c: any) => c.id === current.parent_category_id);
-            if (!parent) break;
-            current = parent;
-          }
-
-          if (current) {
-            setSelectedRootCategoryId(current.id);
-            setExpandedCategoryIds(new Set([current.id]));
-          }
-        }
-      }
+      await loadCategories(determinedType);
 
       // Load verification documents
       await loadVerificationDocuments();
@@ -452,22 +652,33 @@ export default function BusinessDetailsScreen() {
       const { getBusinessPackages } = await import('../lib/packageApi');
       const { data: packagesData } = await getBusinessPackages(id);
 
+      console.log('[loadData] Packages raw data:', JSON.stringify(packagesData, null, 2));
+
       const activePackages = (packagesData || []).filter((pkg: any) => pkg.is_active !== false);
+      console.log('[loadData] Active packages count:', activePackages.length);
       setPackages(activePackages);
 
       // If we have any packages, use the first one's price/unit for the edit form
       // If we have a 'Standard Package', prefer that
-      let defaultPkg = activePackages.find((p: any) => p.package_name === 'Standard Package');
+      let defaultPkg = activePackages.find((p: any) => p.package_name === 'Standard Package' || p.name === 'Standard Package');
       if (!defaultPkg && activePackages.length > 0) {
         defaultPkg = activePackages[0];
       }
 
+      console.log('[loadData] Default package:', JSON.stringify(defaultPkg, null, 2));
+
       if (defaultPkg) {
         setDefaultPackageId(defaultPkg.id ?? null);
+        // Backend returns 'price' (not 'base_price') and 'price_unit'
+        const pkgPrice = defaultPkg.price ?? defaultPkg.base_price ?? null;
+        const pkgUnit = defaultPkg.price_unit ?? defaultPkg.pricing_unit ?? 'per_event';
+        console.log('[loadData] Setting price fields:', { base_price: pkgPrice, pricing_unit: pkgUnit });
         setEditData((prev: any) => ({
           ...prev,
-          base_price: defaultPkg.base_price,
-          pricing_unit: defaultPkg.price_unit
+          base_price: pkgPrice,
+          pricing_unit: pkgUnit,
+          initial_base_price: pkgPrice,
+          initial_pricing_unit: pkgUnit,
         }));
       } else {
         setDefaultPackageId(null);
@@ -486,64 +697,105 @@ export default function BusinessDetailsScreen() {
     }
   };
 
-  const loadCategoryMappings = async (): Promise<{ businessIds: string[]; eventIds: string[]; businessType: 'services' | 'rental' }> => {
+  const loadCategoryMappings = async (rawBusiness?: any): Promise<{ businessIds: string[]; eventIds: string[]; businessType: 'services' | 'rental' }> => {
     try {
-      const { data: mappings, error } = await supabaseCore
-        .from('vendor_business_category_mappings')
-        .select('category_id')
-        .eq('business_id', id);
+      const biz = rawBusiness || business;
+      if (!biz) return { businessIds: [], eventIds: [], businessType: 'services' };
 
-      if (error) {
-        console.error('Error loading category mappings:', error);
+      // Get category IDs from business object
+      let allCategoryIds: string[] = [];
+
+      if (Array.isArray(biz.category_ids)) {
+        allCategoryIds = biz.category_ids.filter(Boolean);
+      } else if (Array.isArray(biz.categories)) {
+        allCategoryIds = biz.categories.map((c: any) => c.id || c.category_id || c).filter(Boolean);
+      } else if (biz.category_id) {
+        allCategoryIds = [biz.category_id].filter(Boolean);
+      }
+
+      if (allCategoryIds.length === 0) {
+        setBusinessType('services');
         return { businessIds: [], eventIds: [], businessType: 'services' };
       }
 
-      let determinedBusinessType: 'services' | 'rental' = 'services';
-
-      if (mappings && mappings.length > 0) {
-        const allCategoryIds = mappings.map((m) => m.category_id);
-
-        // Fetch categories to determine their types and business model
-        const { data: categories, error: catError } = await supabaseCore
-          .from('categories')
-          .select('id, category_type, category_level, parent_category_id, business_model')
-          .in('id', allCategoryIds);
-
-        if (catError) {
-          console.error('Error loading categories:', catError);
-          return { businessIds: [], eventIds: [], businessType: 'services' };
-        }
-
-        // Separate business and event categories
-        const businessCategoryIds: string[] = [];
-        const eventCategoryIds: string[] = [];
-
-        categories?.forEach((cat) => {
-          if (cat.category_type === 'business') {
-            businessCategoryIds.push(cat.id);
-            // Dynamic logic: if ANY category is rental, business type is rental
-            if (cat.business_model === 'rental') {
-              determinedBusinessType = 'rental';
-            }
-          } else if (cat.category_type === 'event') {
-            eventCategoryIds.push(cat.id);
-          }
-        });
-
-        setBusinessType(determinedBusinessType);
-        setEditData((prev: any) => ({ ...prev, businessType: determinedBusinessType }));
-        setSelectedCategoryIds(businessCategoryIds);
-        setSelectedEventIds(eventCategoryIds);
-
-        return {
-          businessIds: businessCategoryIds,
-          eventIds: eventCategoryIds,
-          businessType: determinedBusinessType
-        };
+      const { data: treeData, error: treeError } = await getCategoryTree();
+      if (treeError) {
+        console.error('Error loading category tree for mappings:', treeError);
       }
 
-      setBusinessType('services');
-      return { businessIds: [], eventIds: [], businessType: 'services' };
+      const tree = Array.isArray(treeData) ? treeData : [];
+      const flatList: any[] = [];
+      const flatten = (nodes: any[]) => {
+        nodes.forEach(node => {
+          flatList.push(node);
+          if (node.children && node.children.length > 0) {
+            flatten(node.children);
+          }
+        });
+      };
+      flatten(tree);
+
+      let determinedBusinessType: 'services' | 'rental' = 'services';
+      const businessCategoryIds: string[] = [];
+      const eventCategoryIds: string[] = [];
+
+      allCategoryIds.forEach((cid: string) => {
+        const cat = flatList.find((c: any) => c.id === cid);
+        if (cat?.category_type === 'business') {
+          businessCategoryIds.push(cid);
+          if ((cat as any).business_model === 'rental') determinedBusinessType = 'rental';
+        } else if (cat?.category_type === 'event') {
+          eventCategoryIds.push(cid);
+        }
+      });
+
+      setBusinessType(determinedBusinessType);
+      // Don't set editData here, let the caller handle it if needed
+      setSelectedCategoryIds(businessCategoryIds);
+      setSelectedEventIds(eventCategoryIds);
+
+      // Store initial category IDs for change detection
+      setEditData((prev: any) => ({
+        ...prev,
+        initial_category_ids: [...businessCategoryIds, ...eventCategoryIds]
+      }));
+
+      // Determine Primary Category (Root business category)
+      const businessCats = flatList.filter(c => c.category_type === 'business');
+      let rootId = null;
+
+      // Try to find a Root category among businessCategoryIds
+      const selectedRoots = businessCategoryIds.filter(id => {
+        const cat = businessCats.find(c => c.id === id);
+        return cat && !cat.parent_category_id;
+      });
+
+      if (selectedRoots.length > 0) {
+        rootId = selectedRoots[0];
+      } else if (businessCategoryIds.length > 0) {
+        // Fallback: find root for the first selected business category
+        const firstCat = businessCats.find(c => c.id === businessCategoryIds[0]);
+        if (firstCat) {
+          let current = firstCat;
+          while (current.parent_category_id) {
+            const parent = businessCats.find(c => c.id === current.parent_category_id);
+            if (!parent) break;
+            current = parent;
+          }
+          rootId = current.id;
+        }
+      }
+
+      if (rootId) {
+        setSelectedRootCategoryId(rootId);
+        setExpandedCategoryIds(new Set([rootId]));
+      }
+
+      return {
+        businessIds: businessCategoryIds,
+        eventIds: eventCategoryIds,
+        businessType: determinedBusinessType
+      };
     } catch (error) {
       console.error('Error loading category mappings:', error);
       return { businessIds: [], eventIds: [], businessType: 'services' };
@@ -551,52 +803,46 @@ export default function BusinessDetailsScreen() {
   };
 
 
-
   const loadCategories = async (type?: 'services' | 'rental') => {
     let businessCatsResult: any[] = [];
     try {
       setLoadingCategories(true);
+      const { data: treeData, error } = await getCategoryTree();
 
-      // Fetch all business categories with hierarchy info
-      let businessQuery = supabaseCore
-        .from('categories')
-        .select('id, name, icon, parent_category_id, category_level, sort_order')
-        .eq('category_type', 'business')
-        .eq('visible', true);
-
-      // If rental type is selected, filter by business_model = 'rental'
-      if (type === 'rental') {
-        businessQuery = businessQuery.eq('business_model', 'rental');
-      } else {
-        // If service type is selected, filter by business_model != 'rental'
-        businessQuery = businessQuery.neq('business_model', 'rental');
+      if (error) {
+        console.error('Error fetching category tree in edit:', error);
+        return [];
       }
 
-      const { data: businessCats, error: businessError } = await businessQuery
-        .order('sort_order', { ascending: true });
+      const tree = Array.isArray(treeData) ? treeData : [];
 
-      if (businessError) {
-        console.error('Error fetching business categories:', businessError);
-      } else {
-        businessCatsResult = businessCats || [];
-        setAllBusinessCategories(businessCatsResult);
-      }
+      // Flatten for state management compatibility
+      const flatList: any[] = [];
+      const flatten = (nodes: any[]) => {
+        nodes.forEach(node => {
+          flatList.push(node);
+          if (node.children && node.children.length > 0) {
+            flatten(node.children);
+          }
+        });
+      };
+      flatten(tree);
 
-      // Fetch all event categories with hierarchy info
-      const { data: eventCats, error: eventError } = await supabaseCore
-        .from('categories')
-        .select('id, name, icon, parent_category_id, category_level, sort_order')
-        .eq('category_type', 'event')
-        .eq('visible', true)
-        .order('sort_order', { ascending: true });
+      // Separate and filter categories
+      const businessCats = flatList.filter(c => {
+        if (c.category_type !== 'business') return false;
+        if (type === 'rental') return c.business_model === 'rental';
+        if (type === 'services') return c.business_model === 'service';
+        return true;
+      });
 
-      if (eventError) {
-        console.error('Error fetching event categories:', eventError);
-      } else {
-        setAllEventCategories(eventCats || []);
-      }
+      const eventCats = flatList.filter(c => c.category_type === 'event' && !c.parent_category_id);
+
+      businessCatsResult = businessCats;
+      setAllBusinessCategories(businessCats);
+      setAllEventCategories(eventCats);
     } catch (error) {
-      console.error('Error fetching categories:', error);
+      console.error('Error fetching categories in edit:', error);
     } finally {
       setLoadingCategories(false);
     }
@@ -605,7 +851,6 @@ export default function BusinessDetailsScreen() {
 
   const handleBusinessTypeChange = (type: 'services' | 'rental') => {
     setBusinessType(type);
-    setEditData((prev: any) => ({ ...prev, businessType: type }));
     // Reset category selections when type changes
     setSelectedRootCategoryId(null);
     setSelectedCategoryIds([]);
@@ -704,11 +949,12 @@ export default function BusinessDetailsScreen() {
 
   // Build hierarchical tree structure
   const buildCategoryTree = (categories: any[]): any[] => {
+    const safeCategories = Array.isArray(categories) ? categories : [];
     const categoryMap = new Map<string, any>();
     const rootCategories: any[] = [];
 
     // First pass: create all nodes
-    categories.forEach((cat) => {
+    safeCategories.forEach((cat) => {
       categoryMap.set(cat.id, {
         ...cat,
         children: [],
@@ -716,7 +962,7 @@ export default function BusinessDetailsScreen() {
     });
 
     // Second pass: build tree structure
-    categories.forEach((cat) => {
+    safeCategories.forEach((cat) => {
       const node = categoryMap.get(cat.id)!;
       if (cat.parent_category_id) {
         const parent = categoryMap.get(cat.parent_category_id);
@@ -746,8 +992,9 @@ export default function BusinessDetailsScreen() {
 
   // Get full path for a category
   const getCategoryPath = (categoryId: string, categories: any[]): string => {
+    const safeCategories = Array.isArray(categories) ? categories : [];
     const categoryMap = new Map<string, any>();
-    categories.forEach((cat) => categoryMap.set(cat.id, cat));
+    safeCategories.forEach((cat) => categoryMap.set(cat.id, cat));
 
     const path: string[] = [];
     let currentId: string | null = categoryId;
@@ -763,19 +1010,20 @@ export default function BusinessDetailsScreen() {
   };
 
   const getRootCategoryId = (categoryId: string, categories: any[]): string => {
+    const safeCategories = Array.isArray(categories) ? categories : [];
     const categoryMap = new Map<string, any>();
-    categories.forEach((cat) => categoryMap.set(cat.id, cat));
-    
+    safeCategories.forEach((cat) => categoryMap.set(cat.id, cat));
+
     let currentId: string | null = categoryId;
     let rootId = categoryId;
-    
+
     while (currentId) {
       const cat = categoryMap.get(currentId);
       if (!cat) break;
       rootId = cat.id;
       currentId = cat.parent_category_id;
     }
-    
+
     return rootId;
   };
 
@@ -847,6 +1095,15 @@ export default function BusinessDetailsScreen() {
     setSelectedRootCategoryId(categoryId);
     setSelectedCategoryIds([]);
     setExpandedCategoryIds(new Set([categoryId]));
+    
+    // Determine business_type from selected category's business_model
+    const selectedCategory = allBusinessCategories.find(c => c.id === categoryId);
+    if (selectedCategory?.business_model === 'rental') {
+      setBusinessType('rental');
+    } else {
+      setBusinessType('services');
+    }
+    
     if (isCategoryModalOpen) {
       setIsCategoryModalOpen(false);
       setTempSelectedCategoryIds([]);
@@ -1352,12 +1609,12 @@ export default function BusinessDetailsScreen() {
   const filteredPrimaryResults = React.useMemo(() => {
     if (!primarySearchQuery.trim()) return rootCategoriesForDropdown;
     const lowerQuery = primarySearchQuery.toLowerCase();
-    
+
     // 1. Root categories matching the query
-    const directMatches = rootCategoriesForDropdown.filter((cat: any) => 
+    const directMatches = rootCategoriesForDropdown.filter((cat: any) =>
       cat.name.toLowerCase().includes(lowerQuery)
     );
-    
+
     // 2. Root categories that have matching children
     const parentMatches: any[] = [];
     const subCategories = allBusinessCategories.filter(cat => cat.parent_category_id !== null);
@@ -1380,10 +1637,10 @@ export default function BusinessDetailsScreen() {
 
   const filteredSpecializationResults = React.useMemo(() => {
     if (!primarySearchQuery.trim()) return [];
-    
+
     // Get all sub-categories (non-roots)
     const subCategories = allBusinessCategories.filter(cat => cat.parent_category_id !== null);
-    
+
     return subCategories
       .filter(cat => cat.name.toLowerCase().includes(primarySearchQuery.toLowerCase()))
       .map(cat => ({
@@ -1398,6 +1655,15 @@ export default function BusinessDetailsScreen() {
     if (selectedRootCategoryId !== rootId) {
       setSelectedRootCategoryId(rootId);
       setSelectedCategoryIds([catId]);
+      
+      // Determine business_type from root category's business_model
+      const rootCategory = allBusinessCategories.find(c => c.id === rootId);
+      if (rootCategory?.business_model === 'rental') {
+        setBusinessType('rental');
+      } else {
+        setBusinessType('services');
+      }
+      
       setEditData((prev: any) => ({
         ...prev,
         selectedRootCategoryId: rootId,
@@ -1406,10 +1672,10 @@ export default function BusinessDetailsScreen() {
     } else {
       // Same root, toggle selection
       const isSelected = selectedCategoryIds.includes(catId);
-      const nextIds = isSelected 
+      const nextIds = isSelected
         ? selectedCategoryIds.filter(id => id !== catId)
         : [...selectedCategoryIds, catId];
-      
+
       setSelectedCategoryIds(nextIds);
       setEditData((prev: any) => ({
         ...prev,
@@ -1420,7 +1686,7 @@ export default function BusinessDetailsScreen() {
 
   const handleSelectAllFilteredSpecializations = () => {
     if (filteredSpecializationResults.length === 0) return;
-    
+
     const targetRootId = filteredSpecializationResults[0].rootCategoryId;
     if (!targetRootId) return;
 
@@ -1430,6 +1696,15 @@ export default function BusinessDetailsScreen() {
     if (selectedRootCategoryId !== targetRootId) {
       setSelectedRootCategoryId(targetRootId);
       setSelectedCategoryIds(newIds);
+      
+      // Determine business_type from root category's business_model
+      const rootCategory = allBusinessCategories.find(c => c.id === targetRootId);
+      if (rootCategory?.business_model === 'rental') {
+        setBusinessType('rental');
+      } else {
+        setBusinessType('services');
+      }
+      
       setEditData((prev: any) => ({
         ...prev,
         selectedRootCategoryId: targetRootId,
@@ -1437,10 +1712,10 @@ export default function BusinessDetailsScreen() {
       }));
     } else {
       const allSelected = newIds.every(id => selectedCategoryIds.includes(id));
-      const nextIds = allSelected 
+      const nextIds = allSelected
         ? selectedCategoryIds.filter(id => !newIds.includes(id))
         : Array.from(new Set([...selectedCategoryIds, ...newIds]));
-      
+
       setSelectedCategoryIds(nextIds);
       setEditData((prev: any) => ({
         ...prev,
@@ -1715,98 +1990,148 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleUploadImage = async () => {
+    const timestamp = new Date().toISOString();
+    console.log(`[handleUploadImage][${timestamp}] START - businessId: ${id}`);
+    
     const imagesOnly = images.filter(img => img.image_type !== 'video');
+    console.log(`[handleUploadImage][${timestamp}] Current gallery images: ${imagesOnly.length}/10`);
+    
     if (imagesOnly.length >= 10) {
+      console.log(`[handleUploadImage][${timestamp}] LIMIT REACHED - Max 10 images`);
       Alert.alert('Limit Reached', 'Maximum 10 images allowed per business');
       return;
     }
 
+    console.log(`[handleUploadImage][${timestamp}] Opening image picker...`);
     const { uri, error } = await pickImage();
+    
     if (error) {
+      console.error(`[handleUploadImage][${timestamp}] Image picker error:`, error.message);
       Alert.alert('Error', error.message);
       return;
     }
 
     if (uri) {
+      console.log(`[handleUploadImage][${timestamp}] Image selected, URI: ${uri.substring(0, 50)}...`);
       try {
         setUploading(true);
-        console.log('Starting image upload, URI:', uri);
+        console.log(`[handleUploadImage][${timestamp}] Calling uploadBusinessImage...`);
+        
         const { data, error: uploadError } = await uploadBusinessImage(id, uri);
+        
         if (uploadError) {
-          console.error('Upload error:', uploadError);
+          console.error(`[handleUploadImage][${timestamp}] Upload error:`, uploadError);
           throw uploadError;
         }
-        console.log('Upload successful, data:', data);
+        
+        console.log(`[handleUploadImage][${timestamp}] Upload successful, data:`, {
+          id: data?.id,
+          image_type: data?.image_type,
+          image_url: data?.image_url?.substring(0, 50) + '...',
+        });
 
-        // Reload data to refresh calculations
         await loadData();
-
         Alert.alert('Success', 'Image uploaded successfully');
       } catch (error: any) {
-        console.error('Upload failed:', error);
+        console.error(`[handleUploadImage][${timestamp}] Upload failed:`, error);
         Alert.alert('Error', error.message || 'Failed to upload image');
       } finally {
         setUploading(false);
+        console.log(`[handleUploadImage][${timestamp}] END`);
       }
+    } else {
+      console.log(`[handleUploadImage][${timestamp}] No image selected (cancelled)`);
     }
   };
 
   const handleUploadVideo = async () => {
+    const timestamp = new Date().toISOString();
+    console.log(`[handleUploadVideo][${timestamp}] START - businessId: ${id}`);
+    
     const videosOnly = images.filter(img => img.image_type === 'video');
+    console.log(`[handleUploadVideo][${timestamp}] Current videos: ${videosOnly.length}/5`);
+    
     if (videosOnly.length >= 5) {
+      console.log(`[handleUploadVideo][${timestamp}] LIMIT REACHED - Max 5 videos`);
       Alert.alert('Limit Reached', 'Maximum 5 videos allowed per business');
       return;
     }
 
+    console.log(`[handleUploadVideo][${timestamp}] Opening video picker...`);
     const { uri, error } = await pickVideo();
+    
     if (error) {
+      console.error(`[handleUploadVideo][${timestamp}] Video picker error:`, error.message);
       Alert.alert('Error', error.message);
       return;
     }
 
     if (uri) {
+      console.log(`[handleUploadVideo][${timestamp}] Video selected, URI: ${uri.substring(0, 50)}...`);
       try {
         setUploading(true);
-        console.log('Starting video upload, URI:', uri);
+        console.log(`[handleUploadVideo][${timestamp}] Calling uploadBusinessVideo...`);
+        
         const { data, error: uploadError } = await uploadBusinessVideo(id, uri);
+        
         if (uploadError) {
-          console.error('Upload error:', uploadError);
+          console.error(`[handleUploadVideo][${timestamp}] Upload error:`, uploadError);
           throw uploadError;
         }
-        console.log('Upload successful, data:', data);
+        
+        console.log(`[handleUploadVideo][${timestamp}] Upload successful, data:`, {
+          id: data?.id,
+          image_type: data?.image_type,
+          image_url: data?.image_url?.substring(0, 50) + '...',
+        });
 
-        // Reload data
         await loadData();
-
         Alert.alert('Success', 'Video uploaded successfully');
       } catch (error: any) {
-        console.error('Upload failed:', error);
+        console.error(`[handleUploadVideo][${timestamp}] Upload failed:`, error);
         Alert.alert('Error', error.message || 'Failed to upload video');
       } finally {
         setUploading(false);
+        console.log(`[handleUploadVideo][${timestamp}] END`);
       }
+    } else {
+      console.log(`[handleUploadVideo][${timestamp}] No video selected (cancelled)`);
     }
   };
 
   const handleUploadMultipleImages = async () => {
+    const timestamp = new Date().toISOString();
+    console.log(`[handleUploadMultipleImages][${timestamp}] START - businessId: ${id}`);
+    
     const imagesOnly = images.filter(img => img.image_type !== 'video');
     const availableSlots = 10 - imagesOnly.length;
+    console.log(`[handleUploadMultipleImages][${timestamp}] Current images: ${imagesOnly.length}/10, Available slots: ${availableSlots}`);
+    
     if (availableSlots <= 0) {
+      console.log(`[handleUploadMultipleImages][${timestamp}] LIMIT REACHED - Max 10 images`);
       Alert.alert('Limit Reached', 'Maximum 10 images allowed per business');
       return;
     }
 
+    console.log(`[handleUploadMultipleImages][${timestamp}] Opening multiple image picker...`);
     const { uris, error } = await pickMultipleImages();
+    
     if (error) {
+      console.error(`[handleUploadMultipleImages][${timestamp}] Image picker error:`, error.message);
       Alert.alert('Error', error.message);
       return;
     }
 
+    console.log(`[handleUploadMultipleImages][${timestamp}] Selected ${uris.length} images`);
+    console.log(`[handleUploadMultipleImages][${timestamp}] URIs:`, uris.map(u => u.substring(0, 30) + '...'));
+
     if (uris.length === 0) {
+      console.log(`[handleUploadMultipleImages][${timestamp}] No images selected (cancelled)`);
       return;
     }
 
     if (uris.length > availableSlots) {
+      console.error(`[handleUploadMultipleImages][${timestamp}] TOO MANY IMAGES - Selected: ${uris.length}, Available: ${availableSlots}`);
       Alert.alert(
         'Too Many Images',
         `You can only upload ${availableSlots} more image(s). Currently at ${imagesOnly.length}/10.`
@@ -1817,55 +2142,83 @@ export default function BusinessDetailsScreen() {
     try {
       setUploadingMultiple(true);
       setUploadProgress({ current: 0, total: uris.length });
+      console.log(`[handleUploadMultipleImages][${timestamp}] Starting bulk upload...`);
 
       const { results, successCount, error: uploadError } =
         await uploadMultipleBusinessImages(id, uris, (current, total) => {
+          console.log(`[handleUploadMultipleImages][${timestamp}] Progress: ${current}/${total}`);
           setUploadProgress({ current, total });
         });
 
-      if (uploadError) throw uploadError;
+      console.log(`[handleUploadMultipleImages][${timestamp}] Bulk upload complete - Success: ${successCount}/${uris.length}`);
+      console.log(`[handleUploadMultipleImages][${timestamp}] Results:`, results.map(r => ({ success: r.success, error: r.error?.substring(0, 50) })));
+
+      if (uploadError) {
+        console.error(`[handleUploadMultipleImages][${timestamp}] Upload error:`, uploadError);
+        throw uploadError;
+      }
 
       await loadData();
 
       const failCount = results.length - successCount;
       if (failCount === 0) {
+        console.log(`[handleUploadMultipleImages][${timestamp}] All uploads successful!`);
         Alert.alert(
           'Success',
           `All ${successCount} images uploaded successfully!`
         );
       } else if (successCount === 0) {
+        console.error(`[handleUploadMultipleImages][${timestamp}] ALL UPLOADS FAILED`);
         Alert.alert('Error', 'All uploads failed. Please try again.');
       } else {
+        console.log(`[handleUploadMultipleImages][${timestamp}] Partial success - ${successCount} succeeded, ${failCount} failed`);
         Alert.alert(
           'Partial Success',
           `${successCount} of ${results.length} images uploaded successfully. ${failCount} failed.`
         );
       }
     } catch (error: any) {
+      console.error(`[handleUploadMultipleImages][${timestamp}] EXCEPTION:`, error);
       Alert.alert('Error', error.message || 'Failed to upload images');
     } finally {
       setUploadingMultiple(false);
       setUploadProgress({ current: 0, total: 0 });
+      console.log(`[handleUploadMultipleImages][${timestamp}] END`);
     }
   };
 
   const handleDeleteImage = (image: PortfolioImage) => {
+    const timestamp = new Date().toISOString();
     const isVideo = image.image_type === 'video';
+    console.log(`[handleDeleteImage][${timestamp}] START - imageId: ${image.id}, type: ${image.image_type}`);
+    
     Alert.alert(
       `Delete ${isVideo ? 'Video' : 'Image'}`,
       `Are you sure you want to delete this ${isVideo ? 'video' : 'image'}?`,
       [
-        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Cancel', 
+          style: 'cancel',
+          onPress: () => {
+            console.log(`[handleDeleteImage][${timestamp}] Cancelled by user`);
+          }
+        },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
             try {
-              const { error } = await deleteBusinessImage(image.id);
-              if (error) throw error;
-              await loadData(); // Reload to get updated list
+              console.log(`[handleDeleteImage][${timestamp}] Confirming delete...`);
+              const { error } = await deleteBusinessImage(image.id, id);
+              if (error) {
+                console.error(`[handleDeleteImage][${timestamp}] Delete error:`, error);
+                throw error;
+              }
+              console.log(`[handleDeleteImage][${timestamp}] Delete successful`);
+              await loadData();
               Alert.alert('Success', `${isVideo ? 'Video' : 'Image'} deleted successfully`);
             } catch (error: any) {
+              console.error(`[handleDeleteImage][${timestamp}] EXCEPTION:`, error);
               Alert.alert('Error', error.message || `Failed to delete ${isVideo ? 'video' : 'image'}`);
             }
           },
@@ -1875,16 +2228,27 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleSetCoverImage = async (image: PortfolioImage) => {
+    const timestamp = new Date().toISOString();
+    console.log(`[handleSetCoverImage][${timestamp}] START - imageId: ${image.id}, currentType: ${image.image_type}`);
+    
     if (image.image_type === 'video') {
+      console.error(`[handleSetCoverImage][${timestamp}] ERROR: Videos cannot be set as cover`);
       Alert.alert('Error', 'Videos cannot be set as cover image.');
       return;
     }
+    
     try {
+      console.log(`[handleSetCoverImage][${timestamp}] Calling setCoverImage...`);
       const { error } = await setCoverImage(id, image.id);
-      if (error) throw error;
-      await loadData(); // Reload to get updated list with cover status
+      if (error) {
+        console.error(`[handleSetCoverImage][${timestamp}] ERROR:`, error);
+        throw error;
+      }
+      console.log(`[handleSetCoverImage][${timestamp}] SUCCESS - Cover image updated`);
+      await loadData();
       Alert.alert('Success', 'Cover image updated successfully');
     } catch (error: any) {
+      console.error(`[handleSetCoverImage][${timestamp}] EXCEPTION:`, error);
       Alert.alert('Error', error.message || 'Failed to set cover image');
     }
   };
@@ -2003,100 +2367,144 @@ export default function BusinessDetailsScreen() {
     try {
       setSavingDetails(true);
 
-      // Extract base_price and pricing_unit from editData as they are not columns on vendor_businesses
-      const { base_price, pricing_unit, businessType: editDataBusinessType, ...businessUpdateData } = editData;
+      // 1. Identify purely business fields supported by the vendor-businesses-update API
+      const SUPPORTED_BUSINESS_FIELDS = [
+        'business_name', 'description', 'address', 'locality', 'city',
+        'state', 'pincode', 'district', 'contact_person_name', 'contact_person_phone',
+        'contact_person_role', 'business_email', 'website_url', 'instagram_url',
+        'facebook_url', 'youtube_url', 'business_registration_number', 'gst_number',
+        'years_experience', 'availability', 'cover_photo_url',
+        'operating_locations'
+      ];
 
-      // Update business details
-      const finalUpdateData = {
-        ...businessUpdateData
-      };
-      if (finalUpdateData.contact_person_phone) {
-        finalUpdateData.contact_person_phone = stripCountryCode(finalUpdateData.contact_person_phone);
+      // 2. Identify package-level fields
+      const { base_price, pricing_unit } = editData;
+
+      // 3. Build the business update payload: only include changed and supported fields
+      const businessUpdates: Record<string, any> = {};
+      let hasBusinessChanges = false;
+
+      SUPPORTED_BUSINESS_FIELDS.forEach(field => {
+        if (field in editData) {
+          let newValue = editData[field];
+          let oldValue = business[field];
+
+          // Normalize phone for comparison
+          if (field === 'contact_person_phone') {
+            newValue = stripCountryCode(newValue || '');
+            oldValue = stripCountryCode(oldValue || '');
+          }
+
+          // Convert years_experience display string to numeric
+          if (field === 'years_experience') {
+            newValue = parseExperienceToYears(newValue);
+            oldValue = typeof oldValue === 'string' ? parseExperienceToYears(oldValue) : oldValue;
+          }
+
+          // Deep comparison for arrays (operating_locations)
+          const isChanged = Array.isArray(newValue)
+            ? JSON.stringify(newValue) !== JSON.stringify(oldValue)
+            : newValue !== oldValue;
+
+          if (isChanged) {
+            businessUpdates[field] = newValue === '' ? null : newValue;
+            hasBusinessChanges = true;
+          }
+        }
+      });
+
+      // Collect errors from each operation to report at the end
+      const operationErrors: string[] = [];
+
+      // Update business details if changes exist
+      if (hasBusinessChanges) {
+        const { data, error } = await updateBusinessDetails(id, businessUpdates);
+        if (error) {
+          console.error('[handleSaveDetails] Business update failed:', error);
+          operationErrors.push(`Business update failed: ${error.message}`);
+        } else {
+          setBusiness(data);
+        }
       }
-      const { data, error } = await updateBusinessDetails(id, finalUpdateData);
-      if (error) throw error;
-      setBusiness(data);
-
-
 
       // Handle Package Update/Creation using the extracted price fields
-      if (base_price && pricing_unit) {
+      // This runs INDEPENDENTLY of business update - even if business update fails, pricing should still save
+      const packageChanged =
+        String(base_price) !== String(editData.initial_base_price ?? '') ||
+        pricing_unit !== (editData.initial_pricing_unit ?? '');
+
+      if (packageChanged && base_price && pricing_unit) {
         const { createPackage, updatePackage } = await import('../lib/packageApi');
 
-        if (defaultPackageId) {
-          // Update existing package
-          await updatePackage(defaultPackageId, {
-            base_price: parseFloat(base_price),
-            price_unit: pricing_unit
-          });
-        } else {
-          // Create new default package
-          const { data: newPkg } = await createPackage({
-            business_id: id,
-            package_name: 'Standard Package',
-            package_type: 'fixed',
-            base_price: parseFloat(base_price),
-            price_unit: pricing_unit,
-            included_services: [],
-            is_active: true,
-            sort_order: 0
-          });
-          if (newPkg) setDefaultPackageId(newPkg.id ?? null);
+        console.log('[handleSaveDetails] Saving package with price:', base_price, 'unit:', pricing_unit);
+
+        try {
+          if (defaultPackageId) {
+            // Update existing package - backend expects 'price' not 'base_price'
+            const { error: pkgError } = await updatePackage(defaultPackageId, {
+              price: parseFloat(base_price),
+              price_unit: pricing_unit
+            });
+            if (pkgError) {
+              console.error('[handleSaveDetails] Package update failed:', pkgError);
+              operationErrors.push(`Pricing update failed: ${pkgError.message}`);
+            }
+          } else {
+            // Create new default package - backend expects 'price' not 'base_price'
+            const { data: newPkg, error: pkgError } = await createPackage({
+              business_id: id,
+              package_name: 'Standard Package',
+              package_type: 'fixed',
+              price: parseFloat(base_price),
+              price_unit: pricing_unit,
+              included_services: [],
+              is_active: true,
+              sort_order: 0
+            });
+            if (pkgError) {
+              console.error('[handleSaveDetails] Package create failed:', pkgError);
+              operationErrors.push(`Pricing save failed: ${pkgError.message}`);
+            } else {
+              console.log('[handleSaveDetails] Created new package:', newPkg);
+              if (newPkg) setDefaultPackageId(newPkg.id ?? null);
+            }
+          }
+        } catch (pkgErr: any) {
+          console.error('[handleSaveDetails] Package operation error:', pkgErr);
+          operationErrors.push(`Pricing save failed: ${pkgErr.message}`);
         }
       }
 
-      // Update category mappings
-      // First, delete existing mappings
-      const { error: deleteError } = await supabaseCore
-        .from('vendor_business_category_mappings')
-        .delete()
-        .eq('business_id', id);
+      // 5. Update category mappings if they have changed
+      // Comparison logic for categories
+      const currentCategoryIds = [...selectedCategoryIds, ...selectedEventIds].sort();
+      const initialCategoryIds = [...(editData.initial_category_ids || [])].sort();
 
-      if (deleteError) {
-        console.error('Error deleting category mappings:', deleteError);
-      }
+      const categoriesChanged = JSON.stringify(currentCategoryIds) !== JSON.stringify(initialCategoryIds);
 
-      // Then, insert new mappings
-      const categoryMappings: any[] = [];
-
-      // Add selected business category IDs
-      if (selectedCategoryIds.length > 0) {
-        selectedCategoryIds.forEach((categoryId) => {
-          categoryMappings.push({
-            vendor_id: user?.id,
-            business_id: id,
-            category_id: categoryId,
-          });
-        });
-      }
-
-      // Add event category IDs
-      if (selectedEventIds.length > 0) {
-        selectedEventIds.forEach((categoryId) => {
-          categoryMappings.push({
-            vendor_id: user?.id,
-            business_id: id,
-            category_id: categoryId,
-          });
-        });
-      }
-
-      // Insert all category mappings in a single batch
-      if (categoryMappings.length > 0) {
-        const { error: mappingError } = await supabaseCore
-          .from('vendor_business_category_mappings')
-          .insert(categoryMappings);
-
+      if (categoriesChanged && currentCategoryIds.length > 0) {
+        const { error: mappingError } = await updateBusinessCategoryMappings(id, currentCategoryIds);
         if (mappingError) {
-          console.error('Error inserting category mappings:', mappingError);
+          console.error('Error updating category mappings:', mappingError);
+          operationErrors.push(`Category update failed: ${mappingError.message}`);
         }
       }
 
-      Alert.alert(
-        'Success',
-        'Business details updated successfully',
-        [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
-      );
+      // Show appropriate message based on results
+      if (operationErrors.length > 0) {
+        // Some operations failed - show partial success warning
+        const hasSuccess = !hasBusinessChanges || (hasBusinessChanges && !operationErrors.some(e => e.includes('Business update failed')));
+        const title = hasSuccess ? 'Partially Saved' : 'Save Failed';
+        const message = operationErrors.join('\n');
+        Alert.alert(title, message, [{ text: 'OK' }]);
+      } else {
+        // All operations succeeded
+        Alert.alert(
+          'Success',
+          'Business details updated successfully',
+          [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
+        );
+      }
       await loadData(); // Reload to refresh the display
       await loadVerificationDocuments(); // Reload documents
     } catch (error: any) {
@@ -2167,92 +2575,6 @@ export default function BusinessDetailsScreen() {
       </View>
     </View>
   );
-
-  const renderImageItem = ({ item, index }: { item: PortfolioImage; index: number }) => {
-    const imageSource = item.image_base64 || item.image_url;
-    const isCover = item.image_type === 'cover';
-    const isVideo = item.image_type === 'video';
-    const isMenuOpen = activeMenuImageId === item.id;
-
-    return (
-      <View style={styles.imageGridItemContainer}>
-        <TouchableOpacity
-          style={styles.imageGridItem}
-          activeOpacity={0.9}
-          onPress={() => {
-            if (activeMenuImageId) {
-              setActiveMenuImageId(null);
-            } else {
-              setPreviewInitialIndex(index);
-              setCurrentPreviewIndex(index);
-              setShowImagePreview(true);
-            }
-          }}
-        >
-          {isVideo ? (
-            <View style={styles.galleryImage}>
-              <ExpoVideo 
-                source={{ uri: imageSource ?? '' }}
-                style={styles.galleryImage}
-                resizeMode={ResizeMode.COVER}
-                shouldPlay={false}
-                useNativeControls={false}
-                isMuted={true}
-              />
-              <View style={styles.videoBadge}>
-                <Video size={16} color="#fff" />
-              </View>
-            </View>
-          ) : (
-            <Image source={{ uri: imageSource ?? '' }} style={styles.galleryImage} resizeMode="cover" />
-          )}
-          
-          {isCover && (
-            <View style={styles.coverBadge}>
-              <Text style={styles.coverBadgeText}>Cover</Text>
-            </View>
-          )}
-
-          {/* Gradient overlay for text readability if needed, but kept clean for now */}
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.menuButton}
-          onPress={() => setActiveMenuImageId(isMenuOpen ? null : item.id)}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <View style={styles.menuButtonCircle}>
-            <MoreVertical size={18} color="#fff" />
-          </View>
-        </TouchableOpacity>
-
-        {isMenuOpen && (
-          <View style={styles.menuOptions}>
-            <TouchableOpacity
-              style={styles.menuOptionItem}
-              onPress={() => {
-                setActiveMenuImageId(null);
-                handleSetCoverImage(item);
-              }}
-            >
-              <Text style={styles.menuOptionText}>Set Cover Image</Text>
-            </TouchableOpacity>
-            <View style={styles.menuDivider} />
-            <TouchableOpacity
-              style={styles.menuOptionItem}
-              onPress={() => {
-                setActiveMenuImageId(null);
-                handleDeleteImage(item);
-              }}
-            >
-              <Text style={[styles.menuOptionText, styles.menuDeleteText]}>Delete</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-    );
-  };
-
 
   if (loading) {
     return (
@@ -2477,7 +2799,19 @@ export default function BusinessDetailsScreen() {
               ) : (
                 <FlatList
                   data={images}
-                  renderItem={renderImageItem}
+                  renderItem={({ item, index }) => (
+                    <ImageGridItem
+                      item={item}
+                      index={index}
+                      activeMenuImageId={activeMenuImageId}
+                      setActiveMenuImageId={setActiveMenuImageId}
+                      setPreviewInitialIndex={setPreviewInitialIndex}
+                      setCurrentPreviewIndex={setCurrentPreviewIndex}
+                      setShowImagePreview={setShowImagePreview}
+                      handleSetCoverImage={handleSetCoverImage}
+                      handleDeleteImage={handleDeleteImage}
+                    />
+                  )}
                   keyExtractor={(item) => item.id}
                   numColumns={2}
                   columnWrapperStyle={styles.imageRow}
@@ -2710,7 +3044,7 @@ export default function BusinessDetailsScreen() {
                     activeOpacity={0.7}
                   >
                     <Text style={[styles.dropdownText, !selectedRootCategoryId && styles.placeholder]}>
-                      {selectedRootCategoryId 
+                      {selectedRootCategoryId
                         ? rootCategoriesForDropdown.find((c: any) => c.id === selectedRootCategoryId)?.name || 'Select a category'
                         : 'Select a category'}
                     </Text>
@@ -3851,8 +4185,8 @@ export default function BusinessDetailsScreen() {
               <X size={32} color="#fff" />
             </TouchableOpacity>
 
-            <PagerView 
-              style={styles.previewPager} 
+            <PagerView
+              style={styles.previewPager}
               initialPage={previewInitialIndex}
               pageMargin={10}
               onPageSelected={(e) => setCurrentPreviewIndex(e.nativeEvent.position)}
@@ -3860,7 +4194,7 @@ export default function BusinessDetailsScreen() {
               {images.map((item, index) => {
                 const imageSource = item.image_base64 || item.image_url;
                 const isVideo = item.image_type === 'video';
-                
+
                 return (
                   <View key={`${item.id}-${index}`} style={styles.previewSlide}>
                     {isVideo ? (
@@ -3883,7 +4217,7 @@ export default function BusinessDetailsScreen() {
                 );
               })}
             </PagerView>
-            
+
             <View style={styles.previewFooter}>
               <Text style={styles.previewCounterText}>
                 {currentPreviewIndex + 1} / {images.length}
@@ -4275,6 +4609,29 @@ const styles = StyleSheet.create({
   galleryImage: {
     width: '100%',
     height: '100%',
+  },
+  imageHidden: {
+    opacity: 0,
+  },
+  imageLoadingContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+  },
+  imageErrorContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
   },
   menuButton: {
     position: 'absolute',
