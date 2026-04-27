@@ -2,13 +2,13 @@ import React, { createContext, useContext, useEffect, useState, useRef } from 'r
 import { AppState, AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { 
-  sendOTP, 
-  verifyOTP as verifyOTPApi, 
-  refreshAccessToken, 
-  devSignIn as devSignInApi, 
+import {
+  sendOTP,
+  verifyOTP as verifyOTPApi,
+  refreshAccessToken,
+  devSignIn as devSignInApi,
   signOut as signOutApi,
-  type VerifyOTPResponse 
+  type VerifyOTPResponse
 } from '../lib/authApi';
 import {
   getAccessToken,
@@ -139,7 +139,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         has_business: Boolean(data.vendor_businesses && data.vendor_businesses.length > 0),
       };
       setProfile(profileData);
-      AsyncStorage.setItem(`cached_profile_${userId}`, JSON.stringify(profileData)).catch(() => {});
+      AsyncStorage.setItem(`cached_profile_${userId}`, JSON.stringify(profileData)).catch(() => { });
     } else {
       // No error but no data (e.g. vendor-me-get 404 while backend is incomplete) — keep cache / existing profile
       console.warn('[AUTH] getMe returned no data; keeping cached profile if any');
@@ -188,6 +188,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         const accessToken = await getAccessToken();
+        console.log("TOKEN:", accessToken);
         const refreshTokenVal = await getRefreshToken();
         const expiryTime = await getTokenExpiry();
         if (!accessToken) {
@@ -235,7 +236,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setSession(sess);
           setUser(appUser);
           userRef.current = appUser;
-          await AsyncStorage.setItem('current_user_id', appUser.id).catch(() => {});
+          await AsyncStorage.setItem('current_user_id', appUser.id).catch(() => { });
           await fetchProfile(appUser.id);
         }
       } catch (e) {
@@ -255,7 +256,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!user?.id) return;
     const pollInterval = setInterval(() => {
-      if (userRef.current?.id) fetchProfile(userRef.current.id).catch(() => {});
+      if (userRef.current?.id) fetchProfile(userRef.current.id).catch(() => { });
     }, 30 * 60 * 1000);
     return () => clearInterval(pollInterval);
   }, [user?.id]);
@@ -272,7 +273,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user?.id]);
 
   useEffect(() => {
-    if (user?.id) registerPushTokenFromDevice().catch(() => {});
+    if (user?.id) registerPushTokenFromDevice().catch(() => { });
   }, [user?.id]);
 
   const signInWithOTP = async (phone: string) => {
@@ -293,7 +294,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!result.data) return { error: new Error('No data received') };
       const { user: userData, newUser, accessToken: newAccessToken, refreshToken: newRefreshToken, expiresIn } = result.data;
       const appUser = userFromVerify(userData);
-      
+
       const sessionData: AppSession = {
         access_token: newAccessToken,
         refresh_token: newRefreshToken,
@@ -308,11 +309,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       userRef.current = appUser;
       setIsNewUser(newUser);
 
-      await AsyncStorage.setItem('current_user_id', appUser.id).catch(() => {});
-      
+      await AsyncStorage.setItem('current_user_id', appUser.id).catch(() => { });
+
       // We must fetch the latest profile before finishing, so _layout avoids flicker/redirect issues
       await fetchProfile(appUser.id);
-      
+
       return { error: null };
     } finally {
       setLoading(false);
@@ -336,7 +337,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSession(session);
     setUser(appUser);
     userRef.current = appUser;
-    await AsyncStorage.setItem('current_user_id', appUser.id).catch(() => {});
+    await AsyncStorage.setItem('current_user_id', appUser.id).catch(() => { });
     await fetchProfile(appUser.id);
     return { error: null };
   };
@@ -383,13 +384,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.warn('[AUTH] Sign out error:', e);
       await clearTokens();
     }
-    
+
     if (userRef.current?.id) {
-      await AsyncStorage.removeItem(`cached_profile_${userRef.current.id}`).catch(() => {});
+      await AsyncStorage.removeItem(`cached_profile_${userRef.current.id}`).catch(() => { });
     }
     await Promise.all([
-      AsyncStorage.removeItem('current_user_id').catch(() => {}),
-      AsyncStorage.removeItem('skip_business_registration').catch(() => {}),
+      AsyncStorage.removeItem('current_user_id').catch(() => { }),
+      AsyncStorage.removeItem('skip_business_registration').catch(() => { }),
     ]);
     clearSession();
     setTimeout(() => { isLoggingOutRef.current = false; }, 1000);

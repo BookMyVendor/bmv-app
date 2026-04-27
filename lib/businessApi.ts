@@ -116,36 +116,103 @@ export const resolveBusinessMediaUrl = (
   filePathOrUrl: string | null | undefined,
   bucket = 'vendor-media'
 ): string | null => {
-  if (!filePathOrUrl) return null;
-  if (filePathOrUrl.startsWith('http://') || filePathOrUrl.startsWith('https://')) {
+  if (!filePathOrUrl) {
+    console.log('[MediaResolve] Empty input, returning null');
+    return null;
+  }
+  
+  const base = getApiBaseUrl().replace(/\/+$/, '');
+  let resolvedUrl: string | null = null;
+
+  // 1. If it's a full URL, check if it's an internal storage URL that needs proxying
+  if (
+    filePathOrUrl.startsWith('http://') || 
+    filePathOrUrl.startsWith('https://')
+  ) {
+    try {
+      const url = new URL(filePathOrUrl);
+      const apiHost = new URL(base).host;
+      
+      // If it's already on our API host, return it as-is
+      if (url.host === apiHost) {
+        console.log('[MediaResolve] Already on API host:', filePathOrUrl);
+        return filePathOrUrl;
+      }
+
+      const path = url.pathname;
+      
+      // Pattern 1: /bucket-name/path/to/file
+      if (path.includes(`/${bucket}/`)) {
+        const pathAfterBucket = path.split(`/${bucket}/`)[1];
+        resolvedUrl = `${base}/media/${bucket}/${pathAfterBucket}`;
+        console.log('[MediaResolve] Rewrote storage URL to proxy:', { original: filePathOrUrl, resolved: resolvedUrl });
+        return resolvedUrl;
+      }
+      
+      // Pattern 2: /media/bucket-name/path/to/file
+      if (path.includes('/media/')) {
+        resolvedUrl = `${base}${path}`;
+        console.log('[MediaResolve] Prepended base to media proxy path:', { original: filePathOrUrl, resolved: resolvedUrl });
+        return resolvedUrl;
+      }
+
+      // Pattern 3: Any other path that looks like a storage path (e.g. minio host)
+      if (url.host.includes('minio')) {
+        const parts = path.split('/').filter(Boolean);
+        if (parts.length >= 2) {
+           const urlBucket = parts[0];
+           const urlKey = parts.slice(1).join('/');
+           resolvedUrl = `${base}/media/${urlBucket}/${urlKey}`;
+           console.log('[MediaResolve] Detected MinIO host, converted to proxy:', { original: filePathOrUrl, resolved: resolvedUrl });
+           return resolvedUrl;
+        }
+      }
+    } catch (e) {
+      console.warn('[MediaResolve] URL parsing failed for:', filePathOrUrl);
+    }
+
+    console.log('[MediaResolve] Returning external URL as-is:', filePathOrUrl);
     return filePathOrUrl;
   }
 
-  const base = getApiBaseUrl().replace(/\/+$/, '');
-
-  // Proxy path from backend, e.g. /media/vendor-media/...
-  if (filePathOrUrl.startsWith('/')) {
-    return `${base}${filePathOrUrl}`;
+  // 2. Data URLs are returned as-is
+  if (filePathOrUrl.startsWith('data:')) {
+    console.log('[MediaResolve] Returning Data URL as-is');
+    return filePathOrUrl;
   }
 
-  // Raw storage key in bucket.
+  // 3. If it's a proxy path (starts with /media, /storage, /files, etc)
+  if (filePathOrUrl.startsWith('/')) {
+    resolvedUrl = `${base}${filePathOrUrl}`;
+    console.log('[MediaResolve] Handled absolute path:', { original: filePathOrUrl, resolved: resolvedUrl });
+    return resolvedUrl;
+  }
+
+  // 4. If it's a relative path containing a slash, assume it's a sub-path
+  if (filePathOrUrl.includes('/')) {
+    resolvedUrl = `${base}/${filePathOrUrl.replace(/^\/+/, '')}`;
+    console.log('[MediaResolve] Handled relative path:', { original: filePathOrUrl, resolved: resolvedUrl });
+    return resolvedUrl;
+  }
+
+  // 5. Fallback for raw keys/UUIDs:
   const key = filePathOrUrl.replace(/^\/+/, '');
-  return `${base}/storage/v1/object/public/${bucket}/${key}`;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  
+  if (!uuidRegex.test(key) && key.includes('.')) {
+     resolvedUrl = `${base}/${key}`;
+     console.log('[MediaResolve] Handled raw key (filename):', { original: filePathOrUrl, resolved: resolvedUrl });
+     return resolvedUrl;
+  }
+
+  resolvedUrl = `${base}/media/${bucket}/${key}`;
+  console.log('[MediaResolve] Fallback resolved to proxy:', { original: filePathOrUrl, resolved: resolvedUrl });
+  return resolvedUrl;
 };
 
 // Helper to rewrite MinIO URLs for local development
-// Replace the internal IP with your computer's WiFi IP or ngrok URL
-const rewriteMinioUrl = (url: string | null | undefined): string | null => {
-  if (!url) return null;
-  
-  // TODO: Replace with your computer's WiFi IP or ngrok URL
-  // Example: 'http://192.168.1.xxx:9000' or 'https://your-ngrok-url.ngrok-free.app'
-  const REPLACEMENT_BASE_URL = 'http://192.168.1.100:9000'; // <-- CHANGE THIS
-  
-  if (url.includes('49.248.202.218:9000')) {
-    return url.replace('http://49.248.202.218:9000', REPLACEMENT_BASE_URL);
-  }
-  return url;
+const rewriteMinioUrl = (url: string | null | undefined, bucket = 'vendor-media'): string | null => {
+  return resolveBusinessMediaUrl(url, bucket);
 };
 
 export const deleteImageFromStorage = async (
@@ -240,7 +307,7 @@ export const getBusinessImages = async (
   const transformedData = (data || []).map((item) => ({
     id: item.id,
     business_id: item.business_id,
-    image_url: rewriteMinioUrl(item.url ?? item.image_url ?? null),
+    image_url: resolveBusinessMediaUrl(item.url ?? item.image_url ?? null, 'vendor-media'),
     image_base64: null,
     display_order: item.display_order ?? item.sort_order ?? 0,
     created_at: item.created_at,
@@ -404,7 +471,7 @@ export const pickVideo = async (): Promise<{
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      mediaTypes: ['videos'],
       quality: 0.8,
     });
 
@@ -689,19 +756,44 @@ export const uploadVerificationDocument = async (
   file: DocumentFile,
   _userId?: string
 ): Promise<{ data: VerificationDocument | null; error: Error | null }> => {
+  const timestamp = new Date().toISOString();
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] START`);
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] businessId: ${businessId}`);
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] documentTypeCode: ${documentTypeCode}`);
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] file:`, { name: file.name, uri: file.uri?.substring(0, 50), size: file.size });
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] userId: ${_userId}`);
+  
   const mimeType = file.type || getMimeType(file.uri, file.name);
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] mimeType: ${mimeType}`);
+  
   if (!mimeType || !validateFileType(mimeType)) {
+    console.error(`[businessApi.uploadVerificationDocument][${timestamp}] Invalid file type`);
     return { data: null, error: new Error('Invalid file type. Only images (jpg, png) and PDFs are allowed.') };
   }
   if (file.size && file.size > 10 * 1024 * 1024) {
+    console.error(`[businessApi.uploadVerificationDocument][${timestamp}] File size exceeds 10MB`);
     return { data: null, error: new Error('File size exceeds 10MB limit') };
   }
-  const formData = new FormData();
-  formData.append('documentTypeCode', documentTypeCode);
-  formData.append('file', { uri: file.uri, name: file.name || 'document', type: mimeType } as any);
-  const result = await verificationApi.uploadVerificationDocument(businessId, formData);
-  if (result.error) return { data: null, error: new Error(result.error.error) };
-  return { data: (result.data as any) ?? null, error: null };
+  
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] Calling verificationApi.uploadVerificationDocument...`);
+  const result = await verificationApi.uploadVerificationDocument(
+    businessId, 
+    documentTypeCode, 
+    file.uri, 
+    file.name
+  );
+  
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] Result:`, {
+    error: result.error ? result.error.error : null,
+    dataId: result.data?.id
+  });
+  
+  if (result.error) {
+    console.error(`[businessApi.uploadVerificationDocument][${timestamp}] API error:`, result.error);
+    return { data: null, error: new Error(result.error.error) };
+  }
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] SUCCESS`);
+  return { data: result.data || null, error: null };
 };
 
 /**
@@ -737,6 +829,12 @@ export const getBusinessVerificationDocuments = async (
   const { data, error } = await verificationApi.getVerificationDocuments(businessId);
   if (error) return { data: null, error: new Error(error.error) };
   return { data: (data || []) as VerificationDocument[], error: null };
+};
+
+export const getDocumentTypes = async (): Promise<{ data: any[] | null; error: Error | null }> => {
+  const { data, error } = await verificationApi.getDocumentTypes();
+  if (error) return { data: null, error: new Error(error.error) };
+  return { data: data || [], error: null };
 };
 
 export const deleteVerificationDocument = async (

@@ -277,7 +277,10 @@ export async function updateVendorBusiness(bodyOrId: UpdateBusinessRequest | str
   console.log('[updateVendorBusiness] Response - Error:', result.error ? JSON.stringify(result.error, null, 2) : null);
   console.log('[updateVendorBusiness] Response - Data:', result.data ? JSON.stringify(result.data, null, 2) : null);
 
-  if (result.error) return { data: null, error: result.error };
+  if (result.error) {
+    console.error('[updateVendorBusiness] Full error object:', result.error);
+    return { data: null, error: result.error };
+  }
   const resData = result.data;
   if (!resData) return { data: null as any, error: null };
   const business = resData.vendor_business || resData.business || resData.data || resData.item || resData;

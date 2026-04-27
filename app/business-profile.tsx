@@ -52,7 +52,7 @@ interface Business {
  * If it's a file path, prepend the API base URL.
  */
 function getFullImageUrl(filePathOrUrl: string | null | undefined): string | null {
-    return resolveBusinessMediaUrl(filePathOrUrl);
+  return resolveBusinessMediaUrl(filePathOrUrl, 'vendor-media');
 }
 
 interface Review {
@@ -71,13 +71,20 @@ function ImageWithFallback({
     style,
     fallbackLetter,
 }: {
-    uri: string;
+    uri: string | null | undefined;
     style: any;
     fallbackLetter: string;
 }) {
     const [hasError, setHasError] = useState(false);
+    const [imageLoaded, setImageLoaded] = useState(false);
 
-    if (hasError) {
+    // Reset error state when URI changes
+    useEffect(() => {
+        setHasError(false);
+        setImageLoaded(false);
+    }, [uri]);
+
+    if (!uri || hasError) {
         return (
             <LinearGradient
                 colors={['#6c7ef7', '#8b9dff']}
@@ -91,12 +98,23 @@ function ImageWithFallback({
     }
 
     return (
-        <Image
-            source={{ uri }}
-            style={style}
-            resizeMode="cover"
-            onError={() => setHasError(true)}
-        />
+        <View style={style}>
+            {!imageLoaded && !hasError && (
+                <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#f0f0f0' }]}>
+                    <ActivityIndicator size="small" color="#6aa3ce" />
+                </View>
+            )}
+            <Image
+                source={{ uri }}
+                style={[StyleSheet.absoluteFillObject, !imageLoaded && { opacity: 0 }]}
+                resizeMode="cover"
+                onLoad={() => setImageLoaded(true)}
+                onError={() => {
+                    setHasError(true);
+                    setImageLoaded(true);
+                }}
+            />
+        </View>
     );
 }
 
@@ -225,34 +243,49 @@ export default function BusinessProfileScreen() {
 
                 // Build category lookup map from category tree
                 const categoryMap = new Map<string, { name: string; category_type?: string; parent_category_id?: string | null }>();
-                if (categoryTreeRes.data) {
+                if (categoryTreeRes.data && Array.isArray(categoryTreeRes.data)) {
                     const flattenCategories = (cats: any[]) => {
                         cats.forEach(cat => {
-                            categoryMap.set(cat.id, {
-                                name: cat.name,
-                                category_type: cat.category_type,
-                                parent_category_id: cat.parent_category_id,
-                            });
-                            if (cat.children) flattenCategories(cat.children);
+                            if (cat && cat.id) {
+                                categoryMap.set(cat.id, {
+                                    name: cat.name || 'Unknown',
+                                    category_type: cat.category_type,
+                                    parent_category_id: cat.parent_category_id,
+                                });
+                                if (cat.children && Array.isArray(cat.children)) {
+                                    flattenCategories(cat.children);
+                                }
+                            }
                         });
                     };
                     flattenCategories(categoryTreeRes.data);
                 }
 
                 // Try multiple possible API response structures for category
+                // Priority: primary_category_id > root business category > other fallbacks
                 let category = 'General';
-                if (raw.business_category) {
+                
+                // First check if primary_category_id is available
+                if (raw.primary_category_id) {
+                    const primaryCat = categoryMap.get(raw.primary_category_id);
+                    if (primaryCat?.name) {
+                        category = primaryCat.name;
+                    }
+                }
+                
+                // If not found, check business_category field
+                if (category === 'General' && raw.business_category) {
                     category = raw.business_category;
-                } else if (raw.primary_category_name) {
+                } else if (category === 'General' && raw.primary_category_name) {
                     category = raw.primary_category_name;
-                } else if (raw.category_name) {
+                } else if (category === 'General' && raw.category_name) {
                     category = raw.category_name;
-                } else if (raw.vendor_business_category_mappings?.length > 0) {
+                } else if (category === 'General' && raw.vendor_business_category_mappings?.length > 0) {
                     const mapping = raw.vendor_business_category_mappings[0];
                     category = mapping.categories?.name || mapping.category_name || 'General';
-                } else if (raw.categories?.name) {
+                } else if (category === 'General' && raw.categories?.name) {
                     category = raw.categories.name;
-                } else if (raw.category_ids?.length > 0) {
+                } else if (category === 'General' && raw.category_ids?.length > 0) {
                     // Find PRIMARY business category (category_type='business' with no parent)
                     const primaryCatId = raw.category_ids.find((id: string) => {
                         const cat = categoryMap.get(id);
