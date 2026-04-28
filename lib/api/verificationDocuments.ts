@@ -38,14 +38,14 @@ export async function getVerificationDocuments(businessId: string) {
  */
 export async function uploadVerificationDocument(
   businessId: string,
-  documentTypeCode: string,
+  documentTypeId: string,
   uri: string,
   fileName?: string
 ): Promise<{ data?: VerificationDocument; error?: { success: false; error: string } }> {
   const timestamp = new Date().toISOString();
   console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] START`);
   console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] businessId: ${businessId}`);
-  console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] documentTypeCode: ${documentTypeCode}`);
+  console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] documentTypeId: ${documentTypeId}`);
   console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] uri: ${uri.substring(0, 60)}...`);
   console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] fileName: ${fileName}`);
   
@@ -64,9 +64,8 @@ export async function uploadVerificationDocument(
     console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] Appending business_id: ${businessId}`);
     formData.append('business_id', businessId);
 
-    const upperTypeCode = documentTypeCode.toUpperCase();
-    console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] Appending document_type_code: ${upperTypeCode}`);
-    formData.append('document_type_code', upperTypeCode);
+    console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] Appending document_type_id: ${documentTypeId}`);
+    formData.append('document_type_id', documentTypeId);
 
     console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] Appending file:`, { name: safeName, type: mimeType });
     if (Platform.OS === 'web') {
@@ -82,16 +81,28 @@ export async function uploadVerificationDocument(
     }
 
     console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] FormData created, calling axiosMultipartUpload...`);
+    console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] REQUEST:`);
+    console.log(`  Function: vendor-businesses-verification-documents-create`);
+    console.log(`  business_id: ${businessId}`);
+    console.log(`  document_type_id: ${documentTypeId}`);
+    console.log(`  file: ${safeName} (${mimeType})`);
+    
     const result = await axiosMultipartUpload<VerificationDocument>(
       'vendor-businesses-verification-documents-create',
       formData,
       'verification_document'
     );
 
-    console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] axiosMultipartUpload result:`, {
-      error: result.error ? result.error.error : null,
-      dataId: result.data?.id
-    });
+    console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] RESPONSE:`);
+    if (result.error) {
+      console.log(`  Status: ERROR`);
+      console.log(`  Error: ${result.error.error}`);
+      console.log(`  Code: ${result.error.code}`);
+    } else {
+      console.log(`  Status: SUCCESS`);
+      console.log(`  Document ID: ${result.data?.id}`);
+      console.log(`  File URL: ${result.data?.file_url}`);
+    }
 
     if (result.error) {
       console.error(`[verificationDocuments.uploadVerificationDocument][${timestamp}] FAILED:`, result.error);

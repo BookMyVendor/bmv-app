@@ -752,14 +752,14 @@ export interface UploadDocumentData {
  */
 export const uploadVerificationDocument = async (
   businessId: string,
-  documentTypeCode: string,
+  documentTypeId: string,
   file: DocumentFile,
   _userId?: string
 ): Promise<{ data: VerificationDocument | null; error: Error | null }> => {
   const timestamp = new Date().toISOString();
   console.log(`[businessApi.uploadVerificationDocument][${timestamp}] START`);
   console.log(`[businessApi.uploadVerificationDocument][${timestamp}] businessId: ${businessId}`);
-  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] documentTypeCode: ${documentTypeCode}`);
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] documentTypeId: ${documentTypeId}`);
   console.log(`[businessApi.uploadVerificationDocument][${timestamp}] file:`, { name: file.name, uri: file.uri?.substring(0, 50), size: file.size });
   console.log(`[businessApi.uploadVerificationDocument][${timestamp}] userId: ${_userId}`);
   
@@ -778,7 +778,7 @@ export const uploadVerificationDocument = async (
   console.log(`[businessApi.uploadVerificationDocument][${timestamp}] Calling verificationApi.uploadVerificationDocument...`);
   const result = await verificationApi.uploadVerificationDocument(
     businessId, 
-    documentTypeCode, 
+    documentTypeId, 
     file.uri, 
     file.name
   );

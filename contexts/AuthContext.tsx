@@ -390,7 +390,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     await Promise.all([
       AsyncStorage.removeItem('current_user_id').catch(() => { }),
-      AsyncStorage.removeItem('skip_business_registration').catch(() => { }),
     ]);
     clearSession();
     setTimeout(() => { isLoggingOutRef.current = false; }, 1000);

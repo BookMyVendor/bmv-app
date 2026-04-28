@@ -397,7 +397,8 @@ export default function BusinessDetailsScreen() {
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [verificationDocuments, setVerificationDocuments] = useState<VerificationDocument[]>([]);
   const [loadingDocuments, setLoadingDocuments] = useState(false);
-  const [uploadingDocument, setUploadingDocument] = useState<string | null>(null); // document type code
+  const [uploadingDocument, setUploadingDocument] = useState<string | null>(null); // document type id
+  const [documentTypes, setDocumentTypes] = useState<any[]>([]);
   const [packages, setPackages] = useState<any[]>([]);
   const [loadingPackages, setLoadingPackages] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -561,7 +562,7 @@ export default function BusinessDetailsScreen() {
       });
 
       // Normalize business data keys with multiple fallback field names
-      const rawBusiness = businessRes.data;
+      const rawBusiness = businessRes.data?.vendor_business || businessRes.data;
       const normalizedBusiness = rawBusiness ? {
         ...rawBusiness,
         business_name: rawBusiness.business_name || rawBusiness.name || '',
@@ -677,8 +678,8 @@ export default function BusinessDetailsScreen() {
       if (defaultPkg) {
         setDefaultPackageId(defaultPkg.id ?? null);
         // Backend returns 'price' (not 'base_price') and 'price_unit'
-        const pkgPrice = defaultPkg.price ?? defaultPkg.base_price ?? null;
-        const pkgUnit = defaultPkg.price_unit ?? defaultPkg.pricing_unit ?? 'per_event';
+        const pkgPrice = (defaultPkg as any).price ?? defaultPkg.base_price ?? null;
+        const pkgUnit = (defaultPkg as any).price_unit ?? (defaultPkg as any).pricing_unit ?? 'per_event';
         console.log('[loadData] Setting price fields:', { base_price: pkgPrice, pricing_unit: pkgUnit });
         setEditData((prev: any) => ({
           ...prev,
@@ -1809,7 +1810,9 @@ export default function BusinessDetailsScreen() {
 
       const rawDocs = docsRes.data || [];
       const docTypesData = typesRes.data || [];
-      const docTypes = Array.isArray(docTypesData) ? docTypesData : (docTypesData.rows || []);
+      const docTypes = Array.isArray(docTypesData) ? docTypesData : ((docTypesData as any).rows || []);
+      
+      setDocumentTypes(docTypes);
       
       // Create a map of document type ID to code/name
       const typeMap: Record<string, { code: string; name: string }> = {};
@@ -1846,10 +1849,21 @@ export default function BusinessDetailsScreen() {
           }
         }
 
+        // 4. Fill missing mime type from file URL
+        if (!enriched.mime_type && enriched.file_url) {
+          enriched.mime_type = inferMimeType(enriched.file_url);
+        }
+
         return enriched;
       }));
 
-      // Removed RAW logs to prevent console spam
+      console.log('[Verification] Enriched documents:', enrichedDocs.map(d => ({
+        id: d.id,
+        document_type_code: d.document_type_code,
+        file_url: d.file_url,
+        mime_type: d.mime_type,
+        file_name: d.file_name
+      })));
       setVerificationDocuments(enrichedDocs);
     } catch (error) {
       console.error('[Verification] Exception loading verification documents:', error);
@@ -1858,10 +1872,27 @@ export default function BusinessDetailsScreen() {
     }
   };
 
+  // Helper to get document type ID from code
+  const getDocumentTypeId = (code: string): string => {
+    const docType = documentTypes.find((t: any) => t.type_code === code);
+    return docType?.id || code;
+  };
+
+// Helper to infer mime type from file URL
+  const inferMimeType = (fileUrl: string): string | null => {
+    if (!fileUrl) return null;
+    const lowerUrl = fileUrl.toLowerCase();
+    if (lowerUrl.endsWith('.jpg') || lowerUrl.endsWith('.jpeg')) return 'image/jpeg';
+    if (lowerUrl.endsWith('.png')) return 'image/png';
+    if (lowerUrl.endsWith('.pdf')) return 'application/pdf';
+    return null;
+  };
+
   // Handle document upload
   const handleUploadDocument = async (documentTypeCode: string) => {
+    const documentTypeId = getDocumentTypeId(documentTypeCode);
     const timestamp = new Date().toISOString();
-    console.log(`[handleUploadDocument][${timestamp}] START - documentTypeCode: ${documentTypeCode}, businessId: ${id}`);
+    console.log(`[handleUploadDocument][${timestamp}] START - documentTypeCode: ${documentTypeCode}, documentTypeId: ${documentTypeId}, businessId: ${id}`);
     console.log(`[handleUploadDocument][${timestamp}] userId: ${user?.id}`);
     
     try {
@@ -1883,10 +1914,10 @@ export default function BusinessDetailsScreen() {
 
       // Upload each file
       for (const file of files) {
-        console.log(`[handleUploadDocument][${timestamp}] Uploading file: ${file.name}, type: ${documentTypeCode}`);
+        console.log(`[handleUploadDocument][${timestamp}] Uploading file: ${file.name}, type: ${documentTypeId}`);
         const { data, error: uploadError } = await uploadVerificationDocument(
           id,
-          documentTypeCode,
+          documentTypeId,
           file,
           user?.id
         );
@@ -1901,7 +1932,8 @@ export default function BusinessDetailsScreen() {
           console.error(`[handleUploadDocument][${timestamp}] Upload error for ${file.name}:`, uploadError);
           Alert.alert('Upload Error', `Failed to upload ${file.name || 'document'}: ${uploadError.message}`);
         } else {
-          console.log(`[handleUploadDocument][${timestamp}] Upload successful for ${file.name}, reloading documents`);
+          console.log(`[handleUploadDocument][${timestamp}] Upload successful for ${file.name}, data:`, data);
+          console.log(`[handleUploadDocument][${timestamp}] file_url: ${data?.file_url}, mime_type: ${data?.mime_type}, document_type_code: ${data?.document_type_code}`);
           await loadVerificationDocuments();
         }
       }
@@ -1947,7 +1979,7 @@ export default function BusinessDetailsScreen() {
   const documentsByType = React.useMemo(() => {
     const grouped: Record<string, VerificationDocument[]> = {};
     verificationDocuments.forEach((doc) => {
-      const type = doc.document_type_code || 'MISSING_TYPE';
+      const type = (doc.document_type_code || 'MISSING_TYPE').toLowerCase();
       if (!grouped[type]) {
         grouped[type] = [];
       }
@@ -2248,10 +2280,10 @@ export default function BusinessDetailsScreen() {
 
       // Check if cover image exists, if not set first uploaded image as cover
       const hasCover = images.some(img => img.image_type === 'cover');
-      const firstSuccessResult = results.find(r => r.success && r.data?.id);
-      if (!hasCover && firstSuccessResult?.data?.id) {
+      const firstSuccessResult = results.find(r => r.success && (r as any).data?.id);
+      if (!hasCover && firstSuccessResult && (firstSuccessResult as any).data?.id) {
         console.log(`[handleUploadMultipleImages][${timestamp}] No cover exists, setting first uploaded image as cover`);
-        const { error: setCoverError } = await setCoverImage(id, firstSuccessResult.data.id);
+        const { error: setCoverError } = await setCoverImage(id, (firstSuccessResult as any).data.id);
         if (setCoverError) {
           console.error(`[handleUploadMultipleImages][${timestamp}] Failed to set cover:`, setCoverError);
         } else {
@@ -2547,7 +2579,7 @@ export default function BusinessDetailsScreen() {
             const { error: pkgError } = await updatePackage(defaultPackageId, {
               price: parseFloat(base_price),
               price_unit: pricing_unit
-            });
+            } as any);
             if (pkgError) {
               console.error('[handleSaveDetails] Package update failed:', pkgError);
               operationErrors.push(`Pricing update failed: ${pkgError.message}`);
@@ -2563,7 +2595,7 @@ export default function BusinessDetailsScreen() {
               included_services: [],
               is_active: true,
               sort_order: 0
-            });
+            } as any);
             if (pkgError) {
               console.error('[handleSaveDetails] Package create failed:', pkgError);
               operationErrors.push(`Pricing save failed: ${pkgError.message}`);
@@ -2589,7 +2621,7 @@ export default function BusinessDetailsScreen() {
         const { error: mappingError } = await updateBusinessCategoryMappings(id, currentCategoryIds);
         if (mappingError) {
           console.error('Error updating category mappings:', mappingError);
-          operationErrors.push(`Category update failed: ${mappingError.message}`);
+          operationErrors.push(`Category update failed: ${(mappingError as any).message}`);
         }
       }
 
@@ -3946,7 +3978,7 @@ export default function BusinessDetailsScreen() {
                     />
                     <TouchableOpacity
                       style={[styles.inlineUploadButton, uploadingDocument === 'pan' && styles.addDocumentButtonDisabled]}
-                      onPress={() => handleUploadDocument('PAN')}
+                      onPress={() => handleUploadDocument('pan')}
                       disabled={uploadingDocument === 'pan'}
                     >
                       {uploadingDocument === 'pan' ? (
@@ -4014,7 +4046,7 @@ export default function BusinessDetailsScreen() {
                     />
                     <TouchableOpacity
                       style={[styles.inlineUploadButton, uploadingDocument === 'gst' && styles.addDocumentButtonDisabled]}
-                      onPress={() => handleUploadDocument('GST')}
+                      onPress={() => handleUploadDocument('gst')}
                       disabled={uploadingDocument === 'gst'}
                     >
                       {uploadingDocument === 'gst' ? (

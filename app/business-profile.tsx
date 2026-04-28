@@ -168,7 +168,6 @@ export default function BusinessProfileScreen() {
 
     // Stats
     const [totalLeads, setTotalLeads] = useState(0);
-    const [wonLeads, setWonLeads] = useState(0);
     const [avgReview, setAvgReview] = useState<number | null>(null);
     const [reviewCount, setReviewCount] = useState(0);
 
@@ -330,7 +329,6 @@ export default function BusinessProfileScreen() {
                     const parsedLeads = JSON.parse(cachedLeads);
                     setLeads(parsedLeads);
                     setTotalLeads(parsedLeads.length);
-                    setWonLeads(parsedLeads.filter((l: Lead) => l.lead_status === 'converted').length);
                 }
             } catch (_) {}
 
@@ -340,7 +338,6 @@ export default function BusinessProfileScreen() {
             setLeads(leadsData);
             try { AsyncStorage.setItem(`business_leads_${id}`, JSON.stringify(leadsData)); } catch (_) {}
             setTotalLeads(leadsData.length);
-            setWonLeads(leadsData.filter((l) => l.lead_status === 'converted').length);
         } catch (err) {
             console.error('Error fetching leads:', err);
         } finally {
@@ -371,7 +368,7 @@ export default function BusinessProfileScreen() {
             const raw = Array.isArray(data) ? (data as any[]) : [];
             const mapped: Review[] = raw.map((r: any) => ({
                 id: r.id,
-                customer_name: r.customers?.name ?? 'Anonymous',
+                customer_name: r.customer_first_name ?? 'Anonymous',
                 rating: r.rating ?? 0,
                 comment: r.review_text || r.review_title || null,
                 created_at: r.created_at,
@@ -428,6 +425,12 @@ export default function BusinessProfileScreen() {
             setSearchQuery('');
         });
     };
+
+    // ── Derived stats ─────────────────────────────────────────────────────────
+
+    const wonLeads = useMemo(() => {
+        return leads.filter((l) => l.lead_status === 'converted').length;
+    }, [leads]);
 
     // ── Filtered data ─────────────────────────────────────────────────────────
 

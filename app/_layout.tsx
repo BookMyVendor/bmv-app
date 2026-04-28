@@ -19,7 +19,7 @@ const TERMS_ACCEPTANCE_KEY = 'vendor_terms_accepted';
 const SKIP_BUSINESS_REGISTRATION_KEY = 'skip_business_registration';
 
 function RootLayoutNav() {
-  const { session, profile, loading, isNewUser } = useAuth();
+  const { session, profile, loading, isNewUser, refreshProfile } = useAuth();
   const segments = useSegments();
   const router = useRouter();
   const [initialLoad, setInitialLoad] = useState(true);
@@ -165,16 +165,15 @@ function RootLayoutNav() {
           setIsVerifyingBusiness(true);
           try {
             console.log('[NAV] Verifying business status via API (one-time check)...');
-            const { data: businesses, error } = await getVendorBusinesses();
-            if (!error && businesses && Array.isArray(businesses) && businesses.length > 0) {
-              console.log('[NAV] API verification found', businesses.length, 'business(es)');
-              hasBusiness = true;
-            }
+            // Use refreshProfile instead of getVendorBusinesses to update the context profile
+            await refreshProfile();
           } catch (e) {
             console.error('[NAV] Error verifying business status:', e);
           } finally {
             setIsVerifyingBusiness(false);
           }
+          // Return early to wait for the re-render triggered by refreshProfile/setIsVerifyingBusiness
+          return;
         }
 
         if (!hasBusiness && !skipBusinessRegistration) {
@@ -195,7 +194,7 @@ function RootLayoutNav() {
     };
 
     hideSplashAndNavigate();
-  }, [session, profile?.id, profile?.first_name, profile?.last_name, profile?.has_business, loading, segments, hasSeenOnboarding, termsAccepted, skipBusinessRegistration, isVerifyingBusiness, initialLoad]);
+  }, [session, profile?.id, profile?.first_name, profile?.last_name, profile?.has_business, loading, segments, hasSeenOnboarding, termsAccepted, skipBusinessRegistration, isVerifyingBusiness, initialLoad, refreshProfile]);
 
   // Show gradient splash screen during initial load
   if (loading && initialLoad) {

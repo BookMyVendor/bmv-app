@@ -191,74 +191,117 @@ function calculateProfileCompletion(business: Business): number {
     }
     // Fallback: check event_category_ids
     if (business.event_category_ids && business.event_category_ids.length > 0) return true;
+    // Fallback: check if any category_ids are event categories (from API category data)
+    const eventCategoryIds = (business as any).event_category_ids;
+    if (eventCategoryIds && eventCategoryIds.length > 0) return true;
+    // Final fallback: if business has any categories, consider event categories satisfied
+    // (API doesn't distinguish event vs business categories in category_ids)
+    if (business.category_ids && business.category_ids.length > 0) return true;
     return false;
   };
 
-  // Helper to check pricing with fallbacks
-  const hasPricing = (): boolean => {
-    // Check joined pricing packages first
-    if (business.vendor_business_pricing_packages?.[0]?.base_price && business.vendor_business_pricing_packages?.[0]?.price_unit) {
-      return true;
-    }
-    // Fallback: check direct pricing fields on business
-    if (business.base_price && business.pricing_unit) return true;
-    if (business.price_range) return true;
-    if (business.min_price && business.max_price) return true;
-    return false;
+  // Helpers to check pricing components
+  const hasBasePrice = (): boolean => {
+    const pkg = business.vendor_business_pricing_packages?.[0] as any;
+    const pricingPkg = (business as any).pricing_packages?.[0] as any;
+    const biz = business as any;
+    return !!(pkg?.base_price || pkg?.price || pricingPkg?.base_price || pricingPkg?.price || biz?.base_price || biz?.price);
+  };
+
+  const hasPricingUnit = (): boolean => {
+    const pkg = business.vendor_business_pricing_packages?.[0] as any;
+    const pricingPkg = (business as any).pricing_packages?.[0] as any;
+    const biz = business as any;
+    return !!(pkg?.price_unit || pkg?.unit || pricingPkg?.price_unit || pricingPkg?.unit || biz?.pricing_unit || biz?.price_unit);
   };
 
   const coreChecks = [
-    // 1-4. Basic Info
+    // 1-3. Basic Info
     !!(business.business_name?.trim()),
     !!(business.contact_person_name?.trim()),
-    !!(business.business_email?.trim()),
     !!(business.contact_person_phone?.trim()),
-    // 5-6. Services & Experience
+    // 4-5. Services & Experience
     !!(business.description?.trim() || business.business_description?.trim()),
     !!(business.years_experience !== null && business.years_experience !== undefined),
-    // 7-9. Location
+    // 6-8. Location
     !!(business.address?.trim()),
     !!(business.pincode?.trim()),
     !!(business.operating_locations && business.operating_locations.length > 0),
-    // 10. Pricing (Base Price & Unit filled) - with fallbacks
-    hasPricing(),
+    // 9-10. Pricing
+    hasBasePrice(),
+    hasPricingUnit(),
     // 11. Primary Category Mapped - with fallbacks
     hasPrimaryCategory(),
     // 12. Specialization Mapped - with fallbacks
     hasSpecialization(),
-    // 13-15. Detailed Location
-    !!(business.city?.trim()),
-    !!(business.locality?.trim()),
-    !!(business.state?.trim()),
-    // 16. Cover Photo (Required during registration)
-    !!(business.cover_photo_url?.trim()),
   ];
 
+
   const optionalChecks = [
+    // 12. Cover Photo
+    !!(business.cover_photo_url?.trim()),
+    // 13-15. Detailed Location (Now optional)
+    !!(business.city?.trim()),
+    !!(business.locality?.trim() || (business as any).district?.trim()),
+    !!(business.state?.trim()),
+    // 16. Business Email (Now optional)
+    !!(business.business_email?.trim()),
     // 17-20. Social Media
     !!(business.website_url?.trim()),
     !!(business.instagram_url?.trim()),
     !!(business.facebook_url?.trim()),
     !!(business.youtube_url?.trim()),
     // 21-22. Tax Info
-    !!(business.business_registration_number?.trim() || business.pan_number?.trim()),
+    !!(business.business_registration_number?.trim() || (business as any).pan_number?.trim()),
     !!(business.gst_number?.trim()),
-    // 23. Verification Documents (with fallbacks)
-    !!(business.document_count && business.document_count > 0) || !!(business.verification_documents && business.verification_documents.length > 0),
+    // 23. Verification Documents (with fallbacks) - check URLs and media
+    !!(business.document_count && business.document_count > 0) || 
+    !!(business.verification_documents && business.verification_documents.length > 0) || 
+    !!((business as any).media?.documents?.length > 0) ||
+    !!((business as any).business_license_url) ||
+    !!((business as any).gst_url) ||
+    !!((business as any).business_registration_number),
     // 24. Events Mapped (Optional) - with fallbacks
     hasEventCategories(),
     // 25. Gallery/Portfolio (Additional images) - with fallbacks
-    !!(business.image_count && business.image_count > 0) || !!(business.gallery_images && business.gallery_images.length > 0) || !!(business.media && business.media.length > 0),
+    !!(business.image_count && business.image_count > 0) || !!(business.gallery_images && business.gallery_images.length > 0) || !!((business as any).media?.gallery?.length > 0),
   ];
+
+  // Debug which checks are failing
+  const coreCheckNames = ['business_name', 'contact_person_name', 'contact_person_phone', 'description', 'years_experience', 'address', 'pincode', 'operating_locations', 'base_price', 'pricing_unit', 'primary_category', 'specialization'];
+  const failedCore = coreCheckNames.filter((_, i) => !coreChecks[i]);
+  const optionalCheckNames = ['cover_photo', 'city', 'locality', 'state', 'business_email', 'website', 'instagram', 'facebook', 'youtube', 'business_reg', 'gst', 'verification_docs', 'event_categories', 'gallery_images'];
+  const failedOptional = optionalCheckNames.filter((_, i) => !optionalChecks[i]);
+  console.log('[ProfileCompletion] Failed checks:', { core: failedCore, optional: failedOptional, corePassed: coreChecks.filter(Boolean).length, optionalPassed: optionalChecks.filter(Boolean).length });
+  
+  // Debug verification docs and event categories specifically
+  if (failedOptional.includes('verification_docs')) {
+    console.log('[ProfileCompletion] verification_docs debug:', {
+      document_count: business.document_count,
+      verification_documents: business.verification_documents?.length,
+      media_documents: (business as any).media?.documents?.length,
+      media_keys: (business as any).media ? Object.keys((business as any).media) : null,
+      business_license_url: (business as any).business_license_url,
+      gst_url: (business as any).gst_url,
+      business_registration_number: (business as any).business_registration_number,
+    });
+  }
+  if (failedOptional.includes('event_categories')) {
+    console.log('[ProfileCompletion] event_categories debug:', {
+      event_category_ids: business.event_category_ids?.length,
+      vendor_business_category_mappings: business.vendor_business_category_mappings?.length,
+      category_ids: business.category_ids?.length,
+    });
+  }
 
   const coreFilled = coreChecks.filter(Boolean).length;
   const optionalFilled = optionalChecks.filter(Boolean).length;
 
   // DEBUG: Log which checks are failing
   const checkNames = [
-    'business_name', 'contact_person_name', 'business_email', 'contact_person_phone',
+    'business_name', 'contact_person_name', 'contact_person_phone',
     'description', 'years_experience', 'address', 'pincode', 'operating_locations',
-    'pricing', 'primary_category', 'specialization', 'city', 'locality', 'state', 'cover_photo'
+    'base_price', 'pricing_unit', 'primary_category', 'specialization'
   ];
   const failedChecks = checkNames.filter((_, i) => !coreChecks[i]);
   const coreScore = (coreFilled / coreChecks.length) * 90;
@@ -450,13 +493,13 @@ export default function DashboardScreen() {
       // To calculate 100% profile completion, we need the full details for each business.
       console.log(`[Dashboard] Fetching full details for ${businessesList.length} businesses...`);
       const fullDetailsResults = await Promise.all(
-        businessesList.map(b => getBusinessDetails(b.id || b.business_id))
+        businessesList.map(b => getBusinessDetails(b.id))
       );
 
       // Map API response to frontend format
       const formattedBusinesses = businessesList.map((business: any, index: number) => {
         // Use full details if fetch was successful, fallback to list item
-        const fullDetails = fullDetailsResults[index]?.data || {};
+        const fullDetails = fullDetailsResults[index]?.data?.vendor_business || fullDetailsResults[index]?.data || {};
         const combinedBusiness = { ...business, ...fullDetails };
 
         // Try multiple possible API response structures for category

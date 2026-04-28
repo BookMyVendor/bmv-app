@@ -159,7 +159,7 @@ export default function ReviewsScreen() {
 
       const list = apiList.map(item => ({
         id: item.id,
-        customer_name: item.customers?.name || item.customer_name || 'Anonymous',
+        customer_name: item.customer_first_name || item.customer_name || 'Anonymous',
         profile_photo_url: item.profile_photo_url || null,
         rating: item.rating || 0,
         comment: item.review_text || item.comment || '',
