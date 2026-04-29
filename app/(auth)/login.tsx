@@ -83,10 +83,13 @@ export default function LoginScreen() {
     setOtp('');
     setOtpAttemptsRemaining(null);
 
+    console.log('[handleSendOTP] Sending OTP for phone:', formattedPhone);
     const result = await sendOTP(formattedPhone);
+    console.log('[handleSendOTP] Result:', result);
     setLoading(false);
 
     if (result?.error) {
+      console.error('[handleSendOTP] Error:', result.error);
       if (result.error.code === 'RATE_LIMIT') {
         setRateLimitCountdown(result.error.retryAfter || 60);
         setError(`Too many requests. Try again later.`);

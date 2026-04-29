@@ -84,8 +84,6 @@ function RootLayoutNav() {
     }
   }, [segments[0], session, profile, checkStorage]);
 
-  const hasVerifiedBusiness = useRef(false);
-
   useEffect(() => {
     // Don't navigate during initial load or while checking storage
     if (loading && initialLoad) return;
@@ -160,20 +158,18 @@ function RootLayoutNav() {
 
         // If profile says no business, verify by calling the API directly
         // This handles the case where user reinstalls app and API cache is stale
-        if (!hasBusiness && !skipBusinessRegistration && !isVerifyingBusiness && !hasVerifiedBusiness.current) {
-          hasVerifiedBusiness.current = true;
+        if (!hasBusiness && !skipBusinessRegistration && !isVerifyingBusiness) {
           setIsVerifyingBusiness(true);
           try {
-            console.log('[NAV] Verifying business status via API (one-time check)...');
-            // Use refreshProfile instead of getVendorBusinesses to update the context profile
+            console.log('[NAV] Verifying business status via API...');
             await refreshProfile();
+            // After refresh, get the updated has_business value
+            hasBusiness = profile?.has_business;
           } catch (e) {
             console.error('[NAV] Error verifying business status:', e);
           } finally {
             setIsVerifyingBusiness(false);
           }
-          // Return early to wait for the re-render triggered by refreshProfile/setIsVerifyingBusiness
-          return;
         }
 
         if (!hasBusiness && !skipBusinessRegistration) {
