@@ -487,10 +487,17 @@ export default function BusinessRegistrationScreen() {
         businessData.operatingLocations.length === 0 ||
         businessData.operatingLocations.some(loc => loc.toLowerCase() === 'pan india' || loc.toLowerCase() === 'all india');
 
+      // If no cover photo is provided but portfolio images exist, use first portfolio image as cover
+      let coverPhotoUri = businessData.coverPhotoUri;
+      if (!coverPhotoUri && businessData.portfolioImages && businessData.portfolioImages.length > 0) {
+        coverPhotoUri = businessData.portfolioImages[0];
+        console.log('[BizDebug][Register] No cover photo provided, using first portfolio image as cover');
+      }
+
       // Prepare gallery photos from portfolioImages (excluding cover photo)
       const galleryPhotos = businessData.portfolioImages
-        ? businessData.coverPhotoUri
-          ? businessData.portfolioImages.filter(uri => uri !== businessData.coverPhotoUri)
+        ? coverPhotoUri
+          ? businessData.portfolioImages.filter(uri => uri !== coverPhotoUri)
           : businessData.portfolioImages
         : [];
 
@@ -507,7 +514,7 @@ export default function BusinessRegistrationScreen() {
         primary_category_id: businessData.selectedRootCategoryId || '',
         specialization_category_ids: businessData.selectedCategoryIds || [],
         event_category_ids: businessData.selectedEventIds || [],
-        cover_photo: businessData.coverPhotoUri ? { uri: businessData.coverPhotoUri } : undefined,
+        cover_photo: coverPhotoUri ? { uri: coverPhotoUri } : undefined,
         photos: galleryPhotos.map(uri => ({ uri })),
       };
 

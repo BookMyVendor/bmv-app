@@ -1,6 +1,5 @@
-import { getAuthFunctionsBaseUrl } from '../apiConfig';
-import { apiFetch } from '../apiClient';
-import { axiosFunctionsCall } from '../axiosClient';
+import { Platform } from 'react-native';
+import { axiosFunctionsCall, axiosMultipartUpload } from '../axiosClient';
 
 export interface VerificationDocument {
   id: string;
@@ -12,7 +11,7 @@ export interface VerificationDocument {
   file_url: string | null;
   file_name: string | null;
   mime_type: string | null;
-  verification_status: string;
+  verification_status: 'pending' | 'verified' | 'rejected';
   uploaded_at: string;
 }
 
@@ -26,30 +25,94 @@ export async function getVerificationDocuments(businessId: string) {
   return result;
 }
 
-/** Spec: vendor-businesses-verification-documents-create has file_id (no multipart). If backend has multipart upload, use it. */
+/**
+ * Uploads a verification document via multipart/form-data directly to
+ * vendor-businesses-verification-documents-create.
+ *
+ * The backend handles:
+ *  - uploading the file to the vendor-docs bucket
+ *  - storing file metadata in cms.file_storage
+ *  - creating the verification document row
+ *
+ * Path in MinIO: vendors/{vendorId}/businesses/{businessId}/{docType}/{filename}
+ */
 export async function uploadVerificationDocument(
   businessId: string,
-  formData: FormData
+  documentTypeId: string,
+  uri: string,
+  fileName?: string
 ): Promise<{ data?: VerificationDocument; error?: { success: false; error: string } }> {
+  const timestamp = new Date().toISOString();
+  console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] START`);
+  console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] businessId: ${businessId}`);
+  console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] documentTypeId: ${documentTypeId}`);
+  console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] uri: ${uri.substring(0, 60)}...`);
+  console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] fileName: ${fileName}`);
+  
   try {
-    const url = `${getAuthFunctionsBaseUrl()}/vendor-businesses-verification-documents-upload`;
-    const response = await apiFetch(url, { method: 'POST', body: formData });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      if (response.status === 404) {
-        console.warn('[API] 404 Not Found (non-blocking): vendor-businesses-verification-documents-upload', url);
-        return {};
-      }
-      return {
-        error: {
-          success: false,
-          error: (typeof data?.error === 'string' ? data.error : data?.message) || 'Upload failed',
-        },
-      };
+    console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] Creating FormData...`);
+    const formData = new FormData();
+    
+    const safeName = fileName || uri.split('/').pop() || 'upload.jpg';
+    const stripped = uri.split('?')[0].split('#')[0];
+    const rawExt = stripped.split('.').pop()?.toLowerCase() || '';
+    const ext = ['jpg', 'jpeg', 'png', 'webp', 'pdf'].includes(rawExt) ? rawExt : 'jpg';
+    const mimeType = ext === 'pdf' ? 'application/pdf' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+
+    console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] File info:`, { safeName, ext, mimeType });
+
+    console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] Appending business_id: ${businessId}`);
+    formData.append('business_id', businessId);
+
+    console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] Appending document_type_id: ${documentTypeId}`);
+    formData.append('document_type_id', documentTypeId);
+
+    console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] Appending file:`, { name: safeName, type: mimeType });
+    if (Platform.OS === 'web') {
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      formData.append('file', new File([blob], safeName, { type: mimeType }));
+    } else {
+      formData.append('file', {
+        uri,
+        name: safeName,
+        type: mimeType,
+      } as any);
     }
-    const doc = data?.verification_document ?? data;
-    return { data: doc as VerificationDocument };
+
+    console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] FormData created, calling axiosMultipartUpload...`);
+    console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] REQUEST:`);
+    console.log(`  Function: vendor-businesses-verification-documents-create`);
+    console.log(`  business_id: ${businessId}`);
+    console.log(`  document_type_id: ${documentTypeId}`);
+    console.log(`  file: ${safeName} (${mimeType})`);
+    
+    const result = await axiosMultipartUpload<VerificationDocument>(
+      'vendor-businesses-verification-documents-create',
+      formData,
+      'verification_document'
+    );
+
+    console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] RESPONSE:`);
+    if (result.error) {
+      console.log(`  Status: ERROR`);
+      console.log(`  Error: ${result.error.error}`);
+      console.log(`  Code: ${result.error.code}`);
+    } else {
+      console.log(`  Status: SUCCESS`);
+      console.log(`  Document ID: ${result.data?.id}`);
+      console.log(`  File URL: ${result.data?.file_url}`);
+    }
+
+    if (result.error) {
+      console.error(`[verificationDocuments.uploadVerificationDocument][${timestamp}] FAILED:`, result.error);
+      return { error: { success: false, error: result.error.error } };
+    }
+
+    console.log(`[verificationDocuments.uploadVerificationDocument][${timestamp}] SUCCESS:`, result.data);
+    return { data: result.data };
   } catch (e: any) {
+    console.error(`[verificationDocuments.uploadVerificationDocument][${timestamp}] EXCEPTION:`, e);
     return { error: { success: false, error: e?.message || 'Upload failed' } };
   }
 }
@@ -71,7 +134,15 @@ export interface CreateVerificationDocumentRequest {
   document_type_code?: string;
 }
 
-/** Spec: vendor-businesses-verification-documents-create { business_id, file_id, ... } */
+/** Spec: document-types-list { is_active: true } */
+export async function getDocumentTypes() {
+  console.log('[getDocumentTypes] Request - Function: document-types-list');
+  const result = await axiosFunctionsCall<any[]>('document-types-list', { is_active: true }, 'document_types');
+  console.log('[getDocumentTypes] Response - Count:', result.data?.length ?? 0);
+  return result;
+}
+
+/** Spec: vendor-businesses-verification-documents-create (JSON) { business_id, file_id, ... } */
 export async function createVerificationDocument(body: CreateVerificationDocumentRequest) {
   console.log('[createVerificationDocument] Request - Function: vendor-businesses-verification-documents-create');
   console.log('[createVerificationDocument] Request - Payload:', JSON.stringify(body, null, 2));

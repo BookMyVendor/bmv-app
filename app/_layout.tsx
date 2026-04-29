@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
@@ -19,7 +19,7 @@ const TERMS_ACCEPTANCE_KEY = 'vendor_terms_accepted';
 const SKIP_BUSINESS_REGISTRATION_KEY = 'skip_business_registration';
 
 function RootLayoutNav() {
-  const { session, profile, loading, isNewUser } = useAuth();
+  const { session, profile, loading, isNewUser, refreshProfile } = useAuth();
   const segments = useSegments();
   const router = useRouter();
   const [initialLoad, setInitialLoad] = useState(true);
@@ -84,6 +84,8 @@ function RootLayoutNav() {
     }
   }, [segments[0], session, profile, checkStorage]);
 
+  const hasVerifiedBusiness = useRef(false);
+
   useEffect(() => {
     // Don't navigate during initial load or while checking storage
     if (loading && initialLoad) return;
@@ -97,27 +99,6 @@ function RootLayoutNav() {
     const inTermsAndConditions = segments[0] === 'terms-and-conditions';
     const inCompleteProfile = segments[0] === 'complete-profile';
     const inBusinessReg = segments[0] === 'business-registration';
-
-    console.log('[NAV DEBUG]', {
-      session: !!session,
-      profile: !!profile,
-      isNewUser,
-      loading,
-      hasSeenOnboarding,
-      termsAccepted,
-      currentSegment: segments[0],
-      userFirstName: profile?.first_name,
-    });
-
-    // If user is on onboarding screen AND not logged in, don't interfere - let onboarding handle navigation
-    if (inOnboarding && !session) {
-      // But still hide splash screen if not already hidden
-      if (initialLoad) {
-        SplashScreen.hideAsync().catch(() => { });
-        setInitialLoad(false);
-      }
-      return;
-    }
 
     const hideSplashAndNavigate = async () => {
       // Hide splash screen first
@@ -133,7 +114,6 @@ function RootLayoutNav() {
 
       // Show onboarding for first-time users (only if not logged in)
       if (hasSeenOnboarding === false && !session && !inAuthGroup) {
-        console.log('[NAV] Redirecting to onboarding');
         router.replace('/onboarding');
         return;
       }
@@ -141,7 +121,6 @@ function RootLayoutNav() {
       // If no session, redirect to login
       if (!session && !loading && hasSeenOnboarding) {
         if (!inAuthGroup && !inOnboarding) {
-          console.log('[NAV] No session - redirecting to login');
           router.replace('/(auth)/login');
         }
         return;
@@ -149,7 +128,6 @@ function RootLayoutNav() {
 
       // If profile is still loading, wait
       if (session && loading) {
-        console.log('[NAV] Session exists but profile/data still loading');
         return;
       }
 
@@ -158,15 +136,12 @@ function RootLayoutNav() {
 
       // NEW USER FLOW - if authenticated but profile NOT complete
       if (session && !isProfileComplete) {
-        console.log('[NAV] User has no complete profile - needs to complete profile');
-
         const termsAcceptedValue = await AsyncStorage.getItem(TERMS_ACCEPTANCE_KEY);
         const isTermsAccepted = termsAcceptedValue === 'true' || profile?.terms_accepted === true;
 
         // Step 1: T&C must be accepted first
         if (!isTermsAccepted) {
           if (!inTermsAndConditions) {
-            console.log('[NAV] T&C not accepted - redirecting to terms and conditions');
             router.replace('/terms-and-conditions');
           }
           return;
@@ -174,7 +149,6 @@ function RootLayoutNav() {
 
         // Step 2: After T&C, complete profile
         if (!inCompleteProfile && !inBusinessReg) {
-          console.log('[NAV] T&C accepted but profile incomplete - redirecting to complete profile');
           router.replace('/complete-profile');
         }
         return;
@@ -186,28 +160,25 @@ function RootLayoutNav() {
 
         // If profile says no business, verify by calling the API directly
         // This handles the case where user reinstalls app and API cache is stale
-        if (!hasBusiness && !skipBusinessRegistration && !isVerifyingBusiness) {
+        if (!hasBusiness && !skipBusinessRegistration && !isVerifyingBusiness && !hasVerifiedBusiness.current) {
+          hasVerifiedBusiness.current = true;
           setIsVerifyingBusiness(true);
           try {
-            console.log('[NAV] Verifying business status via API...');
-            const { data: businesses, error } = await getVendorBusinesses();
-            if (!error && businesses && Array.isArray(businesses) && businesses.length > 0) {
-              console.log('[NAV] API verification found', businesses.length, 'business(es)');
-              hasBusiness = true;
-            } else {
-              console.log('[NAV] API verification confirmed no businesses');
-            }
+            console.log('[NAV] Verifying business status via API (one-time check)...');
+            // Use refreshProfile instead of getVendorBusinesses to update the context profile
+            await refreshProfile();
           } catch (e) {
             console.error('[NAV] Error verifying business status:', e);
           } finally {
             setIsVerifyingBusiness(false);
           }
+          // Return early to wait for the re-render triggered by refreshProfile/setIsVerifyingBusiness
+          return;
         }
 
         if (!hasBusiness && !skipBusinessRegistration) {
           // If profile is complete but no business exists, they must go to registration
           if (!inBusinessReg) {
-            console.log('[NAV] Profile complete but no business - redirecting to registration');
             router.replace('/business-registration');
           }
           return;
@@ -215,7 +186,7 @@ function RootLayoutNav() {
 
         // Only redirect to dashboard if they are coming from an setup/auth screen
         if (inAuthGroup || inTermsAndConditions || inOnboarding || inCompleteProfile) {
-          console.log('[NAV] User has profile and completed setup - redirecting to dashboard');
+          console.log('[NAV] Redirecting to dashboard');
           router.replace('/(tabs)');
         }
         return;
@@ -223,7 +194,7 @@ function RootLayoutNav() {
     };
 
     hideSplashAndNavigate();
-  }, [session, profile?.id, profile?.first_name, profile?.last_name, profile?.has_business, loading, segments, hasSeenOnboarding, termsAccepted, skipBusinessRegistration, isVerifyingBusiness, initialLoad]);
+  }, [session, profile?.id, profile?.first_name, profile?.last_name, profile?.has_business, loading, segments, hasSeenOnboarding, termsAccepted, skipBusinessRegistration, isVerifyingBusiness, initialLoad, refreshProfile]);
 
   // Show gradient splash screen during initial load
   if (loading && initialLoad) {

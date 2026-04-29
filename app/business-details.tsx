@@ -66,13 +66,16 @@ import {
   pickVideo,
   setCoverImage,
   getBusinessVerificationDocuments,
+  getDocumentTypes,
   uploadVerificationDocument,
   deleteVerificationDocument,
   VerificationDocument,
   Offer,
   PortfolioImage,
+  getPublicUrl,
   resolveBusinessMediaUrl,
 } from '../lib/businessApi';
+import { getFileUrl } from '../lib/api/fileStorage';
 import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '../lib/documentUpload';
 import { validatePincode } from '../lib/pincodeValidation';
 import { validateEmail, getEmailError } from '../lib/validation';
@@ -248,9 +251,13 @@ const ImageGridItem: React.FC<ImageGridItemProps> = ({
   handleSetCoverImage,
   handleDeleteImage,
 }) => {
-  const imageSource = item.image_base64 || item.image_url;
+  const imageSource = item.image_base64 || resolveBusinessMediaUrl(item.image_url);
   const isCover = item.image_type === 'cover';
-  const isVideo = item.image_type === 'video';
+  const isVideo = item.image_type === 'video' || 
+                 (typeof item.image_url === 'string' && 
+                  (item.image_url.toLowerCase().endsWith('.mp4') || 
+                   item.image_url.toLowerCase().endsWith('.mov') || 
+                   item.image_url.toLowerCase().endsWith('.avi')));
   const isMenuOpen = activeMenuImageId === item.id;
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -390,7 +397,8 @@ export default function BusinessDetailsScreen() {
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [verificationDocuments, setVerificationDocuments] = useState<VerificationDocument[]>([]);
   const [loadingDocuments, setLoadingDocuments] = useState(false);
-  const [uploadingDocument, setUploadingDocument] = useState<string | null>(null); // document type code
+  const [uploadingDocument, setUploadingDocument] = useState<string | null>(null); // document type id
+  const [documentTypes, setDocumentTypes] = useState<any[]>([]);
   const [packages, setPackages] = useState<any[]>([]);
   const [loadingPackages, setLoadingPackages] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -554,7 +562,7 @@ export default function BusinessDetailsScreen() {
       });
 
       // Normalize business data keys with multiple fallback field names
-      const rawBusiness = businessRes.data;
+      const rawBusiness = businessRes.data?.vendor_business || businessRes.data;
       const normalizedBusiness = rawBusiness ? {
         ...rawBusiness,
         business_name: rawBusiness.business_name || rawBusiness.name || '',
@@ -670,8 +678,8 @@ export default function BusinessDetailsScreen() {
       if (defaultPkg) {
         setDefaultPackageId(defaultPkg.id ?? null);
         // Backend returns 'price' (not 'base_price') and 'price_unit'
-        const pkgPrice = defaultPkg.price ?? defaultPkg.base_price ?? null;
-        const pkgUnit = defaultPkg.price_unit ?? defaultPkg.pricing_unit ?? 'per_event';
+        const pkgPrice = (defaultPkg as any).price ?? defaultPkg.base_price ?? null;
+        const pkgUnit = (defaultPkg as any).price_unit ?? (defaultPkg as any).pricing_unit ?? 'per_event';
         console.log('[loadData] Setting price fields:', { base_price: pkgPrice, pricing_unit: pkgUnit });
         setEditData((prev: any) => ({
           ...prev,
@@ -1787,54 +1795,153 @@ export default function BusinessDetailsScreen() {
     if (!id) return;
     try {
       setLoadingDocuments(true);
-      const { data, error } = await getBusinessVerificationDocuments(id);
-      if (error) {
-        console.error('Error loading verification documents:', error);
+      console.log('[Verification] Fetching documents for business:', id);
+      
+      // Fetch documents and document types in parallel
+      const [docsRes, typesRes] = await Promise.all([
+        getBusinessVerificationDocuments(id),
+        getDocumentTypes()
+      ]);
+
+      if (docsRes.error) {
+        console.error('[Verification] Error loading verification documents:', docsRes.error);
         return;
       }
-      setVerificationDocuments(data || []);
+
+      const rawDocs = docsRes.data || [];
+      const docTypesData = typesRes.data || [];
+      const docTypes = Array.isArray(docTypesData) ? docTypesData : ((docTypesData as any).rows || []);
+      
+      setDocumentTypes(docTypes);
+      
+      // Create a map of document type ID to code/name
+      const typeMap: Record<string, { code: string; name: string }> = {};
+      docTypes.forEach((t: any) => {
+        typeMap[t.id] = { code: t.type_code, name: t.name };
+      });
+
+      console.log('[Verification] RAW documents from backend:', JSON.stringify(rawDocs, null, 2));
+      
+      // Enrich documents with missing info (workaround for backend list API)
+      const enrichedDocs = await Promise.all(rawDocs.map(async (doc) => {
+        const enriched = { ...doc };
+        
+        // 1. Fill missing type info
+        if (!enriched.document_type_code && enriched.document_type_id && typeMap[enriched.document_type_id]) {
+          enriched.document_type_code = typeMap[enriched.document_type_id].code;
+          enriched.document_type_name = typeMap[enriched.document_type_id].name;
+        }
+
+        // 2. Fill missing verification status
+        if (!enriched.verification_status) {
+          enriched.verification_status = 'pending';
+        }
+
+        // 3. Fill missing file URL/info
+        if (!enriched.file_url && enriched.file_id) {
+          try {
+            const urlRes = await getFileUrl(enriched.file_id);
+            if (urlRes.data?.url) {
+              enriched.file_url = urlRes.data.url;
+            }
+          } catch (e) {
+            console.warn(`[Verification] Failed to fetch URL for file ${enriched.file_id}`, e);
+          }
+        }
+
+        // 4. Fill missing mime type from file URL
+        if (!enriched.mime_type && enriched.file_url) {
+          enriched.mime_type = inferMimeType(enriched.file_url);
+        }
+
+        return enriched;
+      }));
+
+      console.log('[Verification] Enriched documents:', enrichedDocs.map(d => ({
+        id: d.id,
+        document_type_code: d.document_type_code,
+        file_url: d.file_url,
+        mime_type: d.mime_type,
+        file_name: d.file_name
+      })));
+      setVerificationDocuments(enrichedDocs);
     } catch (error) {
-      console.error('Error loading verification documents:', error);
+      console.error('[Verification] Exception loading verification documents:', error);
     } finally {
       setLoadingDocuments(false);
     }
   };
 
+  // Helper to get document type ID from code
+  const getDocumentTypeId = (code: string): string => {
+    const docType = documentTypes.find((t: any) => t.type_code === code);
+    return docType?.id || code;
+  };
+
+// Helper to infer mime type from file URL
+  const inferMimeType = (fileUrl: string): string | null => {
+    if (!fileUrl) return null;
+    const lowerUrl = fileUrl.toLowerCase();
+    if (lowerUrl.endsWith('.jpg') || lowerUrl.endsWith('.jpeg')) return 'image/jpeg';
+    if (lowerUrl.endsWith('.png')) return 'image/png';
+    if (lowerUrl.endsWith('.pdf')) return 'application/pdf';
+    return null;
+  };
+
   // Handle document upload
   const handleUploadDocument = async (documentTypeCode: string) => {
+    const documentTypeId = getDocumentTypeId(documentTypeCode);
+    const timestamp = new Date().toISOString();
+    console.log(`[handleUploadDocument][${timestamp}] START - documentTypeCode: ${documentTypeCode}, documentTypeId: ${documentTypeId}, businessId: ${id}`);
+    console.log(`[handleUploadDocument][${timestamp}] userId: ${user?.id}`);
+    
     try {
       setUploadingDocument(documentTypeCode);
       const { files, error } = await pickDocuments(true);
 
+      console.log(`[handleUploadDocument][${timestamp}] Files picked:`, files.map(f => ({ name: f.name, uri: f.uri?.substring(0, 50), size: f.size })));
+
       if (error) {
+        console.error(`[handleUploadDocument][${timestamp}] Error picking documents:`, error);
         Alert.alert('Error', error.message);
         return;
       }
 
       if (files.length === 0) {
+        console.log(`[handleUploadDocument][${timestamp}] No files selected, returning`);
         return;
       }
 
       // Upload each file
       for (const file of files) {
+        console.log(`[handleUploadDocument][${timestamp}] Uploading file: ${file.name}, type: ${documentTypeId}`);
         const { data, error: uploadError } = await uploadVerificationDocument(
           id,
-          documentTypeCode,
+          documentTypeId,
           file,
           user?.id
         );
 
+        console.log(`[handleUploadDocument][${timestamp}] Upload result for ${file.name}:`, {
+          success: !uploadError,
+          dataId: data?.id,
+          error: uploadError?.message
+        });
+
         if (uploadError) {
+          console.error(`[handleUploadDocument][${timestamp}] Upload error for ${file.name}:`, uploadError);
           Alert.alert('Upload Error', `Failed to upload ${file.name || 'document'}: ${uploadError.message}`);
-        } else if (data) {
-          // Reload documents to show the new one
+        } else {
+          console.log(`[handleUploadDocument][${timestamp}] Upload successful for ${file.name}, data:`, data);
+          console.log(`[handleUploadDocument][${timestamp}] file_url: ${data?.file_url}, mime_type: ${data?.mime_type}, document_type_code: ${data?.document_type_code}`);
           await loadVerificationDocuments();
         }
       }
     } catch (error) {
+      console.error(`[handleUploadDocument][${timestamp}] Exception:`, error);
       Alert.alert('Error', 'Failed to upload document');
-      console.error('Error uploading document:', error);
     } finally {
+      console.log(`[handleUploadDocument][${timestamp}] END`);
       setUploadingDocument(null);
     }
   };
@@ -1872,10 +1979,11 @@ export default function BusinessDetailsScreen() {
   const documentsByType = React.useMemo(() => {
     const grouped: Record<string, VerificationDocument[]> = {};
     verificationDocuments.forEach((doc) => {
-      if (!grouped[doc.document_type_code]) {
-        grouped[doc.document_type_code] = [];
+      const type = (doc.document_type_code || 'MISSING_TYPE').toLowerCase();
+      if (!grouped[type]) {
+        grouped[type] = [];
       }
-      grouped[doc.document_type_code].push(doc);
+      grouped[type].push(doc);
     });
     return grouped;
   }, [verificationDocuments]);
@@ -2030,6 +2138,18 @@ export default function BusinessDetailsScreen() {
           image_url: data?.image_url?.substring(0, 50) + '...',
         });
 
+        // Check if cover image exists, if not set this image as cover
+        const hasCover = images.some(img => img.image_type === 'cover');
+        if (!hasCover && data?.id) {
+          console.log(`[handleUploadImage][${timestamp}] No cover exists, setting uploaded image as cover`);
+          const { error: setCoverError } = await setCoverImage(id, data.id);
+          if (setCoverError) {
+            console.error(`[handleUploadImage][${timestamp}] Failed to set cover:`, setCoverError);
+          } else {
+            console.log(`[handleUploadImage][${timestamp}] Cover set successfully`);
+          }
+        }
+
         await loadData();
         Alert.alert('Success', 'Image uploaded successfully');
       } catch (error: any) {
@@ -2156,6 +2276,19 @@ export default function BusinessDetailsScreen() {
       if (uploadError) {
         console.error(`[handleUploadMultipleImages][${timestamp}] Upload error:`, uploadError);
         throw uploadError;
+      }
+
+      // Check if cover image exists, if not set first uploaded image as cover
+      const hasCover = images.some(img => img.image_type === 'cover');
+      const firstSuccessResult = results.find(r => r.success && (r as any).data?.id);
+      if (!hasCover && firstSuccessResult && (firstSuccessResult as any).data?.id) {
+        console.log(`[handleUploadMultipleImages][${timestamp}] No cover exists, setting first uploaded image as cover`);
+        const { error: setCoverError } = await setCoverImage(id, (firstSuccessResult as any).data.id);
+        if (setCoverError) {
+          console.error(`[handleUploadMultipleImages][${timestamp}] Failed to set cover:`, setCoverError);
+        } else {
+          console.log(`[handleUploadMultipleImages][${timestamp}] Cover set successfully`);
+        }
       }
 
       await loadData();
@@ -2369,11 +2502,11 @@ export default function BusinessDetailsScreen() {
 
       // 1. Identify purely business fields supported by the vendor-businesses-update API
       const SUPPORTED_BUSINESS_FIELDS = [
-        'business_name', 'description', 'address', 'locality', 'city',
-        'state', 'pincode', 'district', 'contact_person_name', 'contact_person_phone',
+        'business_name', 'description', 'address', 'locality', 'district',
+        'city', 'state', 'pincode', 'contact_person_name', 'contact_person_phone',
         'contact_person_role', 'business_email', 'website_url', 'instagram_url',
         'facebook_url', 'youtube_url', 'business_registration_number', 'gst_number',
-        'years_experience', 'availability', 'cover_photo_url',
+        'years_experience', 'cover_photo_url',
         'operating_locations'
       ];
 
@@ -2418,9 +2551,11 @@ export default function BusinessDetailsScreen() {
 
       // Update business details if changes exist
       if (hasBusinessChanges) {
+        console.log('[handleSaveDetails] Sending businessUpdates:', JSON.stringify(businessUpdates, null, 2));
         const { data, error } = await updateBusinessDetails(id, businessUpdates);
         if (error) {
           console.error('[handleSaveDetails] Business update failed:', error);
+          console.error('[handleSaveDetails] Error details:', JSON.stringify(error, null, 2));
           operationErrors.push(`Business update failed: ${error.message}`);
         } else {
           setBusiness(data);
@@ -2444,7 +2579,7 @@ export default function BusinessDetailsScreen() {
             const { error: pkgError } = await updatePackage(defaultPackageId, {
               price: parseFloat(base_price),
               price_unit: pricing_unit
-            });
+            } as any);
             if (pkgError) {
               console.error('[handleSaveDetails] Package update failed:', pkgError);
               operationErrors.push(`Pricing update failed: ${pkgError.message}`);
@@ -2460,7 +2595,7 @@ export default function BusinessDetailsScreen() {
               included_services: [],
               is_active: true,
               sort_order: 0
-            });
+            } as any);
             if (pkgError) {
               console.error('[handleSaveDetails] Package create failed:', pkgError);
               operationErrors.push(`Pricing save failed: ${pkgError.message}`);
@@ -2486,7 +2621,7 @@ export default function BusinessDetailsScreen() {
         const { error: mappingError } = await updateBusinessCategoryMappings(id, currentCategoryIds);
         if (mappingError) {
           console.error('Error updating category mappings:', mappingError);
-          operationErrors.push(`Category update failed: ${mappingError.message}`);
+          operationErrors.push(`Category update failed: ${(mappingError as any).message}`);
         }
       }
 
@@ -2531,7 +2666,7 @@ export default function BusinessDetailsScreen() {
     <View key={offer.id} style={styles.offerCard}>
       {offer.banner_image_url && (
         <Image
-          source={{ uri: offer.banner_image_url }}
+          source={{ uri: resolveBusinessMediaUrl(offer.banner_image_url) || '' }}
           style={styles.offerBanner}
           resizeMode="cover"
         />
@@ -3862,7 +3997,7 @@ export default function BusinessDetailsScreen() {
                       {(documentsByType['pan'] || []).map((doc: any) => (
                         <View key={doc.id} style={styles.documentItem}>
                           {isImageFile(doc.mime_type || '') && doc.file_url ? (
-                            <Image source={{ uri: doc.file_url }} style={styles.documentThumbnail} />
+                            <Image source={{ uri: resolveBusinessMediaUrl(doc.file_url) || '' }} style={styles.documentThumbnail} />
                           ) : (
                             <View style={styles.documentIcon}>
                               <FileText size={20} color="#666" />
@@ -3930,7 +4065,7 @@ export default function BusinessDetailsScreen() {
                       {(documentsByType['gst'] || []).map((doc: any) => (
                         <View key={doc.id} style={styles.documentItem}>
                           {isImageFile(doc.mime_type || '') && doc.file_url ? (
-                            <Image source={{ uri: doc.file_url }} style={styles.documentThumbnail} />
+                            <Image source={{ uri: resolveBusinessMediaUrl(doc.file_url) || '' }} style={styles.documentThumbnail} />
                           ) : (
                             <View style={styles.documentIcon}>
                               <FileText size={20} color="#666" />
@@ -3993,7 +4128,7 @@ export default function BusinessDetailsScreen() {
                             {docs.map((doc) => (
                               <View key={doc.id} style={styles.documentItem}>
                                 {isImageFile(doc.mime_type || '') && doc.file_url ? (
-                                  <Image source={{ uri: doc.file_url }} style={styles.documentThumbnail} />
+                                  <Image source={{ uri: resolveBusinessMediaUrl(doc.file_url) || '' }} style={styles.documentThumbnail} />
                                 ) : (
                                   <View style={styles.documentIcon}>
                                     <FileText size={20} color="#666" />
@@ -4192,14 +4327,19 @@ export default function BusinessDetailsScreen() {
               onPageSelected={(e) => setCurrentPreviewIndex(e.nativeEvent.position)}
             >
               {images.map((item, index) => {
-                const imageSource = item.image_base64 || item.image_url;
-                const isVideo = item.image_type === 'video';
+                const imageSource = item.image_base64 || resolveBusinessMediaUrl(item.image_url);
+                const isVideo = item.image_type === 'video' || 
+                               (typeof item.image_url === 'string' && 
+                                (item.image_url.toLowerCase().endsWith('.mp4') || 
+                                 item.image_url.toLowerCase().endsWith('.mov') || 
+                                 item.image_url.toLowerCase().endsWith('.avi')));
+                const videoSource = resolveBusinessMediaUrl(item.image_url);
 
                 return (
                   <View key={`${item.id}-${index}`} style={styles.previewSlide}>
                     {isVideo ? (
                       <ExpoVideo
-                        source={{ uri: item.image_url || '' }}
+                        source={{ uri: videoSource || '' }}
                         style={styles.previewImage}
                         useNativeControls
                         resizeMode={ResizeMode.CONTAIN}

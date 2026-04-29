@@ -307,15 +307,16 @@ export async function getFileStorageUrl(fileId: string) {
 }
 
 /** Spec: upload-profile-photo — multipart/form-data field `image` (file). */
-export async function uploadProfilePhoto(imageUri: string, fileName?: string): Promise<{ data?: { file_id: string; url: string }; error?: { success: false; error: string } }> {
+export async function uploadProfilePhoto(
+  imageUri: string, 
+  fileName?: string
+): Promise<{ data?: { file_id: string; url: string }; error?: { success: false; error: string } }> {
   try {
-    const url = `${getAuthFunctionsBaseUrl()}upload-profile-photo`;
     const formData = new FormData();
     let normalizedImageUri = imageUri;
     let fileExt = getSafeImageExtension(imageUri);
 
     // Some gallery URIs have unsupported extensions or query strings.
-    // Converting to JPEG avoids backend parser failures.
     if (Platform.OS !== 'web' && !imageUri.startsWith('data:image/')) {
       try {
         const manipulated = await ImageManipulator.manipulateAsync(
@@ -326,20 +327,18 @@ export async function uploadProfilePhoto(imageUri: string, fileName?: string): P
         normalizedImageUri = manipulated.uri;
         fileExt = 'jpg';
       } catch {
-        // Fall back to original URI when conversion fails.
+        // Fall back to original URI
       }
     }
     
     const normalizedName = normalizeFileName(fileName, 'profile', fileExt);
 
-    // Platform-specific FormData handling
     if (Platform.OS === 'web') {
       const response = await fetch(normalizedImageUri);
       if (!response.ok) throw new Error('Failed to load image for upload');
       const blob = await response.blob();
       formData.append('image', new File([blob], normalizedName, { type: blob.type || 'image/jpeg' }));
     } else {
-      // In React Native, we pass an object as 'any' for multipart upload
       formData.append('image', {
         uri: normalizedImageUri,
         name: normalizedName,
@@ -347,26 +346,24 @@ export async function uploadProfilePhoto(imageUri: string, fileName?: string): P
       } as any);
     }
 
-    const response = await apiFetch(url, { method: 'POST', body: formData });
-    let data: any;
-    try {
-      const text = await response.text();
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      data = {};
+    console.log('[uploadProfilePhoto] START', { imageUri, fileName });
+    const { data, error } = await axiosMultipartUpload<any>('upload-profile-photo', formData);
+    
+    if (error) {
+      console.error('[uploadProfilePhoto] ERROR:', error);
+      return { error: { success: false, error: error.error } };
     }
     
-    if (!response.ok) {
-      return {
-        error: {
-          success: false,
-          error: (typeof data?.error === 'string' ? data.error : data?.message) || 'Upload failed',
-        },
-      };
-    }
+    console.log('[uploadProfilePhoto] SUCCESS:', data);
     
-    return { data: { file_id: data.file_id || data.id, url: data.url } };
+    return { 
+      data: { 
+        file_id: data?.file_id || data?.id, 
+        url: data?.url || data?.image_url 
+      } 
+    };
   } catch (e: any) {
+    console.error('[uploadProfilePhoto] EXCEPTION:', e);
     return { error: { success: false, error: e?.message || 'Upload failed' } };
   }
 }

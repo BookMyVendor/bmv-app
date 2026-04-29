@@ -22,6 +22,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { getFileUrl } from '../lib/api/fileStorage';
 import { uploadProfilePhoto } from '../lib/api/media';
 import { updateVendorMe } from '../lib/api/vendors';
+import { resolveBusinessMediaUrl } from '../lib/businessApi';
 import { getVendorBusinesses } from '../lib/api/vendorBusinesses';
 import { validateEmail } from '../lib/validation';
 import ScreenBackground from '../components/ScreenBackground';
@@ -52,7 +53,7 @@ export default function CompleteProfileScreen() {
   useEffect(() => {
     if (profile?.image_file_id && !photoUri) {
       getFileUrl(profile.image_file_id).then(({ data }) => {
-        if (data?.url) setPhotoUri(data.url);
+        if (data?.url) setPhotoUri(resolveBusinessMediaUrl(data.url));
       }).catch(() => {});
     }
   }, [profile?.image_file_id]);

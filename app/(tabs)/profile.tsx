@@ -25,6 +25,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { getFileUrl } from '../../lib/api/fileStorage';
 import { uploadProfilePhoto } from '../../lib/api/media';
 import { updateVendorMe } from '../../lib/api/vendors';
+import { resolveBusinessMediaUrl } from '../../lib/businessApi';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
 import { validateEmail } from '../../lib/validation';
 import { sendOTP, resendOTP, deleteAccount as confirmAccountDeletion } from '../../lib/authApi';
@@ -46,6 +47,7 @@ export default function ProfileScreen() {
   const { user, profile, signOut, refreshProfile, verifyOTP: authVerifyOTP, isOffline: authIsOffline } = useAuth();
   const insets = useSafeAreaInsets();
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [hasImageError, setHasImageError] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [deletionLoading, setDeletionLoading] = useState(false);
   const [deletionOtp, setDeletionOtp] = useState('');
@@ -184,25 +186,44 @@ export default function ProfileScreen() {
     setResendCountdown(0);
   };
 
-  useEffect(() => {
-    const fetchImageUrl = async () => {
-      if (profile?.image_file_id) {
-        try {
-          const result = await getFileUrl(profile.image_file_id);
-          if (result.error) {
-            console.error('Error fetching file URL:', result.error);
-            return;
+    useEffect(() => {
+      const fetchImageUrl = async () => {
+        setHasImageError(false);
+        console.log('[Profile] Fetching image URL, profile data:', { 
+          id: profile?.id, 
+          image_file_id: profile?.image_file_id, 
+          avatar_url: profile?.avatar_url 
+        });
+
+        // 1. If we have a file ID, fetch the URL from storage
+        if (profile?.image_file_id) {
+          try {
+            const result = await getFileUrl(profile.image_file_id);
+            console.log('[Profile] getFileUrl result:', result);
+            if (result.data?.url) {
+              const resolved = resolveBusinessMediaUrl(result.data.url);
+              console.log('[Profile] Resolved URL from file_id:', resolved);
+              setPhotoUri(resolved);
+              return;
+            }
+          } catch (err) {
+            console.error('[Profile] Failed to fetch image from file_id:', err);
           }
-          if (result.data?.url) {
-            setPhotoUri(result.data.url);
-          }
-        } catch (err) {
-          console.error('Failed to fetch image URL:', err);
         }
-      }
-    };
-    fetchImageUrl();
-  }, [profile?.image_file_id]);
+        
+        // 2. Fallback to avatar_url if present
+        if (profile?.avatar_url) {
+          const resolved = resolveBusinessMediaUrl(profile.avatar_url);
+          console.log('[Profile] Resolved URL from avatar_url:', resolved);
+          setPhotoUri(resolved);
+        } else {
+          console.log('[Profile] No image found, setting photoUri to null');
+          setPhotoUri(null);
+        }
+      };
+  
+      fetchImageUrl();
+    }, [profile?.id, profile?.image_file_id, profile?.avatar_url]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined;
@@ -329,7 +350,7 @@ export default function ProfileScreen() {
         const uploadResult = await uploadProfilePhoto(photoUri, fileName);
         if (uploadResult.error) throw new Error(uploadResult.error.error);
         if (uploadResult.data?.file_id) imageFileId = uploadResult.data.file_id;
-        if (uploadResult.data?.url) setPhotoUri(uploadResult.data.url);
+        if (uploadResult.data?.url) setPhotoUri(resolveBusinessMediaUrl(uploadResult.data.url));
       }
 
       const updatePayload: Record<string, unknown> = {
@@ -432,14 +453,18 @@ export default function ProfileScreen() {
                   style={styles.photoContainer}
                   onPress={showImageOptions}
                 >
-                  {photoUri ? (
+                  {photoUri && !hasImageError ? (
                     <Image
                       key={photoUri}
                       source={{ uri: photoUri }}
                       style={styles.photo}
-                      onError={(e) => console.error('Image load error:', e.nativeEvent.error)}
+                      onLoad={() => setHasImageError(false)}
+                      onError={(e) => {
+                        console.error('Profile image load error:', e.nativeEvent.error);
+                        setHasImageError(true);
+                      }}
                     />
-                  ) : values.firstName || values.lastName ? (
+                  ) : (values.firstName || values.lastName) ? (
                     <View style={[styles.photo, styles.initialsContainer]}>
                       <Text style={styles.initialsText}>
                         {getInitials(values.firstName, values.lastName)}
