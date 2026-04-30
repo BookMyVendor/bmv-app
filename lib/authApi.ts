@@ -46,19 +46,31 @@ export interface SendOTPResponse {
 /** Sends OTP to the provided phone number. */
 export async function sendOTP(phone: string): Promise<{ data?: SendOTPResponse; error?: AuthError }> {
   try {
+    const fullPhone = ensureFullPhone(phone);
     const url = `${getAuthFunctionsBaseUrl()}auth-vendor-send-otp`;
+    console.log('[sendOTP] Request:', { url, phone: fullPhone, deviceInfo: getDeviceInfo() });
+    
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        phone: ensureFullPhone(phone),
+        phone: fullPhone,
         deviceInfo: getDeviceInfo(),
       }),
     });
+    
+    console.log('[sendOTP] Response status:', response.status);
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) return { error: parseErrorResponse(data) };
+    console.log('[sendOTP] Response data:', data);
+    
+    if (!response.ok) {
+      const error = parseErrorResponse(data);
+      console.log('[sendOTP] Error:', error);
+      return { error };
+    }
     return { data: data as SendOTPResponse };
   } catch (err: any) {
+    console.error('[sendOTP] Exception:', err);
     return {
       error: {
         code: 'NETWORK_ERROR',
