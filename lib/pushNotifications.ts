@@ -96,10 +96,15 @@ export function handleNotificationNavigation(remoteMessage: any, router: any) {
     const title = (typeof notification.title === 'string' ? notification.title : typeof data.title === 'string' ? data.title : '').toLowerCase();
     const body = (typeof notification.body === 'string' ? notification.body : typeof data.body === 'string' ? data.body : '').toLowerCase();
     const leadId = data.leadId;
+    const reviewId = data.reviewId;
+    const screen = data.screen;
 
-    console.log('[PUSH] Notification tapped:', { title, body, leadId, data });
+    console.log('[PUSH] Notification tapped:', { title, body, leadId, reviewId, screen, data });
 
-    if (leadId) {
+    if (reviewId || screen === 'ReviewDetail' || title.includes('review') || body.includes('reviewed')) {
+        console.log('[PUSH] Review notification. Navigating to reviews screen...');
+        router.push('/(tabs)/reviews');
+    } else if (leadId) {
         console.log('[PUSH] Lead ID found. Navigating to lead details...');
         router.push(`/lead-detail?id=${leadId}`);
     } else if (title.includes('lead') || body.includes('lead')) {

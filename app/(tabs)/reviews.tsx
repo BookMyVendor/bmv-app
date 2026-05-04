@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { useFocusEffect } from 'expo-router';
 import {
   View,
   Text,
@@ -17,6 +16,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useFocusEffect } from 'expo-router';
 import { Video, ResizeMode } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -84,24 +84,10 @@ export default function ReviewsScreen() {
   const [mediaLoadError, setMediaLoadError] = useState(false);
   const { user, isOffline: authIsOffline } = useAuth();
 
-  // Refresh reviews whenever the screen is focused
-  useFocusEffect(
-    useCallback(() => {
-      if (user?.id) {
-        fetchReviews();
-      }
-    }, [user?.id, fetchReviews])
-  );
-
-  useEffect(() => {
-    if (selectedMedia) setMediaLoadError(false);
-  }, [selectedMedia]);
-
-  const fetchReviews = useCallback(async () => {
+  const fetchReviews = useCallback(async (isSilentRefresh = false) => {
     try {
       if (!user?.id) return;
-      const isRefresh = refreshing;
-      if (!isRefresh) setLoading(true);
+      if (!isSilentRefresh && !refreshing) setLoading(true);
       try {
         const cachedReviews = await AsyncStorage.getItem(`vendor_reviews_${user.id}`);
         if (cachedReviews) setReviews(JSON.parse(cachedReviews));
@@ -187,6 +173,24 @@ export default function ReviewsScreen() {
       setRefreshing(false);
     }
   }, [user?.id, refreshing]);
+
+  useEffect(() => {
+    if (user?.id) {
+      fetchReviews();
+    }
+  }, [user?.id, fetchReviews]);
+
+  useEffect(() => {
+    if (selectedMedia) setMediaLoadError(false);
+  }, [selectedMedia]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.id) {
+        fetchReviews(true);
+      }
+    }, [user?.id, fetchReviews])
+  );
 
   const onRefresh = () => {
     setRefreshing(true);
