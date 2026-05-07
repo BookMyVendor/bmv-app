@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { SaveFormat } from 'expo-image-manipulator';
+import * as FileSystem from 'expo-file-system';
 import { getAuthFunctionsBaseUrl } from '../apiConfig';
 import { apiFetch } from '../apiClient';
 import { axiosFunctionsCall, axiosMultipartUpload } from '../axiosClient';
@@ -193,9 +194,108 @@ export async function uploadBusinessMediaDirect(
       formData.append('sort_order', request.sort_order.toString());
     }
 
-    const fileExt = request.file.split('.').pop()?.toLowerCase() || 'jpg';
+    let normalizedUri = request.file;
+    const isIOSAssetUri = normalizedUri.startsWith('ph://') || normalizedUri.startsWith('assets-library://');
+    const lowerUri = normalizedUri.toLowerCase();
+    const looksLikeHeic = lowerUri.includes('.heic') || lowerUri.includes('.heif');
+    if (Platform.OS === 'ios' && (isIOSAssetUri || looksLikeHeic)) {
+      try {
+        console.log(`[uploadBusinessMediaDirect][${timestamp}] iOS image needs normalization (asset URI or HEIC/HEIF). Converting via ImageManipulator...`);
+        const manipulated = await ImageManipulator.manipulateAsync(
+          normalizedUri,
+          [],
+          { compress: 0.85, format: SaveFormat.JPEG }
+        );
+        normalizedUri = manipulated.uri;
+        console.log(`[uploadBusinessMediaDirect][${timestamp}] iOS asset URI normalized: ${normalizedUri.substring(0, 50)}...`);
+      } catch (e: any) {
+        console.warn(`[uploadBusinessMediaDirect][${timestamp}] Failed to normalize iOS image URI:`, e?.message || e);
+      }
+    }
+
+    const stillIOSAssetUri = normalizedUri.startsWith('ph://') || normalizedUri.startsWith('assets-library://');
+    if (Platform.OS === 'ios' && stillIOSAssetUri) {
+      return {
+        error: {
+          success: false,
+          error: 'Selected photo could not be prepared for upload on iOS. Please try selecting a different image or take a screenshot (JPEG).',
+          code: 'IOS_ASSET_URI_UNSUPPORTED',
+        },
+      };
+    }
+
+    // Backend enforces a strict 5MB limit (observed via HTTP_400: "Image exceeds 5 MB limit").
+    // iOS HEIC->JPEG conversion can increase size, so ensure we recompress if needed.
+    const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+    const currentExt = getSafeImageExtension(normalizedUri, 'jpg');
+    const isVideoByExt = ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(currentExt);
+    if (Platform.OS !== 'web' && !isVideoByExt) {
+      try {
+        // On iOS we standardize images to JPEG and cap resolution early; this avoids cases where
+        // size can't be read reliably or the original asset is HEIC/very large.
+        if (Platform.OS === 'ios') {
+          const standardized = await ImageManipulator.manipulateAsync(
+            normalizedUri,
+            [{ resize: { width: 1920 } }],
+            { compress: 0.85, format: SaveFormat.JPEG }
+          );
+          normalizedUri = standardized.uri;
+        }
+
+        const info = await FileSystem.getInfoAsync(normalizedUri);
+        const size = (info as any)?.size as number | undefined;
+
+        if (info.exists && typeof size === 'number') {
+          console.log(`[uploadBusinessMediaDirect][${timestamp}] Post-normalize sizeKB: ${Math.round(size / 1024)}`);
+        }
+
+        if (info.exists && typeof size === 'number' && size > MAX_IMAGE_BYTES) {
+          console.log(`[uploadBusinessMediaDirect][${timestamp}] Image too large (${Math.round(size / 1024)}KB). Recompressing to fit 5MB...`);
+
+          // Try a few passes, progressively reducing quality and max width.
+          const attempts: Array<{ maxWidth: number; quality: number }> = [
+            { maxWidth: 1600, quality: 0.72 },
+            { maxWidth: 1280, quality: 0.6 },
+            { maxWidth: 1024, quality: 0.5 },
+            { maxWidth: 800, quality: 0.45 },
+          ];
+
+          let finalSize: number | undefined = size;
+          for (const a of attempts) {
+            const manipulated = await ImageManipulator.manipulateAsync(
+              normalizedUri,
+              [{ resize: { width: a.maxWidth } }],
+              { compress: a.quality, format: SaveFormat.JPEG }
+            );
+            const newInfo = await FileSystem.getInfoAsync(manipulated.uri);
+            const newSize = (newInfo as any)?.size as number | undefined;
+            normalizedUri = manipulated.uri;
+            finalSize = newSize;
+            console.log(`[uploadBusinessMediaDirect][${timestamp}] Recompress pass -> uri: ${normalizedUri.substring(0, 50)}..., sizeKB: ${typeof newSize === 'number' ? Math.round(newSize / 1024) : 'unknown'}`);
+
+            if (newInfo.exists && typeof newSize === 'number' && newSize <= MAX_IMAGE_BYTES) {
+              break;
+            }
+          }
+
+          if (typeof finalSize === 'number' && finalSize > MAX_IMAGE_BYTES) {
+            return {
+              error: {
+                success: false,
+                error: 'Image exceeds 5 MB limit. Please choose a smaller image.',
+                code: 'IMAGE_TOO_LARGE',
+              },
+            };
+          }
+        }
+      } catch (e: any) {
+        console.warn(`[uploadBusinessMediaDirect][${timestamp}] Failed to check/compress image size:`, e?.message || e);
+      }
+    }
+
+    const fileExt = getSafeImageExtension(normalizedUri, 'jpg');
     const isVideo = ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(fileExt);
-    const fileName = request.file_name || `business-${request.image_type}-${Date.now()}.${fileExt}`;
+    const fileName = normalizeFileName(request.file_name, `business-${request.image_type}-${Date.now()}`, fileExt);
 
     console.log(`[uploadBusinessMediaDirect][${timestamp}] File details:`, {
       fileExt,
@@ -206,7 +306,7 @@ export async function uploadBusinessMediaDirect(
 
     if (Platform.OS === 'web') {
       console.log(`[uploadBusinessMediaDirect][${timestamp}] Web platform: fetching blob...`);
-      const response = await fetch(request.file);
+      const response = await fetch(normalizedUri);
       if (!response.ok) throw new Error('Failed to load file for upload');
       const blob = await response.blob();
       const contentType = isVideo ? `video/${fileExt === 'mov' ? 'quicktime' : fileExt}` : `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`;
@@ -218,7 +318,7 @@ export async function uploadBusinessMediaDirect(
         : fileExt === 'png' ? 'image/png' : fileExt === 'webp' ? 'image/webp' : 'image/jpeg';
 
       formData.append('file', {
-        uri: request.file,
+        uri: normalizedUri,
         name: fileName,
         type: contentType,
       } as any);

@@ -88,6 +88,8 @@ export const validateImageUri = (uri: string): boolean => {
   return (
     uri.startsWith('file://') ||
     uri.startsWith('content://') ||
+    uri.startsWith('ph://') ||
+    uri.startsWith('assets-library://') ||
     uri.startsWith('data:image/') ||
     uri.startsWith('blob:')
   );
