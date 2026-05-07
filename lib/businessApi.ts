@@ -117,7 +117,6 @@ export const resolveBusinessMediaUrl = (
   bucket = 'vendor-media'
 ): string | null => {
   if (!filePathOrUrl) {
-    console.log('[MediaResolve] Empty input, returning null');
     return null;
   }
   
@@ -135,7 +134,6 @@ export const resolveBusinessMediaUrl = (
       
       // If it's already on our API host, return it as-is
       if (url.host === apiHost) {
-        console.log('[MediaResolve] Already on API host:', filePathOrUrl);
         return filePathOrUrl;
       }
 
@@ -145,14 +143,12 @@ export const resolveBusinessMediaUrl = (
       if (path.includes(`/${bucket}/`)) {
         const pathAfterBucket = path.split(`/${bucket}/`)[1];
         resolvedUrl = `${base}/media/${bucket}/${pathAfterBucket}`;
-        console.log('[MediaResolve] Rewrote storage URL to proxy:', { original: filePathOrUrl, resolved: resolvedUrl });
         return resolvedUrl;
       }
       
       // Pattern 2: /media/bucket-name/path/to/file
       if (path.includes('/media/')) {
         resolvedUrl = `${base}${path}`;
-        console.log('[MediaResolve] Prepended base to media proxy path:', { original: filePathOrUrl, resolved: resolvedUrl });
         return resolvedUrl;
       }
 
@@ -163,7 +159,6 @@ export const resolveBusinessMediaUrl = (
            const urlBucket = parts[0];
            const urlKey = parts.slice(1).join('/');
            resolvedUrl = `${base}/media/${urlBucket}/${urlKey}`;
-           console.log('[MediaResolve] Detected MinIO host, converted to proxy:', { original: filePathOrUrl, resolved: resolvedUrl });
            return resolvedUrl;
         }
       }
@@ -171,27 +166,23 @@ export const resolveBusinessMediaUrl = (
       console.warn('[MediaResolve] URL parsing failed for:', filePathOrUrl);
     }
 
-    console.log('[MediaResolve] Returning external URL as-is:', filePathOrUrl);
     return filePathOrUrl;
   }
 
   // 2. Data URLs are returned as-is
   if (filePathOrUrl.startsWith('data:')) {
-    console.log('[MediaResolve] Returning Data URL as-is');
     return filePathOrUrl;
   }
 
   // 3. If it's a proxy path (starts with /media, /storage, /files, etc)
   if (filePathOrUrl.startsWith('/')) {
     resolvedUrl = `${base}${filePathOrUrl}`;
-    console.log('[MediaResolve] Handled absolute path:', { original: filePathOrUrl, resolved: resolvedUrl });
     return resolvedUrl;
   }
 
   // 4. If it's a relative path containing a slash, assume it's a sub-path
   if (filePathOrUrl.includes('/')) {
     resolvedUrl = `${base}/${filePathOrUrl.replace(/^\/+/, '')}`;
-    console.log('[MediaResolve] Handled relative path:', { original: filePathOrUrl, resolved: resolvedUrl });
     return resolvedUrl;
   }
 
@@ -201,12 +192,10 @@ export const resolveBusinessMediaUrl = (
   
   if (!uuidRegex.test(key) && key.includes('.')) {
      resolvedUrl = `${base}/${key}`;
-     console.log('[MediaResolve] Handled raw key (filename):', { original: filePathOrUrl, resolved: resolvedUrl });
      return resolvedUrl;
   }
 
   resolvedUrl = `${base}/media/${bucket}/${key}`;
-  console.log('[MediaResolve] Fallback resolved to proxy:', { original: filePathOrUrl, resolved: resolvedUrl });
   return resolvedUrl;
 };
 

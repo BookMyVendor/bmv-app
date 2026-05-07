@@ -28,6 +28,7 @@ function RootLayoutNav() {
   const [skipBusinessRegistration, setSkipBusinessRegistration] = useState<boolean | null>(null);
   const [isCheckingTerms, setIsCheckingTerms] = useState(false);
   const [isVerifyingBusiness, setIsVerifyingBusiness] = useState(false);
+  const lastBusinessVerifyRef = useRef<number>(0);
 
   // Function to check storage values
   const checkStorage = useCallback(async () => {
@@ -154,34 +155,34 @@ function RootLayoutNav() {
 
       // EXISTING USER or PROFILE COMPLETE - check for business requirement
       if (session && isProfileComplete) {
-        let hasBusiness = profile?.has_business;
+        const hasBusiness = profile?.has_business;
 
         // If profile says no business, verify by calling the API directly
         // This handles the case where user reinstalls app and API cache is stale
-        if (!hasBusiness && !skipBusinessRegistration && !isVerifyingBusiness) {
+        const now = Date.now();
+        const canVerify = now - lastBusinessVerifyRef.current > 5000;
+        if (!hasBusiness && !skipBusinessRegistration && !isVerifyingBusiness && canVerify) {
+          lastBusinessVerifyRef.current = now;
           setIsVerifyingBusiness(true);
           try {
             console.log('[NAV] Verifying business status via API...');
             await refreshProfile();
-            // After refresh, get the updated has_business value
-            hasBusiness = profile?.has_business;
           } catch (e) {
             console.error('[NAV] Error verifying business status:', e);
           } finally {
             setIsVerifyingBusiness(false);
           }
+          return;
         }
 
         if (!hasBusiness && !skipBusinessRegistration) {
-          // If profile is complete but no business exists, they must go to registration
           if (!inBusinessReg) {
             router.replace('/business-registration');
           }
           return;
         }
 
-        // Only redirect to dashboard if they are coming from an setup/auth screen
-        if (inAuthGroup || inTermsAndConditions || inOnboarding || inCompleteProfile) {
+        if (hasBusiness && (inAuthGroup || inTermsAndConditions || inOnboarding || inCompleteProfile || inBusinessReg)) {
           console.log('[NAV] Redirecting to dashboard');
           router.replace('/(tabs)');
         }

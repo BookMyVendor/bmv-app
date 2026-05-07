@@ -136,7 +136,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsOffline(false);
       const profileData: UserProfile = {
         ...data,
-        has_business: Boolean(data.vendor_businesses && data.vendor_businesses.length > 0),
+        has_business:
+          typeof data.has_business === 'boolean'
+            ? data.has_business
+            : Boolean(data.vendor_businesses && data.vendor_businesses.length > 0),
       };
       setProfile(profileData);
       AsyncStorage.setItem(`cached_profile_${userId}`, JSON.stringify(profileData)).catch(() => { });

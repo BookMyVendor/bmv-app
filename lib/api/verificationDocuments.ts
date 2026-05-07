@@ -9,10 +9,13 @@ export interface VerificationDocument {
   document_type_name: string;
   file_id: string;
   file_url: string | null;
+  url?: string | null;            // Backend returns `url` instead of `file_url`
   file_name: string | null;
   mime_type: string | null;
+  document_type?: string | null;  // Backend list returns `document_type` (display name)
   verification_status: 'pending' | 'verified' | 'rejected';
   uploaded_at: string;
+  created_at?: string;
 }
 
 /** Spec: vendor-businesses-verification-documents-list { business_id } */

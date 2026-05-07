@@ -175,7 +175,8 @@ export default function LoginScreen() {
       // ✅ SUCCESS — user is logged in
       // AuthContext now has session + profile loaded
       // The navigation logic in _layout.tsx will automatically route the user
-      // Keep loading true so user sees spinner while navigation happens
+      // Set loading to false so navigation can proceed
+      setLoading(false);
 
     } catch (error) {
       console.error('Unexpected error during OTP verification:', error);
@@ -183,7 +184,7 @@ export default function LoginScreen() {
       hasError = true;
     } finally {
       isVerifyingRef.current = false;
-      // Only set loading to false on errors
+      // Set loading to false on errors (already set on success above)
       if (hasError) {
         setLoading(false);
       }
