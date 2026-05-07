@@ -182,8 +182,8 @@ function RootLayoutNav() {
           return;
         }
 
-        if (hasBusiness && (inAuthGroup || inTermsAndConditions || inOnboarding || inCompleteProfile || inBusinessReg)) {
-          console.log('[NAV] Redirecting to dashboard');
+       if (inAuthGroup || inTermsAndConditions || inOnboarding || inCompleteProfile) {
+          console.log('[NAV] User has profile and business - redirecting to dashboard');
           router.replace('/(tabs)');
         }
         return;
