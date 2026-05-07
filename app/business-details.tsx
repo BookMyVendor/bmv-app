@@ -75,7 +75,7 @@ import {
   getPublicUrl,
   resolveBusinessMediaUrl,
 } from '../lib/businessApi';
-import { getFileUrl } from '../lib/api/fileStorage';
+import { getAuthFunctionsBaseUrl } from '../lib/apiConfig';
 import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '../lib/documentUpload';
 import { validatePincode } from '../lib/pincodeValidation';
 import { validateEmail, getEmailError } from '../lib/validation';
@@ -98,6 +98,11 @@ const EXPERIENCE_OPTIONS = [
  */
 function getFullImageUrl(filePathOrUrl: string | null | undefined): string | null {
   return resolveBusinessMediaUrl(filePathOrUrl);
+}
+
+function getVerificationDocumentUrl(fileId: string): string {
+  const fileGetBase = getAuthFunctionsBaseUrl() + 'vendor-businesses-verification-documents-file-get';
+  return `${fileGetBase}?file_id=${fileId}`;
 }
 
 // Helper to convert numeric years to display string
@@ -366,7 +371,7 @@ export default function BusinessDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
 
   const [business, setBusiness] = useState<any>(null);
   const [offers, setOffers] = useState<Offer[]>([]);
@@ -407,6 +412,7 @@ export default function BusinessDetailsScreen() {
   const [defaultPackageId, setDefaultPackageId] = useState<string | null>(null);
   const [activeMenuImageId, setActiveMenuImageId] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
+  const authTokenRef = useRef<string>('');
 
   const handleFieldFocus = () => {
     // Removed scrollToEnd call that was causing the screen to jump to the bottom
@@ -1820,38 +1826,68 @@ export default function BusinessDetailsScreen() {
         typeMap[t.id] = { code: t.type_code, name: t.name };
       });
 
+      const { getAccessToken } = require('../lib/tokenStorage');
+      const token = await getAccessToken();
+      authTokenRef.current = token || '';
+
       console.log('[Verification] RAW documents from backend:', JSON.stringify(rawDocs, null, 2));
       
-      // Enrich documents with missing info (workaround for backend list API)
+      // Enrich documents with missing info and fetch images as base64
       const enrichedDocs = await Promise.all(rawDocs.map(async (doc) => {
-        const enriched = { ...doc };
+        const enriched = { ...doc } as any;
         
-        // 1. Fill missing type info
+        // 1. Build file_url from new document file-get API (replaces old signed MinIO URLs)
+        const fileGetBase = getAuthFunctionsBaseUrl() + 'vendor-businesses-verification-documents-file-get';
+        if (enriched.file_id && enriched.business_id) {
+          enriched.file_url = `${fileGetBase}?file_id=${enriched.file_id}&business_id=${enriched.business_id}`;
+        } else if (!enriched.file_url && enriched.url) {
+          enriched.file_url = enriched.url;
+        }
+
+        // 2. Fill missing type info
         if (!enriched.document_type_code && enriched.document_type_id && typeMap[enriched.document_type_id]) {
           enriched.document_type_code = typeMap[enriched.document_type_id].code;
           enriched.document_type_name = typeMap[enriched.document_type_id].name;
         }
 
-        // 2. Fill missing verification status
+        // 3. Fill missing verification status
         if (!enriched.verification_status) {
           enriched.verification_status = 'pending';
         }
 
-        // 3. Fill missing file URL/info
-        if (!enriched.file_url && enriched.file_id) {
-          try {
-            const urlRes = await getFileUrl(enriched.file_id);
-            if (urlRes.data?.url) {
-              enriched.file_url = urlRes.data.url;
+        // 4. Fill missing mime type (use original url which has file extension, before we overwrite file_url)
+        if (!enriched.mime_type) {
+          if (enriched.url) {
+            enriched.mime_type = inferMimeType(enriched.url);
+          }
+          if (!enriched.mime_type && enriched.document_type_code) {
+            const code = enriched.document_type_code.toLowerCase();
+            if (code === 'pan' || code === 'gst' || code === 'business_license') {
+              enriched.mime_type = 'image/jpeg';
             }
-          } catch (e) {
-            console.warn(`[Verification] Failed to fetch URL for file ${enriched.file_id}`, e);
           }
         }
 
-        // 4. Fill missing mime type from file URL
-        if (!enriched.mime_type && enriched.file_url) {
-          enriched.mime_type = inferMimeType(enriched.file_url);
+        // 5. Fetch image as base64 if it's an image
+        if (isImageFile(enriched.mime_type || '') && enriched.file_url && token) {
+          try {
+            const response = await fetch(enriched.file_url, {
+              headers: {
+                'Authorization': `Bearer ${token}`
+              }
+            });
+            if (response.ok) {
+              const blob = await response.blob();
+              const base64 = await new Promise<string>((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.readAsDataURL(blob);
+              });
+              enriched.image_base64 = base64;
+            }
+          } catch (error) {
+            console.warn('[Verification] Failed to fetch image as base64:', error);
+          }
         }
 
         return enriched;
@@ -1860,9 +1896,8 @@ export default function BusinessDetailsScreen() {
       console.log('[Verification] Enriched documents:', enrichedDocs.map(d => ({
         id: d.id,
         document_type_code: d.document_type_code,
-        file_url: d.file_url,
+        file_url: d.file_url?.substring(0, 80),
         mime_type: d.mime_type,
-        file_name: d.file_name
       })));
       setVerificationDocuments(enrichedDocs);
     } catch (error) {
@@ -1881,7 +1916,8 @@ export default function BusinessDetailsScreen() {
 // Helper to infer mime type from file URL
   const inferMimeType = (fileUrl: string): string | null => {
     if (!fileUrl) return null;
-    const lowerUrl = fileUrl.toLowerCase();
+    const urlWithoutQuery = fileUrl.split('?')[0].split('#')[0];
+    const lowerUrl = urlWithoutQuery.toLowerCase();
     if (lowerUrl.endsWith('.jpg') || lowerUrl.endsWith('.jpeg')) return 'image/jpeg';
     if (lowerUrl.endsWith('.png')) return 'image/png';
     if (lowerUrl.endsWith('.pdf')) return 'application/pdf';
@@ -1933,7 +1969,7 @@ export default function BusinessDetailsScreen() {
           Alert.alert('Upload Error', `Failed to upload ${file.name || 'document'}: ${uploadError.message}`);
         } else {
           console.log(`[handleUploadDocument][${timestamp}] Upload successful for ${file.name}, data:`, data);
-          console.log(`[handleUploadDocument][${timestamp}] file_url: ${data?.file_url}, mime_type: ${data?.mime_type}, document_type_code: ${data?.document_type_code}`);
+          console.log(`[handleUploadDocument][${timestamp}] file_url: ${data?.file_url || (data as any)?.url}, mime_type: ${data?.mime_type}, document_type_code: ${data?.document_type_code}`);
           await loadVerificationDocuments();
         }
       }
@@ -3996,8 +4032,12 @@ export default function BusinessDetailsScreen() {
                     <View style={styles.inlineDocumentsList}>
                       {(documentsByType['pan'] || []).map((doc: any) => (
                         <View key={doc.id} style={styles.documentItem}>
-                          {isImageFile(doc.mime_type || '') && doc.file_url ? (
-                            <Image source={{ uri: resolveBusinessMediaUrl(doc.file_url) || '' }} style={styles.documentThumbnail} />
+                          {isImageFile(doc.mime_type || '') && (doc.image_base64 || doc.file_id) ? (
+                            <Image 
+                              source={{ uri: doc.image_base64 || getVerificationDocumentUrl(doc.file_id) }}
+                              style={styles.documentThumbnail}
+                              onError={(e) => console.warn('[Verification] Image load error PAN:', e.nativeEvent?.error)}
+                            />
                           ) : (
                             <View style={styles.documentIcon}>
                               <FileText size={20} color="#666" />
@@ -4064,8 +4104,12 @@ export default function BusinessDetailsScreen() {
                     <View style={styles.inlineDocumentsList}>
                       {(documentsByType['gst'] || []).map((doc: any) => (
                         <View key={doc.id} style={styles.documentItem}>
-                          {isImageFile(doc.mime_type || '') && doc.file_url ? (
-                            <Image source={{ uri: resolveBusinessMediaUrl(doc.file_url) || '' }} style={styles.documentThumbnail} />
+                          {isImageFile(doc.mime_type || '') && (doc.image_base64 || doc.file_id) ? (
+                            <Image 
+                              source={{ uri: doc.image_base64 || getVerificationDocumentUrl(doc.file_id) }}
+                              style={styles.documentThumbnail}
+                              onError={(e) => console.warn('[Verification] Image load error GST:', e.nativeEvent?.error)}
+                            />
                           ) : (
                             <View style={styles.documentIcon}>
                               <FileText size={20} color="#666" />
@@ -4126,29 +4170,26 @@ export default function BusinessDetailsScreen() {
                         {docs.length > 0 && (
                           <View style={styles.documentsList}>
                             {docs.map((doc) => (
-                              <View key={doc.id} style={styles.documentItem}>
-                                {isImageFile(doc.mime_type || '') && doc.file_url ? (
-                                  <Image source={{ uri: resolveBusinessMediaUrl(doc.file_url) || '' }} style={styles.documentThumbnail} />
-                                ) : (
-                                  <View style={styles.documentIcon}>
-                                    <FileText size={20} color="#666" />
+                                <View key={doc.id} style={styles.documentItem}>
+                                  {isImageFile(doc.mime_type || '') && (doc.image_base64 || doc.file_id) ? (
+                                    <Image 
+                                      source={{ uri: doc.image_base64 || getVerificationDocumentUrl(doc.file_id) }}
+                                      style={styles.documentThumbnail}
+                                      onError={(e) => console.warn('[Verification] Image load error:', e.nativeEvent?.error)}
+                                    />
+                                  ) : (
+                                    <View style={styles.documentIcon}>
+                                      <FileText size={20} color="#666" />
+                                    </View>
+                                  )}
+                                  <View style={styles.documentInfo}>
+                                    <Text style={styles.documentName} numberOfLines={1}>{doc.file_name || doc.document_type_name || 'Document'}</Text>
+                                    <Text style={styles.documentStatus}>Status: {doc.verification_status}</Text>
                                   </View>
-                                )}
-                                <View style={styles.documentInfo}>
-                                  <Text style={styles.documentName} numberOfLines={1}>
-                                    {doc.file_name || 'Document'}
-                                  </Text>
-                                  <Text style={styles.documentStatus}>
-                                    Status: {doc.verification_status}
-                                  </Text>
+                                  <TouchableOpacity style={styles.deleteDocumentButton} onPress={() => handleDeleteDocument(doc.id)}>
+                                    <X size={16} color="#fff" />
+                                  </TouchableOpacity>
                                 </View>
-                                <TouchableOpacity
-                                  style={styles.deleteDocumentButton}
-                                  onPress={() => handleDeleteDocument(doc.id)}
-                                >
-                                  <X size={16} color="#fff" />
-                                </TouchableOpacity>
-                              </View>
                             ))}
                           </View>
                         )}

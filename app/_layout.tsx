@@ -28,6 +28,7 @@ function RootLayoutNav() {
   const [skipBusinessRegistration, setSkipBusinessRegistration] = useState<boolean | null>(null);
   const [isCheckingTerms, setIsCheckingTerms] = useState(false);
   const [isVerifyingBusiness, setIsVerifyingBusiness] = useState(false);
+  const lastBusinessVerifyRef = useRef<number>(0);
 
   // Function to check storage values
   const checkStorage = useCallback(async () => {
@@ -158,7 +159,10 @@ function RootLayoutNav() {
 
         // If profile says no business, verify by calling the API directly
         // This handles the case where user reinstalls app and API cache is stale
-        if (!hasBusiness && !skipBusinessRegistration && !isVerifyingBusiness) {
+        const now = Date.now();
+        const canVerify = now - lastBusinessVerifyRef.current > 5000;
+        if (!hasBusiness && !skipBusinessRegistration && !isVerifyingBusiness && canVerify) {
+          lastBusinessVerifyRef.current = now;
           setIsVerifyingBusiness(true);
           try {
             console.log('[NAV] Verifying business status via API...');
