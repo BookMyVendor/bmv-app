@@ -220,7 +220,8 @@ export default function LeadFormScreen() {
         const { data: created, error } = await createLead(leadData);
         if (error) throw new Error(error.error);
         if (created?.id) {
-          await createLeadCommunication(created.id, {
+          await createLeadCommunication({
+            lead_id: created.id,
             vendor_id: user?.id,
             communication_type: 'message',
             message: 'New lead added to the system',

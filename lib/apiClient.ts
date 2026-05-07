@@ -1,5 +1,5 @@
 import { getAccessToken, isTokenExpiredOrExpiringSoon, clearTokens } from './tokenStorage';
-import { refreshAccessToken } from './otpAuthApi';
+import { refreshAccessToken } from './refreshToken';
 import { getApiBaseUrl, getAuthFunctionsBaseUrl } from './apiConfig';
 import { triggerAuthFailure } from './authFailure';
 
@@ -158,7 +158,24 @@ export async function functionsCall<T = any>(
     }
 
     const payload = text ? data : undefined;
-    const unwrapped = responseKey && payload && payload[responseKey] !== undefined ? payload[responseKey] : payload;
+    let unwrapped = payload;
+    if (responseKey && payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      if ((payload as any)[responseKey] !== undefined) {
+        unwrapped = (payload as any)[responseKey];
+      } else if ((payload as any).data !== undefined) {
+        unwrapped = (payload as any).data;
+      } else if ((payload as any).items !== undefined) {
+        unwrapped = (payload as any).items;
+      } else if ((payload as any).success !== undefined) {
+        // Fallback: look for ANY array in the payload if the primary key is missing
+        const firstArray = Object.values(payload).find(v => Array.isArray(v));
+        if (firstArray !== undefined) {
+          unwrapped = firstArray;
+        } else {
+          unwrapped = undefined;
+        }
+      }
+    }
     return { data: unwrapped as T };
   } catch (err: any) {
     return {

@@ -1,4 +1,4 @@
-import { functionsCall } from '../apiClient';
+import { axiosFunctionsCall } from '../axiosClient';
 
 export interface DocumentType {
   id: string;
@@ -12,5 +12,5 @@ export interface DocumentType {
 export async function getDocumentTypes(typeCodes?: string[]) {
   const body: Record<string, unknown> = {};
   if (typeCodes?.length) body.type_code = typeCodes.length === 1 ? typeCodes[0] : typeCodes;
-  return functionsCall<DocumentType[]>('document-types-list', body, 'document_types');
+  return axiosFunctionsCall<DocumentType[]>('document-types-list', body, 'document_types');
 }

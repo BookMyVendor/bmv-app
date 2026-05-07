@@ -17,6 +17,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import PagerView from 'react-native-pager-view';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -41,10 +42,12 @@ import {
   MoreVertical,
   Search,
   WifiOff,
+  Video,
 } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
-import { getBusinessCategoryMappings, updateBusinessCategoryMappings } from '../lib/api/packages';
-import { getCategories } from '../lib/api/categories';
+import { updateBusinessCategoryMappings } from '../lib/api/packages';
+import { getCategories, getCategoryTree } from '../lib/api/categories';
+import { Video as ExpoVideo, ResizeMode } from 'expo-av';
 import {
   getBusinessDetails,
   getOffers,
@@ -59,14 +62,20 @@ import {
   pickImage,
   pickMultipleImages,
   uploadMultipleBusinessImages,
+  uploadBusinessVideo,
+  pickVideo,
   setCoverImage,
   getBusinessVerificationDocuments,
+  getDocumentTypes,
   uploadVerificationDocument,
   deleteVerificationDocument,
   VerificationDocument,
   Offer,
   PortfolioImage,
+  getPublicUrl,
+  resolveBusinessMediaUrl,
 } from '../lib/businessApi';
+import { getAuthFunctionsBaseUrl } from '../lib/apiConfig';
 import { pickDocuments, DocumentFile, isImageFile, isPdfFile } from '../lib/documentUpload';
 import { validatePincode } from '../lib/pincodeValidation';
 import { validateEmail, getEmailError } from '../lib/validation';
@@ -82,6 +91,20 @@ const EXPERIENCE_OPTIONS = [
   'More than 10 years',
 ];
 
+/**
+ * Helper to convert a file path to a full URL.
+ * If the input is already a full URL (starts with http), return as-is.
+ * If it's a file path, prepend the API base URL.
+ */
+function getFullImageUrl(filePathOrUrl: string | null | undefined): string | null {
+  return resolveBusinessMediaUrl(filePathOrUrl);
+}
+
+function getVerificationDocumentUrl(fileId: string): string {
+  const fileGetBase = getAuthFunctionsBaseUrl() + 'vendor-businesses-verification-documents-file-get';
+  return `${fileGetBase}?file_id=${fileId}`;
+}
+
 // Helper to convert numeric years to display string
 const getExperienceDisplayValue = (years: number | null | undefined): string => {
   if (years === null || years === undefined) return '';
@@ -90,6 +113,38 @@ const getExperienceDisplayValue = (years: number | null | undefined): string => 
   if (years >= 3 && years < 5) return '3-5 years';
   if (years >= 5 && years < 10) return '5-10 years';
   return 'More than 10 years';
+};
+
+// Helper to convert experience display string to numeric years (highest in range)
+const parseExperienceToYears = (val: string | number | null | undefined): number | null => {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'number') return val;
+
+  const s = val.toLowerCase().trim();
+
+  // Direct numeric input
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+
+  // "Less than 1 year" -> 0
+  if (s.includes('less than') || s.includes('< 1')) return 0;
+
+  // "1-3 years" -> 3 (highest in range)
+  if (s.includes('1-3')) return 3;
+
+  // "3-5 years" -> 5 (highest in range)
+  if (s.includes('3-5')) return 5;
+
+  // "5-10 years" -> 10 (highest in range)
+  if (s.includes('5-10')) return 10;
+
+  // "More than 10 years" -> 15 (arbitrary high value)
+  if (s.includes('more than') || s.includes('> 10')) return 15;
+
+  // Fallback: try to extract any number
+  const match = s.match(/(\d+)/);
+  if (match) return parseInt(match[1], 10);
+
+  return null;
 };
 
 // Helper to convert display string to numeric years
@@ -177,11 +232,146 @@ const OPERATING_CITIES = [
 
 type SectionType = 'offers' | 'gallery' | 'packages' | 'edit';
 
+// Separate component for image grid item to avoid hooks violation
+interface ImageGridItemProps {
+  item: PortfolioImage;
+  index: number;
+  activeMenuImageId: string | null;
+  setActiveMenuImageId: (id: string | null) => void;
+  setPreviewInitialIndex: (index: number) => void;
+  setCurrentPreviewIndex: (index: number) => void;
+  setShowImagePreview: (show: boolean) => void;
+  handleSetCoverImage: (item: PortfolioImage) => void;
+  handleDeleteImage: (item: PortfolioImage) => void;
+}
+
+const ImageGridItem: React.FC<ImageGridItemProps> = ({
+  item,
+  index,
+  activeMenuImageId,
+  setActiveMenuImageId,
+  setPreviewInitialIndex,
+  setCurrentPreviewIndex,
+  setShowImagePreview,
+  handleSetCoverImage,
+  handleDeleteImage,
+}) => {
+  const imageSource = item.image_base64 || resolveBusinessMediaUrl(item.image_url);
+  const isCover = item.image_type === 'cover';
+  const isVideo = item.image_type === 'video' || 
+                 (typeof item.image_url === 'string' && 
+                  (item.image_url.toLowerCase().endsWith('.mp4') || 
+                   item.image_url.toLowerCase().endsWith('.mov') || 
+                   item.image_url.toLowerCase().endsWith('.avi')));
+  const isMenuOpen = activeMenuImageId === item.id;
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageError, setImageError] = useState(false);
+
+  return (
+    <View style={styles.imageGridItemContainer}>
+      <TouchableOpacity
+        style={styles.imageGridItem}
+        activeOpacity={0.9}
+        onPress={() => {
+          if (activeMenuImageId) {
+            setActiveMenuImageId(null);
+          } else {
+            setPreviewInitialIndex(index);
+            setCurrentPreviewIndex(index);
+            setShowImagePreview(true);
+          }
+        }}
+      >
+        {isVideo ? (
+          <View style={styles.galleryImage}>
+            <ExpoVideo
+              source={{ uri: imageSource ?? '' }}
+              style={styles.galleryImage}
+              resizeMode={ResizeMode.COVER}
+              shouldPlay={false}
+              useNativeControls={false}
+              isMuted={true}
+            />
+            <View style={styles.videoBadge}>
+              <Video size={16} color="#fff" />
+            </View>
+          </View>
+        ) : (
+          <View style={styles.galleryImage}>
+            {!imageLoaded && !imageError && (
+              <View style={styles.imageLoadingContainer}>
+                <ActivityIndicator size="small" color="#6aa3ce" />
+              </View>
+            )}
+            {imageError ? (
+              <View style={styles.imageErrorContainer}>
+                <ImageIcon size={32} color="#ccc" />
+              </View>
+            ) : (
+              <Image
+                source={{ uri: imageSource ?? '' }}
+                style={[styles.galleryImage, !imageLoaded && styles.imageHidden]}
+                resizeMode="cover"
+                onLoad={() => setImageLoaded(true)}
+                onError={() => {
+                  setImageError(true);
+                  setImageLoaded(true);
+                  console.error(`[ImageGridItem] Failed to load image: ${imageSource}`);
+                }}
+              />
+            )}
+          </View>
+        )}
+
+        {isCover && (
+          <View style={styles.coverBadge}>
+            <Text style={styles.coverBadgeText}>Cover</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.menuButton}
+        onPress={() => setActiveMenuImageId(isMenuOpen ? null : item.id)}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      >
+        <View style={styles.menuButtonCircle}>
+          <MoreVertical size={18} color="#fff" />
+        </View>
+      </TouchableOpacity>
+
+      {isMenuOpen && (
+        <View style={styles.menuOptions}>
+          <TouchableOpacity
+            style={styles.menuOptionItem}
+            onPress={() => {
+              setActiveMenuImageId(null);
+              handleSetCoverImage(item);
+            }}
+          >
+            <Text style={styles.menuOptionText}>Set Cover Image</Text>
+          </TouchableOpacity>
+          <View style={styles.menuDivider} />
+          <TouchableOpacity
+            style={styles.menuOptionItem}
+            onPress={() => {
+              setActiveMenuImageId(null);
+              handleDeleteImage(item);
+            }}
+          >
+            <Text style={[styles.menuOptionText, styles.menuDeleteText]}>Delete</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+};
+
 export default function BusinessDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
 
   const [business, setBusiness] = useState<any>(null);
   const [offers, setOffers] = useState<Offer[]>([]);
@@ -193,7 +383,8 @@ export default function BusinessDetailsScreen() {
 
   const [showOfferModal, setShowOfferModal] = useState(false);
   const [showImagePreview, setShowImagePreview] = useState(false);
-  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [previewInitialIndex, setPreviewInitialIndex] = useState(0);
+  const [currentPreviewIndex, setCurrentPreviewIndex] = useState(0);
   const [editingOffer, setEditingOffer] = useState<Offer | null>(null);
 
   const [offerTitle, setOfferTitle] = useState('');
@@ -211,7 +402,8 @@ export default function BusinessDetailsScreen() {
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [verificationDocuments, setVerificationDocuments] = useState<VerificationDocument[]>([]);
   const [loadingDocuments, setLoadingDocuments] = useState(false);
-  const [uploadingDocument, setUploadingDocument] = useState<string | null>(null); // document type code
+  const [uploadingDocument, setUploadingDocument] = useState<string | null>(null); // document type id
+  const [documentTypes, setDocumentTypes] = useState<any[]>([]);
   const [packages, setPackages] = useState<any[]>([]);
   const [loadingPackages, setLoadingPackages] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -220,6 +412,7 @@ export default function BusinessDetailsScreen() {
   const [defaultPackageId, setDefaultPackageId] = useState<string | null>(null);
   const [activeMenuImageId, setActiveMenuImageId] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
+  const authTokenRef = useRef<string>('');
 
   const handleFieldFocus = () => {
     // Removed scrollToEnd call that was causing the screen to jump to the bottom
@@ -234,9 +427,10 @@ export default function BusinessDetailsScreen() {
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
   const [selectedEventIds, setSelectedEventIds] = useState<string[]>([]);
   const [expandedCategoryIds, setExpandedCategoryIds] = useState<Set<string>>(new Set());
-  const [expandedEventCategoryIds, setExpandedEventCategoryIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [eventSearchQuery, setEventSearchQuery] = useState('');
+  const [isPrimaryModalOpen, setIsPrimaryModalOpen] = useState(false);
+  const [primarySearchQuery, setPrimarySearchQuery] = useState('');
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isRootDropdownOpen, setIsRootDropdownOpen] = useState(false);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
@@ -263,7 +457,6 @@ export default function BusinessDetailsScreen() {
 
   // Refs for keyboard navigation in edit form
   const contactPersonNameRef = useRef<TextInput>(null);
-  const contactPersonRoleRef = useRef<TextInput>(null);
   const businessEmailRef = useRef<TextInput>(null);
   const contactPersonPhoneRef = useRef<TextInput>(null);
   const businessDescriptionRef = useRef<TextInput>(null);
@@ -355,13 +548,68 @@ export default function BusinessDetailsScreen() {
 
       if (businessRes.error) throw businessRes.error;
 
-      setBusiness(businessRes.data);
+      // DEBUG: Log raw API response
+      console.log('[loadData] DEBUG - Raw API response keys:', Object.keys(businessRes.data || {}));
+      console.log('[loadData] DEBUG - Raw category data:', {
+        business_category: businessRes.data?.business_category,
+        primary_category_id: businessRes.data?.primary_category_id,
+        category_ids: businessRes.data?.category_ids,
+        vendor_business_category_mappings: businessRes.data?.vendor_business_category_mappings,
+      });
+      console.log('[loadData] DEBUG - Raw contact data:', {
+        contact_person_name: businessRes.data?.contact_person_name,
+        contact_name: businessRes.data?.contact_name,
+        vendor: businessRes.data?.vendor,
+      });
+      console.log('[loadData] DEBUG - Raw location data:', {
+        operating_locations: businessRes.data?.operating_locations,
+        availability: businessRes.data?.availability,
+        cities: businessRes.data?.cities,
+      });
+
+      // Normalize business data keys with multiple fallback field names
+      const rawBusiness = businessRes.data?.vendor_business || businessRes.data;
+      const normalizedBusiness = rawBusiness ? {
+        ...rawBusiness,
+        business_name: rawBusiness.business_name || rawBusiness.name || '',
+        business_email: rawBusiness.business_email || rawBusiness.email || '',
+        contact_person_phone: rawBusiness.contact_person_phone || rawBusiness.phone || rawBusiness.contact_phone || '',
+        contact_person_name: rawBusiness.contact_person_name || rawBusiness.contact_name || rawBusiness.primary_contact_name ||
+          (rawBusiness.vendor?.first_name && rawBusiness.vendor?.last_name
+            ? `${rawBusiness.vendor.first_name} ${rawBusiness.vendor.last_name}`.trim()
+            : rawBusiness.vendor?.first_name || rawBusiness.vendor?.last_name || ''),
+        operating_locations: rawBusiness.operating_locations || rawBusiness.availability || rawBusiness.cities || rawBusiness.service_locations || [],
+        // Preserve category data from API
+        category_ids: rawBusiness.category_ids || [],
+      } : {};
+
+      // Get full URL for cover photo (API returns full MinIO/S3 URLs or file paths)
+      const coverPhotoUrl = getFullImageUrl(rawBusiness?.cover_photo_url || rawBusiness?.cover_image_file_id);
+      if (coverPhotoUrl && normalizedBusiness) {
+        normalizedBusiness.cover_photo_url = coverPhotoUrl;
+      }
+
+      console.log('[loadData] DEBUG - Normalized business:', {
+        business_name: normalizedBusiness.business_name,
+        contact_person_name: normalizedBusiness.contact_person_name,
+        operating_locations: normalizedBusiness.operating_locations,
+        business_category: normalizedBusiness.business_category,
+        category_ids: normalizedBusiness.category_ids,
+        years_experience: normalizedBusiness.years_experience,
+        cover_photo_url: normalizedBusiness.cover_photo_url,
+        city: normalizedBusiness.city,
+        locality: normalizedBusiness.locality,
+        state: normalizedBusiness.state,
+        address: normalizedBusiness.address,
+      });
+
+      setBusiness(normalizedBusiness);
       setIsOffline(false);
       try {
-        AsyncStorage.setItem(`business_details_${id}`, JSON.stringify(businessRes.data));
-      } catch (e) {}
+        AsyncStorage.setItem(`business_details_${id}`, JSON.stringify(normalizedBusiness));
+      } catch (e) { }
 
-      const dataToEdit = businessRes.data ? { ...businessRes.data } : {};
+      const dataToEdit = { ...normalizedBusiness };
       if (dataToEdit.contact_person_phone) {
         dataToEdit.contact_person_phone = stripCountryCode(dataToEdit.contact_person_phone);
       }
@@ -385,59 +633,30 @@ export default function BusinessDetailsScreen() {
       let allImages = imagesRes.data || [];
 
       // If business has cover_photo_url and it's not already in images, add it
-      if (businessRes.data?.cover_photo_url) {
-        const coverExists = allImages.some(
-          (img) => img.image_url === businessRes.data.cover_photo_url || img.image_type === 'cover'
-        );
-
-        if (!coverExists) {
-          // Add cover photo as the first image
-          allImages = [
-            {
-              id: `cover-${id}`, // Temporary ID for cover photo
-              business_id: id,
-              image_url: businessRes.data.cover_photo_url,
-              image_base64: null,
-              display_order: 0,
-              created_at: businessRes.data.created_at || new Date().toISOString(),
-              image_type: 'cover',
-            },
-            ...allImages,
-          ];
-        }
+      // Note: coverPhotoUrl is already fetched above, reuse it
+      if (coverPhotoUrl && !allImages.some(img => img.image_type === 'cover' || img.image_url === coverPhotoUrl)) {
+        // Add cover photo as the first image
+        allImages = [
+          {
+            id: `cover-${id}`, // Temporary ID for cover photo
+            business_id: id,
+            image_url: coverPhotoUrl,
+            image_base64: null,
+            display_order: 0,
+            created_at: businessRes.data.created_at || new Date().toISOString(),
+            image_type: 'cover',
+          },
+          ...allImages,
+        ];
       }
 
       setImages(allImages);
 
-      // Load existing category mappings (this will determine businessType)
-      const { businessIds, businessType: determinedType } = await loadCategoryMappings();
+      // Load existing category mappings
+      const { businessType: determinedType } = await loadCategoryMappings(normalizedBusiness);
 
       // Load categories using the determined businessType
-      const fetchedBusinessCategories = await loadCategories(determinedType);
-
-      // After mappings are loaded, determine root category
-      if (businessIds.length > 0) {
-        const selectedCats = fetchedBusinessCategories.filter((cat: any) =>
-          businessIds.includes(cat.id)
-        );
-
-        // Find the root parent for the first selected category
-        const firstSelectedCat = selectedCats[0];
-        if (firstSelectedCat) {
-          let current = firstSelectedCat;
-          // Traverse up to find the root
-          while (current.parent_category_id) {
-            const parent = fetchedBusinessCategories.find((c: any) => c.id === current.parent_category_id);
-            if (!parent) break;
-            current = parent;
-          }
-
-          if (current) {
-            setSelectedRootCategoryId(current.id);
-            setExpandedCategoryIds(new Set([current.id]));
-          }
-        }
-      }
+      await loadCategories(determinedType);
 
       // Load verification documents
       await loadVerificationDocuments();
@@ -447,22 +666,33 @@ export default function BusinessDetailsScreen() {
       const { getBusinessPackages } = await import('../lib/packageApi');
       const { data: packagesData } = await getBusinessPackages(id);
 
+      console.log('[loadData] Packages raw data:', JSON.stringify(packagesData, null, 2));
+
       const activePackages = (packagesData || []).filter((pkg: any) => pkg.is_active !== false);
+      console.log('[loadData] Active packages count:', activePackages.length);
       setPackages(activePackages);
 
       // If we have any packages, use the first one's price/unit for the edit form
       // If we have a 'Standard Package', prefer that
-      let defaultPkg = activePackages.find((p: any) => p.package_name === 'Standard Package');
+      let defaultPkg = activePackages.find((p: any) => p.package_name === 'Standard Package' || p.name === 'Standard Package');
       if (!defaultPkg && activePackages.length > 0) {
         defaultPkg = activePackages[0];
       }
 
+      console.log('[loadData] Default package:', JSON.stringify(defaultPkg, null, 2));
+
       if (defaultPkg) {
         setDefaultPackageId(defaultPkg.id ?? null);
+        // Backend returns 'price' (not 'base_price') and 'price_unit'
+        const pkgPrice = (defaultPkg as any).price ?? defaultPkg.base_price ?? null;
+        const pkgUnit = (defaultPkg as any).price_unit ?? (defaultPkg as any).pricing_unit ?? 'per_event';
+        console.log('[loadData] Setting price fields:', { base_price: pkgPrice, pricing_unit: pkgUnit });
         setEditData((prev: any) => ({
           ...prev,
-          base_price: defaultPkg.base_price,
-          pricing_unit: defaultPkg.price_unit
+          base_price: pkgPrice,
+          pricing_unit: pkgUnit,
+          initial_base_price: pkgPrice,
+          initial_pricing_unit: pkgUnit,
         }));
       } else {
         setDefaultPackageId(null);
@@ -481,26 +711,50 @@ export default function BusinessDetailsScreen() {
     }
   };
 
-  const loadCategoryMappings = async (): Promise<{ businessIds: string[]; eventIds: string[]; businessType: 'services' | 'rental' }> => {
+  const loadCategoryMappings = async (rawBusiness?: any): Promise<{ businessIds: string[]; eventIds: string[]; businessType: 'services' | 'rental' }> => {
     try {
-      const { data: mappings, error } = await getBusinessCategoryMappings(id);
-      if (error) {
-        console.error('Error loading category mappings:', error);
-        return { businessIds: [], eventIds: [], businessType: 'services' };
+      const biz = rawBusiness || business;
+      if (!biz) return { businessIds: [], eventIds: [], businessType: 'services' };
+
+      // Get category IDs from business object
+      let allCategoryIds: string[] = [];
+
+      if (Array.isArray(biz.category_ids)) {
+        allCategoryIds = biz.category_ids.filter(Boolean);
+      } else if (Array.isArray(biz.categories)) {
+        allCategoryIds = biz.categories.map((c: any) => c.id || c.category_id || c).filter(Boolean);
+      } else if (biz.category_id) {
+        allCategoryIds = [biz.category_id].filter(Boolean);
       }
-      const list = mappings || [];
-      if (list.length === 0) {
+
+      if (allCategoryIds.length === 0) {
         setBusinessType('services');
         return { businessIds: [], eventIds: [], businessType: 'services' };
       }
-      const allCategoryIds = list.map((m: any) => m.category_id || m.categories?.id).filter(Boolean);
-      const { data: categories } = await getCategories();
-      const catList = categories || [];
+
+      const { data: treeData, error: treeError } = await getCategoryTree();
+      if (treeError) {
+        console.error('Error loading category tree for mappings:', treeError);
+      }
+
+      const tree = Array.isArray(treeData) ? treeData : [];
+      const flatList: any[] = [];
+      const flatten = (nodes: any[]) => {
+        nodes.forEach(node => {
+          flatList.push(node);
+          if (node.children && node.children.length > 0) {
+            flatten(node.children);
+          }
+        });
+      };
+      flatten(tree);
+
       let determinedBusinessType: 'services' | 'rental' = 'services';
       const businessCategoryIds: string[] = [];
       const eventCategoryIds: string[] = [];
+
       allCategoryIds.forEach((cid: string) => {
-        const cat = catList.find((c: any) => c.id === cid);
+        const cat = flatList.find((c: any) => c.id === cid);
         if (cat?.category_type === 'business') {
           businessCategoryIds.push(cid);
           if ((cat as any).business_model === 'rental') determinedBusinessType = 'rental';
@@ -508,11 +762,54 @@ export default function BusinessDetailsScreen() {
           eventCategoryIds.push(cid);
         }
       });
+
       setBusinessType(determinedBusinessType);
-      setEditData((prev: any) => ({ ...prev, businessType: determinedBusinessType }));
+      // Don't set editData here, let the caller handle it if needed
       setSelectedCategoryIds(businessCategoryIds);
       setSelectedEventIds(eventCategoryIds);
-      return { businessIds: businessCategoryIds, eventIds: eventCategoryIds, businessType: determinedBusinessType };
+
+      // Store initial category IDs for change detection
+      setEditData((prev: any) => ({
+        ...prev,
+        initial_category_ids: [...businessCategoryIds, ...eventCategoryIds]
+      }));
+
+      // Determine Primary Category (Root business category)
+      const businessCats = flatList.filter(c => c.category_type === 'business');
+      let rootId = null;
+
+      // Try to find a Root category among businessCategoryIds
+      const selectedRoots = businessCategoryIds.filter(id => {
+        const cat = businessCats.find(c => c.id === id);
+        return cat && !cat.parent_category_id;
+      });
+
+      if (selectedRoots.length > 0) {
+        rootId = selectedRoots[0];
+      } else if (businessCategoryIds.length > 0) {
+        // Fallback: find root for the first selected business category
+        const firstCat = businessCats.find(c => c.id === businessCategoryIds[0]);
+        if (firstCat) {
+          let current = firstCat;
+          while (current.parent_category_id) {
+            const parent = businessCats.find(c => c.id === current.parent_category_id);
+            if (!parent) break;
+            current = parent;
+          }
+          rootId = current.id;
+        }
+      }
+
+      if (rootId) {
+        setSelectedRootCategoryId(rootId);
+        setExpandedCategoryIds(new Set([rootId]));
+      }
+
+      return {
+        businessIds: businessCategoryIds,
+        eventIds: eventCategoryIds,
+        businessType: determinedBusinessType
+      };
     } catch (error) {
       console.error('Error loading category mappings:', error);
       return { businessIds: [], eventIds: [], businessType: 'services' };
@@ -520,25 +817,46 @@ export default function BusinessDetailsScreen() {
   };
 
 
-
   const loadCategories = async (type?: 'services' | 'rental') => {
+    let businessCatsResult: any[] = [];
     try {
       setLoadingCategories(true);
-      const businessParams: any = { category_type: 'business', visible: true };
-      if (type === 'rental') businessParams.business_model = 'rental';
-      const { data: businessCats } = await getCategories(businessParams);
-      const businessCatsResult = businessCats || [];
-      setAllBusinessCategories(businessCatsResult);
+      const { data: treeData, error } = await getCategoryTree();
 
-      const { data: eventCats, error: eventError } = await getCategories({ category_type: 'event', visible: true });
-
-      if (eventError) {
-        console.error('Error fetching event categories:', eventError);
-      } else {
-        setAllEventCategories(eventCats || []);
+      if (error) {
+        console.error('Error fetching category tree in edit:', error);
+        return [];
       }
+
+      const tree = Array.isArray(treeData) ? treeData : [];
+
+      // Flatten for state management compatibility
+      const flatList: any[] = [];
+      const flatten = (nodes: any[]) => {
+        nodes.forEach(node => {
+          flatList.push(node);
+          if (node.children && node.children.length > 0) {
+            flatten(node.children);
+          }
+        });
+      };
+      flatten(tree);
+
+      // Separate and filter categories
+      const businessCats = flatList.filter(c => {
+        if (c.category_type !== 'business') return false;
+        if (type === 'rental') return c.business_model === 'rental';
+        if (type === 'services') return c.business_model === 'service';
+        return true;
+      });
+
+      const eventCats = flatList.filter(c => c.category_type === 'event' && !c.parent_category_id);
+
+      businessCatsResult = businessCats;
+      setAllBusinessCategories(businessCats);
+      setAllEventCategories(eventCats);
     } catch (error) {
-      console.error('Error fetching categories:', error);
+      console.error('Error fetching categories in edit:', error);
     } finally {
       setLoadingCategories(false);
     }
@@ -547,11 +865,12 @@ export default function BusinessDetailsScreen() {
 
   const handleBusinessTypeChange = (type: 'services' | 'rental') => {
     setBusinessType(type);
-    setEditData((prev: any) => ({ ...prev, businessType: type }));
     // Reset category selections when type changes
     setSelectedRootCategoryId(null);
     setSelectedCategoryIds([]);
     setExpandedCategoryIds(new Set());
+    setSelectedEventIds([]);
+    setTempSelectedEventIds([]);
     // Re-fetch categories with new filter
     loadCategories(type);
   };
@@ -644,11 +963,12 @@ export default function BusinessDetailsScreen() {
 
   // Build hierarchical tree structure
   const buildCategoryTree = (categories: any[]): any[] => {
+    const safeCategories = Array.isArray(categories) ? categories : [];
     const categoryMap = new Map<string, any>();
     const rootCategories: any[] = [];
 
     // First pass: create all nodes
-    categories.forEach((cat) => {
+    safeCategories.forEach((cat) => {
       categoryMap.set(cat.id, {
         ...cat,
         children: [],
@@ -656,7 +976,7 @@ export default function BusinessDetailsScreen() {
     });
 
     // Second pass: build tree structure
-    categories.forEach((cat) => {
+    safeCategories.forEach((cat) => {
       const node = categoryMap.get(cat.id)!;
       if (cat.parent_category_id) {
         const parent = categoryMap.get(cat.parent_category_id);
@@ -684,10 +1004,11 @@ export default function BusinessDetailsScreen() {
     return rootCategories;
   };
 
-  // Get full path for a category (excluding root/parent category)
+  // Get full path for a category
   const getCategoryPath = (categoryId: string, categories: any[]): string => {
+    const safeCategories = Array.isArray(categories) ? categories : [];
     const categoryMap = new Map<string, any>();
-    categories.forEach((cat) => categoryMap.set(cat.id, cat));
+    safeCategories.forEach((cat) => categoryMap.set(cat.id, cat));
 
     const path: string[] = [];
     let currentId: string | null = categoryId;
@@ -699,12 +1020,25 @@ export default function BusinessDetailsScreen() {
       currentId = cat.parent_category_id;
     }
 
-    // Remove the root category (first element) if there are multiple levels
-    if (path.length > 1) {
-      path.shift(); // Remove the first element (root category)
+    return path.join(' > ');
+  };
+
+  const getRootCategoryId = (categoryId: string, categories: any[]): string => {
+    const safeCategories = Array.isArray(categories) ? categories : [];
+    const categoryMap = new Map<string, any>();
+    safeCategories.forEach((cat) => categoryMap.set(cat.id, cat));
+
+    let currentId: string | null = categoryId;
+    let rootId = categoryId;
+
+    while (currentId) {
+      const cat = categoryMap.get(currentId);
+      if (!cat) break;
+      rootId = cat.id;
+      currentId = cat.parent_category_id;
     }
 
-    return path.join(' > ');
+    return rootId;
   };
 
   // Filter categories based on search query
@@ -775,10 +1109,21 @@ export default function BusinessDetailsScreen() {
     setSelectedRootCategoryId(categoryId);
     setSelectedCategoryIds([]);
     setExpandedCategoryIds(new Set([categoryId]));
+    
+    // Determine business_type from selected category's business_model
+    const selectedCategory = allBusinessCategories.find(c => c.id === categoryId);
+    if (selectedCategory?.business_model === 'rental') {
+      setBusinessType('rental');
+    } else {
+      setBusinessType('services');
+    }
+    
     if (isCategoryModalOpen) {
       setIsCategoryModalOpen(false);
       setTempSelectedCategoryIds([]);
     }
+    setIsPrimaryModalOpen(false);
+    setPrimarySearchQuery('');
   };
 
   // Handle child category selection
@@ -802,7 +1147,7 @@ export default function BusinessDetailsScreen() {
             (c) => c.parent_category_id === categoryId
           );
           if (hasChildren) {
-            setExpandedCategoryIds((expanded) => new Set([...expanded, categoryId]));
+            setExpandedCategoryIds((expanded) => new Set([...Array.from(expanded), categoryId]));
           }
         }
         return [...prev, categoryId];
@@ -964,7 +1309,6 @@ export default function BusinessDetailsScreen() {
               )}
             </View>
 
-            {node.icon && <Text style={styles.categoryIcon}>{node.icon}</Text>}
             <Text style={[styles.categoryName, isSelected && styles.categoryNameSelected]}>
               {node.name}
             </Text>
@@ -1036,176 +1380,57 @@ export default function BusinessDetailsScreen() {
     return DEFAULT_PRICING_UNITS;
   }, [selectedCategoriesWithPaths, allBusinessCategories, selectedRootCategoryId]);
 
-  // Build hierarchical tree structure for event categories
-  const buildEventCategoryTree = (categories: any[]): any[] => {
-    const categoryMap = new Map<string, any>();
-    const rootCategories: any[] = [];
 
-    // First pass: create all nodes
-    categories.forEach((cat) => {
-      categoryMap.set(cat.id, {
-        ...cat,
-        children: [],
-      });
-    });
 
-    // Second pass: build tree structure
-    categories.forEach((cat) => {
-      const node = categoryMap.get(cat.id)!;
-      if (cat.parent_category_id) {
-        const parent = categoryMap.get(cat.parent_category_id);
-        if (parent) {
-          parent.children.push(node);
-        }
-      } else {
-        rootCategories.push(node);
-      }
-    });
 
-    // Sort children by sort_order
-    const sortChildren = (nodes: any[]) => {
-      nodes.forEach((node) => {
-        node.children.sort((a: any, b: any) => {
-          const aOrder = allEventCategories.find((c) => c.id === a.id)?.sort_order ?? 0;
-          const bOrder = allEventCategories.find((c) => c.id === b.id)?.sort_order ?? 0;
-          return aOrder - bOrder;
-        });
-        sortChildren(node.children);
-      });
-    };
 
-    sortChildren(rootCategories);
-    return rootCategories;
-  };
+  // Get selected event names
+  const selectedEventNames = React.useMemo(() => {
+    return selectedEventIds
+      .map((id) => {
+        const cat = allEventCategories.find((c) => c.id === id);
+        return cat?.name || '';
+      })
+      .filter(Boolean);
+  }, [selectedEventIds, allEventCategories]);
 
-  // Build event category tree
-  const eventCategoryTree = React.useMemo(() => {
-    return buildEventCategoryTree(allEventCategories);
+  // Root event categories for the flat list
+  const rootEventCategories = React.useMemo(() => {
+    return allEventCategories.filter((cat) => cat.parent_category_id === null);
   }, [allEventCategories]);
 
-  // Filter event category tree based on search
-  const filterEventCategories = (nodes: any[], query: string): any[] => {
-    if (!query.trim()) return nodes;
-
-    const lowerQuery = query.toLowerCase();
-    const filtered: any[] = [];
-
-    const matchesQuery = (node: any): boolean => {
-      return node.name.toLowerCase().includes(lowerQuery);
-    };
-
-    const filterNode = (node: any): any | null => {
-      const filteredChildren = node.children
-        .map(filterNode)
-        .filter((n: any): n is any => n !== null);
-
-      if (matchesQuery(node) || filteredChildren.length > 0) {
-        return {
-          ...node,
-          children: filteredChildren,
-        };
-      }
-      return null;
-    };
-
-    nodes.forEach((node) => {
-      const filteredNode = filterNode(node);
-      if (filteredNode) {
-        filtered.push(filteredNode);
-      }
-    });
-
-    return filtered;
-  };
-
-  const filteredEventTree = React.useMemo(() => {
-    return filterEventCategories(eventCategoryTree, eventSearchQuery);
-  }, [eventCategoryTree, eventSearchQuery]);
-
-  // Get full path for an event category
-  const getEventCategoryPath = (categoryId: string, categories: any[]): string => {
-    const categoryMap = new Map<string, any>();
-    categories.forEach((cat) => categoryMap.set(cat.id, cat));
-
-    const path: string[] = [];
-    let currentId: string | null = categoryId;
-
-    while (currentId) {
-      const cat = categoryMap.get(currentId);
-      if (!cat) break;
-      path.unshift(cat.name);
-      currentId = cat.parent_category_id;
-    }
-
-    return path.join(' > ');
-  };
-
-  // Get selected event categories with full paths
-  const selectedEventsWithPaths = React.useMemo(() => {
-    // Only show child categories
-    const childIds = selectedEventIds.filter(id => {
-      const cat = allEventCategories.find(c => c.id === id);
-      return cat && cat.parent_category_id !== null;
-    });
-
-    return childIds.map((id) => ({
-      id,
-      path: getEventCategoryPath(id, allEventCategories),
-    }));
-  }, [selectedEventIds, allEventCategories]);
+  // Filter root events based on search
+  const filteredRootEvents = React.useMemo(() => {
+    if (!eventSearchQuery.trim()) return rootEventCategories;
+    const lowerQuery = eventSearchQuery.toLowerCase();
+    return rootEventCategories.filter((cat) =>
+      cat.name.toLowerCase().includes(lowerQuery)
+    );
+  }, [rootEventCategories, eventSearchQuery]);
 
   // Get display text for event dropdown
   const getEventDropdownDisplayText = (): string => {
-    if (selectedEventsWithPaths.length === 0) {
+    if (selectedEventNames.length === 0) {
       return 'Select event types';
     }
-    if (selectedEventsWithPaths.length === 1) {
-      return selectedEventsWithPaths[0].path;
+    if (selectedEventNames.length === 1) {
+      return selectedEventNames[0];
     }
-    return `${selectedEventsWithPaths.length} sub-categories selected`;
+    return `${selectedEventNames.length} events selected`;
   };
 
   // Toggle event selection
   const toggleEventSelection = (eventId: string) => {
     setSelectedEventIds((prev) => {
       if (prev.includes(eventId)) {
-        // Collapse when deselecting
-        setExpandedEventCategoryIds((expanded) => {
-          const newExpanded = new Set(expanded);
-          if (newExpanded.has(eventId)) {
-            newExpanded.delete(eventId);
-          }
-          return newExpanded;
-        });
         return prev.filter((id) => id !== eventId);
       } else {
-        // Find the category and expand it if it has children
-        const category = allEventCategories.find((c) => c.id === eventId);
-        if (category) {
-          const hasChildren = allEventCategories.some(
-            (c) => c.parent_category_id === eventId
-          );
-          if (hasChildren) {
-            setExpandedEventCategoryIds((expanded) => new Set([...expanded, eventId]));
-          }
-        }
         return [...prev, eventId];
       }
     });
   };
 
-  // Toggle event category expansion
-  const toggleEventExpansion = (categoryId: string) => {
-    setExpandedEventCategoryIds((expanded) => {
-      const newExpanded = new Set(expanded);
-      if (newExpanded.has(categoryId)) {
-        newExpanded.delete(categoryId);
-      } else {
-        newExpanded.add(categoryId);
-      }
-      return newExpanded;
-    });
-  };
+
 
   // Modal handlers for sub-categories only (root is chosen via dropdown)
   const handleCategoryModalOpen = () => {
@@ -1216,6 +1441,8 @@ export default function BusinessDetailsScreen() {
 
   const handleCategoryModalClose = () => {
     setIsCategoryModalOpen(false);
+    setSelectedCategoryIds([]);
+    setTempSelectedCategoryIds([]);
     setSearchQuery('');
   };
 
@@ -1233,6 +1460,58 @@ export default function BusinessDetailsScreen() {
     setSelectedCategoryIds([...tempSelectedCategoryIds]);
     setIsCategoryModalOpen(false);
     setSearchQuery('');
+  };
+
+  // Select All / Deselect All helpers for Services modal
+  const getAllSubtreeIds = (): string[] => {
+    if (!subtreeForSelectedRoot) return [];
+    const getAllIds = (nodes: any[]): string[] => {
+      let ids: string[] = [];
+      nodes.forEach((node) => {
+        ids.push(node.id);
+        if (node.children?.length > 0) ids = [...ids, ...getAllIds(node.children)];
+      });
+      return ids;
+    };
+    return getAllIds(subtreeForSelectedRoot.children || []);
+  };
+
+  const handleSelectAllServices = () => {
+    const allIds = getAllSubtreeIds();
+    const allSelected = allIds.every((id) => tempSelectedCategoryIds.includes(id));
+    if (allSelected) {
+      // Deselect all
+      setTempSelectedCategoryIds([]);
+    } else {
+      // Select all — also expand all nodes
+      setTempSelectedCategoryIds(allIds);
+      setExpandedCategoryIds((prev) => new Set([...Array.from(prev), ...allIds]));
+    }
+  };
+
+  const isAllServicesSelected = (): boolean => {
+    const allIds = getAllSubtreeIds();
+    return allIds.length > 0 && allIds.every((id) => tempSelectedCategoryIds.includes(id));
+  };
+
+  // Get all root event categories for Select All
+  const getAllRootEventIds = (): string[] => {
+    return allEventCategories.filter(c => c.parent_category_id === null).map((c) => c.id);
+  };
+
+  const handleSelectAllEvents = () => {
+    const allIds = getAllRootEventIds();
+    const allSelected = allIds.every((id) => tempSelectedEventIds.includes(id));
+    if (allSelected) {
+      setTempSelectedEventIds([]);
+    } else {
+      setTempSelectedEventIds(allIds);
+    }
+  };
+
+  const isAllEventsSelected = (): boolean => {
+    const allIds = getAllRootEventIds();
+    return allIds.length > 0 && allIds.every((id) => tempSelectedEventIds.includes(id));
   };
 
   const toggleTempCategorySelection = (categoryId: string) => {
@@ -1291,7 +1570,7 @@ export default function BusinessDetailsScreen() {
             currentParentId = parent?.parent_category_id || null;
           }
           if (parentChain.length > 0) {
-            setExpandedCategoryIds((expanded) => new Set([...expanded, ...parentChain]));
+            setExpandedCategoryIds((expanded) => new Set([...Array.from(expanded), ...parentChain]));
           }
         }
       }
@@ -1307,21 +1586,17 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleEventModalClose = () => {
-    // Discard temp changes when X is clicked
+    // Discard temp changes and clear all selections when X is clicked
     setIsEventModalOpen(false);
-    // Reset search
+    setSelectedEventIds([]);
+    setTempSelectedEventIds([]);
     setEventSearchQuery('');
   };
 
   const handleEventModalDone = () => {
-    // Validate: at least one event type (sub-category) must be selected
-    const hasSubEventType = tempSelectedEventIds.some(id => {
-      const cat = allEventCategories.find(c => c.id === id);
-      return cat && cat.parent_category_id !== null;
-    });
-
-    if (!hasSubEventType) {
-      Alert.alert('Validation Error', 'Please select at least one sub-category for event types');
+    // Root categories are now the primary selection
+    if (tempSelectedEventIds.length === 0) {
+      Alert.alert('Validation Error', 'Please select at least one event type');
       return;
     }
 
@@ -1332,132 +1607,191 @@ export default function BusinessDetailsScreen() {
     setEventSearchQuery('');
   };
 
+  const handleClearAllPrimary = () => {
+    setSelectedRootCategoryId('');
+    setSelectedCategoryIds([]);
+    setPrimarySearchQuery('');
+    setEditData((prev: any) => ({
+      ...prev,
+      selectedRootCategoryId: '',
+      selectedCategoryIds: []
+    }));
+    setIsPrimaryModalOpen(false);
+  };
+
+  // Unified Search Logic for Primary Modal (Business Details)
+  const filteredPrimaryResults = React.useMemo(() => {
+    if (!primarySearchQuery.trim()) return rootCategoriesForDropdown;
+    const lowerQuery = primarySearchQuery.toLowerCase();
+
+    // 1. Root categories matching the query
+    const directMatches = rootCategoriesForDropdown.filter((cat: any) =>
+      cat.name.toLowerCase().includes(lowerQuery)
+    );
+
+    // 2. Root categories that have matching children
+    const parentMatches: any[] = [];
+    const subCategories = allBusinessCategories.filter(cat => cat.parent_category_id !== null);
+    subCategories.forEach(cat => {
+      if (cat.name.toLowerCase().includes(lowerQuery)) {
+        // Find top level root for this cat
+        let current: any = cat;
+        while (current && current.parent_category_id) {
+          const parent = allBusinessCategories.find(c => c.id === current.parent_category_id);
+          current = parent;
+        }
+        if (current && !directMatches.find(dm => dm.id === current.id) && !parentMatches.find(pm => pm.id === current.id)) {
+          parentMatches.push(current);
+        }
+      }
+    });
+
+    return [...directMatches, ...parentMatches];
+  }, [rootCategoriesForDropdown, primarySearchQuery, allBusinessCategories]);
+
+  const filteredSpecializationResults = React.useMemo(() => {
+    if (!primarySearchQuery.trim()) return [];
+
+    // Get all sub-categories (non-roots)
+    const subCategories = allBusinessCategories.filter(cat => cat.parent_category_id !== null);
+
+    return subCategories
+      .filter(cat => cat.name.toLowerCase().includes(primarySearchQuery.toLowerCase()))
+      .map(cat => ({
+        ...cat,
+        path: getCategoryPath(cat.id, allBusinessCategories),
+        rootCategoryId: getRootCategoryId(cat.id, allBusinessCategories)
+      }));
+  }, [allBusinessCategories, primarySearchQuery]);
+
+  const handleSpecializationSearchSelection = (catId: string, rootId: string) => {
+    // If different root, reset selections and set new root
+    if (selectedRootCategoryId !== rootId) {
+      setSelectedRootCategoryId(rootId);
+      setSelectedCategoryIds([catId]);
+      
+      // Determine business_type from root category's business_model
+      const rootCategory = allBusinessCategories.find(c => c.id === rootId);
+      if (rootCategory?.business_model === 'rental') {
+        setBusinessType('rental');
+      } else {
+        setBusinessType('services');
+      }
+      
+      setEditData((prev: any) => ({
+        ...prev,
+        selectedRootCategoryId: rootId,
+        selectedCategoryIds: [catId]
+      }));
+    } else {
+      // Same root, toggle selection
+      const isSelected = selectedCategoryIds.includes(catId);
+      const nextIds = isSelected
+        ? selectedCategoryIds.filter(id => id !== catId)
+        : [...selectedCategoryIds, catId];
+
+      setSelectedCategoryIds(nextIds);
+      setEditData((prev: any) => ({
+        ...prev,
+        selectedCategoryIds: nextIds
+      }));
+    }
+  };
+
+  const handleSelectAllFilteredSpecializations = () => {
+    if (filteredSpecializationResults.length === 0) return;
+
+    const targetRootId = filteredSpecializationResults[0].rootCategoryId;
+    if (!targetRootId) return;
+
+    const sameRootResults = filteredSpecializationResults.filter(r => r.rootCategoryId === targetRootId);
+    const newIds = sameRootResults.map(r => r.id);
+
+    if (selectedRootCategoryId !== targetRootId) {
+      setSelectedRootCategoryId(targetRootId);
+      setSelectedCategoryIds(newIds);
+      
+      // Determine business_type from root category's business_model
+      const rootCategory = allBusinessCategories.find(c => c.id === targetRootId);
+      if (rootCategory?.business_model === 'rental') {
+        setBusinessType('rental');
+      } else {
+        setBusinessType('services');
+      }
+      
+      setEditData((prev: any) => ({
+        ...prev,
+        selectedRootCategoryId: targetRootId,
+        selectedCategoryIds: newIds
+      }));
+    } else {
+      const allSelected = newIds.every(id => selectedCategoryIds.includes(id));
+      const nextIds = allSelected
+        ? selectedCategoryIds.filter(id => !newIds.includes(id))
+        : Array.from(new Set([...selectedCategoryIds, ...newIds]));
+
+      setSelectedCategoryIds(nextIds);
+      setEditData((prev: any) => ({
+        ...prev,
+        selectedCategoryIds: nextIds
+      }));
+    }
+  };
+
+  const isAllFilteredSpecializationsSelected = () => {
+    if (filteredSpecializationResults.length === 0) return false;
+    const targetRootId = filteredSpecializationResults[0].rootCategoryId;
+    const sameRootResults = filteredSpecializationResults.filter(r => r.rootCategoryId === targetRootId);
+    return sameRootResults.every(r => selectedCategoryIds.includes(r.id));
+  };
+
   // Temp handler for event selection in modal
   const toggleTempEventSelection = (eventId: string) => {
     setTempSelectedEventIds((prev) => {
-      let newIds = [...prev];
       const isSelected = prev.includes(eventId);
-
       if (isSelected) {
-        // Deselecting
-        newIds = newIds.filter((id) => id !== eventId);
-
-        // Also deselect all children if this is a parent category
-        const childCategories = allEventCategories.filter(c => c.parent_category_id === eventId);
-        if (childCategories.length > 0) {
-          const childIds = childCategories.map(c => c.id);
-          newIds = newIds.filter(id => !childIds.includes(id));
-        }
-
-        // Collapse when deselecting
-        setExpandedEventCategoryIds((expanded) => {
-          const newExpanded = new Set(expanded);
-          if (newExpanded.has(eventId)) {
-            newExpanded.delete(eventId);
-          }
-          return newExpanded;
-        });
+        return prev.filter((id) => id !== eventId);
       } else {
-        // Selecting
-        newIds.push(eventId);
-
-        // Also select all children if this is a parent category
-        const childCategories = allEventCategories.filter(c => c.parent_category_id === eventId);
-        if (childCategories.length > 0) {
-          childCategories.forEach(child => {
-            if (!newIds.includes(child.id)) {
-              newIds.push(child.id);
-            }
-          });
-
-          // Auto-expand the parent category to show selected children
-          setExpandedEventCategoryIds((expanded) => {
-            const newExpanded = new Set(expanded);
-            newExpanded.add(eventId);
-            return newExpanded;
-          });
-        }
+        return [...prev, eventId];
       }
-      return newIds;
     });
   };
 
-  // Auto-expand selected event categories with children
-  React.useEffect(() => {
-    setExpandedEventCategoryIds((currentExpanded) => {
-      const newExpanded = new Set(currentExpanded);
-      let changed = false;
-      selectedEventIds.forEach((categoryId) => {
-        const hasChildren = allEventCategories.some(
-          (c) => c.parent_category_id === categoryId
-        );
-        if (hasChildren && !newExpanded.has(categoryId)) {
-          newExpanded.add(categoryId);
-          changed = true;
-        }
-      });
-      return changed ? newExpanded : currentExpanded;
-    });
-  }, [selectedEventIds, allEventCategories]);
 
-  // Render event category tree for modal (uses temp state)
-  const renderEventCategoryTreeForModal = (nodes: any[], level: number = 0): React.ReactNode => {
-    return nodes.map((node) => {
-      const isSelected = tempSelectedEventIds.includes(node.id);
-      const isExpanded = expandedEventCategoryIds.has(node.id);
-      const hasChildren = node.children.length > 0;
+
+  // Render event category list for modal (flat)
+  const renderEventListForModal = (categories: any[]): React.ReactNode => {
+    return categories.map((cat) => {
+      const isSelected = tempSelectedEventIds.includes(cat.id);
 
       return (
-        <View key={node.id} style={styles.categoryItem}>
-          <TouchableOpacity
-            style={[styles.categoryRow, { paddingLeft: level * 20 + 12 }]}
-            onPress={() => toggleTempEventSelection(node.id)}
-            activeOpacity={0.7}
-          >
-            {hasChildren && (
-              <TouchableOpacity
-                style={styles.expandButton}
-                onPress={(e) => {
-                  e.stopPropagation();
-                  toggleEventExpansion(node.id);
-                }}
-              >
-                {isExpanded ? (
-                  <ChevronDown size={16} color="#666" />
-                ) : (
-                  <ChevronRight size={16} color="#666" />
-                )}
-              </TouchableOpacity>
+        <TouchableOpacity
+          key={cat.id}
+          style={styles.categoryRow}
+          onPress={() => toggleTempEventSelection(cat.id)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.expandButton} />
+
+          <View style={styles.checkbox}>
+            {isSelected ? (
+              <View style={styles.checkboxSelected}>
+                <Check size={14} color="#fff" strokeWidth={3} />
+              </View>
+            ) : (
+              <View style={styles.checkboxUnselected} />
             )}
-            {!hasChildren && <View style={styles.expandButton} />}
+          </View>
 
-            <View style={styles.checkbox}>
-              {isSelected ? (
-                <View style={styles.checkboxSelected}>
-                  <Check size={14} color="#fff" strokeWidth={3} />
-                </View>
-              ) : (
-                <View style={styles.checkboxUnselected} />
-              )}
-            </View>
-
-            {node.icon && <Text style={styles.categoryIcon}>{node.icon}</Text>}
-            <Text
-              style={[
-                styles.categoryName,
-                isSelected && styles.categoryNameSelected,
-              ]}
-            >
-              {node.name}
-            </Text>
-          </TouchableOpacity>
-
-          {hasChildren && isExpanded && (
-            <View style={styles.childrenContainer}>
-              {renderEventCategoryTreeForModal(node.children, level + 1)}
-            </View>
-          )}
-        </View>
+          <Text
+            style={[
+              styles.categoryName,
+              isSelected && styles.categoryNameSelected,
+            ]}
+          >
+            {cat.name}
+          </Text>
+        </TouchableOpacity>
       );
     });
   };
@@ -1467,54 +1801,183 @@ export default function BusinessDetailsScreen() {
     if (!id) return;
     try {
       setLoadingDocuments(true);
-      const { data, error } = await getBusinessVerificationDocuments(id);
-      if (error) {
-        console.error('Error loading verification documents:', error);
+      console.log('[Verification] Fetching documents for business:', id);
+      
+      // Fetch documents and document types in parallel
+      const [docsRes, typesRes] = await Promise.all([
+        getBusinessVerificationDocuments(id),
+        getDocumentTypes()
+      ]);
+
+      if (docsRes.error) {
+        console.error('[Verification] Error loading verification documents:', docsRes.error);
         return;
       }
-      setVerificationDocuments(data || []);
+
+      const rawDocs = docsRes.data || [];
+      const docTypesData = typesRes.data || [];
+      const docTypes = Array.isArray(docTypesData) ? docTypesData : ((docTypesData as any).rows || []);
+      
+      setDocumentTypes(docTypes);
+      
+      // Create a map of document type ID to code/name
+      const typeMap: Record<string, { code: string; name: string }> = {};
+      docTypes.forEach((t: any) => {
+        typeMap[t.id] = { code: t.type_code, name: t.name };
+      });
+
+      const { getAccessToken } = require('../lib/tokenStorage');
+      const token = await getAccessToken();
+      authTokenRef.current = token || '';
+
+      console.log('[Verification] RAW documents from backend:', JSON.stringify(rawDocs, null, 2));
+      
+      // Enrich documents with missing info and fetch images as base64
+      const enrichedDocs = await Promise.all(rawDocs.map(async (doc) => {
+        const enriched = { ...doc } as any;
+        
+        // 1. Build file_url from new document file-get API (replaces old signed MinIO URLs)
+        const fileGetBase = getAuthFunctionsBaseUrl() + 'vendor-businesses-verification-documents-file-get';
+        if (enriched.file_id && enriched.business_id) {
+          enriched.file_url = `${fileGetBase}?file_id=${enriched.file_id}&business_id=${enriched.business_id}`;
+        } else if (!enriched.file_url && enriched.url) {
+          enriched.file_url = enriched.url;
+        }
+
+        // 2. Fill missing type info
+        if (!enriched.document_type_code && enriched.document_type_id && typeMap[enriched.document_type_id]) {
+          enriched.document_type_code = typeMap[enriched.document_type_id].code;
+          enriched.document_type_name = typeMap[enriched.document_type_id].name;
+        }
+
+        // 3. Fill missing verification status
+        if (!enriched.verification_status) {
+          enriched.verification_status = 'pending';
+        }
+
+        // 4. Fill missing mime type (use original url which has file extension, before we overwrite file_url)
+        if (!enriched.mime_type) {
+          if (enriched.url) {
+            enriched.mime_type = inferMimeType(enriched.url);
+          }
+          if (!enriched.mime_type && enriched.document_type_code) {
+            const code = enriched.document_type_code.toLowerCase();
+            if (code === 'pan' || code === 'gst' || code === 'business_license') {
+              enriched.mime_type = 'image/jpeg';
+            }
+          }
+        }
+
+        // 5. Fetch image as base64 if it's an image
+        if (isImageFile(enriched.mime_type || '') && enriched.file_url && token) {
+          try {
+            const response = await fetch(enriched.file_url, {
+              headers: {
+                'Authorization': `Bearer ${token}`
+              }
+            });
+            if (response.ok) {
+              const blob = await response.blob();
+              const base64 = await new Promise<string>((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.readAsDataURL(blob);
+              });
+              enriched.image_base64 = base64;
+            }
+          } catch (error) {
+            console.warn('[Verification] Failed to fetch image as base64:', error);
+          }
+        }
+
+        return enriched;
+      }));
+
+      console.log('[Verification] Enriched documents:', enrichedDocs.map(d => ({
+        id: d.id,
+        document_type_code: d.document_type_code,
+        file_url: d.file_url?.substring(0, 80),
+        mime_type: d.mime_type,
+      })));
+      setVerificationDocuments(enrichedDocs);
     } catch (error) {
-      console.error('Error loading verification documents:', error);
+      console.error('[Verification] Exception loading verification documents:', error);
     } finally {
       setLoadingDocuments(false);
     }
   };
 
+  // Helper to get document type ID from code
+  const getDocumentTypeId = (code: string): string => {
+    const docType = documentTypes.find((t: any) => t.type_code === code);
+    return docType?.id || code;
+  };
+
+// Helper to infer mime type from file URL
+  const inferMimeType = (fileUrl: string): string | null => {
+    if (!fileUrl) return null;
+    const urlWithoutQuery = fileUrl.split('?')[0].split('#')[0];
+    const lowerUrl = urlWithoutQuery.toLowerCase();
+    if (lowerUrl.endsWith('.jpg') || lowerUrl.endsWith('.jpeg')) return 'image/jpeg';
+    if (lowerUrl.endsWith('.png')) return 'image/png';
+    if (lowerUrl.endsWith('.pdf')) return 'application/pdf';
+    return null;
+  };
+
   // Handle document upload
   const handleUploadDocument = async (documentTypeCode: string) => {
+    const documentTypeId = getDocumentTypeId(documentTypeCode);
+    const timestamp = new Date().toISOString();
+    console.log(`[handleUploadDocument][${timestamp}] START - documentTypeCode: ${documentTypeCode}, documentTypeId: ${documentTypeId}, businessId: ${id}`);
+    console.log(`[handleUploadDocument][${timestamp}] userId: ${user?.id}`);
+    
     try {
       setUploadingDocument(documentTypeCode);
       const { files, error } = await pickDocuments(true);
 
+      console.log(`[handleUploadDocument][${timestamp}] Files picked:`, files.map(f => ({ name: f.name, uri: f.uri?.substring(0, 50), size: f.size })));
+
       if (error) {
+        console.error(`[handleUploadDocument][${timestamp}] Error picking documents:`, error);
         Alert.alert('Error', error.message);
         return;
       }
 
       if (files.length === 0) {
+        console.log(`[handleUploadDocument][${timestamp}] No files selected, returning`);
         return;
       }
 
       // Upload each file
       for (const file of files) {
+        console.log(`[handleUploadDocument][${timestamp}] Uploading file: ${file.name}, type: ${documentTypeId}`);
         const { data, error: uploadError } = await uploadVerificationDocument(
           id,
-          documentTypeCode,
+          documentTypeId,
           file,
           user?.id
         );
 
+        console.log(`[handleUploadDocument][${timestamp}] Upload result for ${file.name}:`, {
+          success: !uploadError,
+          dataId: data?.id,
+          error: uploadError?.message
+        });
+
         if (uploadError) {
+          console.error(`[handleUploadDocument][${timestamp}] Upload error for ${file.name}:`, uploadError);
           Alert.alert('Upload Error', `Failed to upload ${file.name || 'document'}: ${uploadError.message}`);
-        } else if (data) {
-          // Reload documents to show the new one
+        } else {
+          console.log(`[handleUploadDocument][${timestamp}] Upload successful for ${file.name}, data:`, data);
+          console.log(`[handleUploadDocument][${timestamp}] file_url: ${data?.file_url || (data as any)?.url}, mime_type: ${data?.mime_type}, document_type_code: ${data?.document_type_code}`);
           await loadVerificationDocuments();
         }
       }
     } catch (error) {
+      console.error(`[handleUploadDocument][${timestamp}] Exception:`, error);
       Alert.alert('Error', 'Failed to upload document');
-      console.error('Error uploading document:', error);
     } finally {
+      console.log(`[handleUploadDocument][${timestamp}] END`);
       setUploadingDocument(null);
     }
   };
@@ -1552,10 +2015,11 @@ export default function BusinessDetailsScreen() {
   const documentsByType = React.useMemo(() => {
     const grouped: Record<string, VerificationDocument[]> = {};
     verificationDocuments.forEach((doc) => {
-      if (!grouped[doc.document_type_code]) {
-        grouped[doc.document_type_code] = [];
+      const type = (doc.document_type_code || 'MISSING_TYPE').toLowerCase();
+      if (!grouped[type]) {
+        grouped[type] = [];
       }
-      grouped[doc.document_type_code].push(doc);
+      grouped[type].push(doc);
     });
     return grouped;
   }, [verificationDocuments]);
@@ -1670,62 +2134,163 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleUploadImage = async () => {
-    if (images.length >= 20) {
-      Alert.alert('Limit Reached', 'Maximum 20 images allowed per business');
+    const timestamp = new Date().toISOString();
+    console.log(`[handleUploadImage][${timestamp}] START - businessId: ${id}`);
+    
+    const imagesOnly = images.filter(img => img.image_type !== 'video');
+    console.log(`[handleUploadImage][${timestamp}] Current gallery images: ${imagesOnly.length}/10`);
+    
+    if (imagesOnly.length >= 10) {
+      console.log(`[handleUploadImage][${timestamp}] LIMIT REACHED - Max 10 images`);
+      Alert.alert('Limit Reached', 'Maximum 10 images allowed per business');
       return;
     }
 
+    console.log(`[handleUploadImage][${timestamp}] Opening image picker...`);
     const { uri, error } = await pickImage();
+    
     if (error) {
+      console.error(`[handleUploadImage][${timestamp}] Image picker error:`, error.message);
       Alert.alert('Error', error.message);
       return;
     }
 
     if (uri) {
+      console.log(`[handleUploadImage][${timestamp}] Image selected, URI: ${uri.substring(0, 50)}...`);
       try {
         setUploading(true);
-        console.log('Starting image upload, URI:', uri);
+        console.log(`[handleUploadImage][${timestamp}] Calling uploadBusinessImage...`);
+        
         const { data, error: uploadError } = await uploadBusinessImage(id, uri);
+        
         if (uploadError) {
-          console.error('Upload error:', uploadError);
+          console.error(`[handleUploadImage][${timestamp}] Upload error:`, uploadError);
           throw uploadError;
         }
-        console.log('Upload successful, data:', data);
+        
+        console.log(`[handleUploadImage][${timestamp}] Upload successful, data:`, {
+          id: data?.id,
+          image_type: data?.image_type,
+          image_url: data?.image_url?.substring(0, 50) + '...',
+        });
 
-        // Reload images to get the persisted data
+        // Check if cover image exists, if not set this image as cover
+        const hasCover = images.some(img => img.image_type === 'cover');
+        if (!hasCover && data?.id) {
+          console.log(`[handleUploadImage][${timestamp}] No cover exists, setting uploaded image as cover`);
+          const { error: setCoverError } = await setCoverImage(id, data.id);
+          if (setCoverError) {
+            console.error(`[handleUploadImage][${timestamp}] Failed to set cover:`, setCoverError);
+          } else {
+            console.log(`[handleUploadImage][${timestamp}] Cover set successfully`);
+          }
+        }
+
         await loadData();
-
         Alert.alert('Success', 'Image uploaded successfully');
       } catch (error: any) {
-        console.error('Upload failed:', error);
+        console.error(`[handleUploadImage][${timestamp}] Upload failed:`, error);
         Alert.alert('Error', error.message || 'Failed to upload image');
       } finally {
         setUploading(false);
+        console.log(`[handleUploadImage][${timestamp}] END`);
       }
+    } else {
+      console.log(`[handleUploadImage][${timestamp}] No image selected (cancelled)`);
     }
   };
 
-  const handleUploadMultipleImages = async () => {
-    const availableSlots = 20 - images.length;
-    if (availableSlots === 0) {
-      Alert.alert('Limit Reached', 'Maximum 20 images allowed per business');
+  const handleUploadVideo = async () => {
+    const timestamp = new Date().toISOString();
+    console.log(`[handleUploadVideo][${timestamp}] START - businessId: ${id}`);
+    
+    const videosOnly = images.filter(img => img.image_type === 'video');
+    console.log(`[handleUploadVideo][${timestamp}] Current videos: ${videosOnly.length}/5`);
+    
+    if (videosOnly.length >= 5) {
+      console.log(`[handleUploadVideo][${timestamp}] LIMIT REACHED - Max 5 videos`);
+      Alert.alert('Limit Reached', 'Maximum 5 videos allowed per business');
       return;
     }
 
-    const { uris, error } = await pickMultipleImages();
+    console.log(`[handleUploadVideo][${timestamp}] Opening video picker...`);
+    const { uri, error } = await pickVideo();
+    
     if (error) {
+      console.error(`[handleUploadVideo][${timestamp}] Video picker error:`, error.message);
       Alert.alert('Error', error.message);
       return;
     }
 
+    if (uri) {
+      console.log(`[handleUploadVideo][${timestamp}] Video selected, URI: ${uri.substring(0, 50)}...`);
+      try {
+        setUploading(true);
+        console.log(`[handleUploadVideo][${timestamp}] Calling uploadBusinessVideo...`);
+        
+        const { data, error: uploadError } = await uploadBusinessVideo(id, uri);
+        
+        if (uploadError) {
+          console.error(`[handleUploadVideo][${timestamp}] Upload error:`, uploadError);
+          throw uploadError;
+        }
+        
+        console.log(`[handleUploadVideo][${timestamp}] Upload successful, data:`, {
+          id: data?.id,
+          image_type: data?.image_type,
+          image_url: data?.image_url?.substring(0, 50) + '...',
+        });
+
+        await loadData();
+        Alert.alert('Success', 'Video uploaded successfully');
+      } catch (error: any) {
+        console.error(`[handleUploadVideo][${timestamp}] Upload failed:`, error);
+        Alert.alert('Error', error.message || 'Failed to upload video');
+      } finally {
+        setUploading(false);
+        console.log(`[handleUploadVideo][${timestamp}] END`);
+      }
+    } else {
+      console.log(`[handleUploadVideo][${timestamp}] No video selected (cancelled)`);
+    }
+  };
+
+  const handleUploadMultipleImages = async () => {
+    const timestamp = new Date().toISOString();
+    console.log(`[handleUploadMultipleImages][${timestamp}] START - businessId: ${id}`);
+    
+    const imagesOnly = images.filter(img => img.image_type !== 'video');
+    const availableSlots = 10 - imagesOnly.length;
+    console.log(`[handleUploadMultipleImages][${timestamp}] Current images: ${imagesOnly.length}/10, Available slots: ${availableSlots}`);
+    
+    if (availableSlots <= 0) {
+      console.log(`[handleUploadMultipleImages][${timestamp}] LIMIT REACHED - Max 10 images`);
+      Alert.alert('Limit Reached', 'Maximum 10 images allowed per business');
+      return;
+    }
+
+    console.log(`[handleUploadMultipleImages][${timestamp}] Opening multiple image picker...`);
+    const { uris, error } = await pickMultipleImages();
+    
+    if (error) {
+      console.error(`[handleUploadMultipleImages][${timestamp}] Image picker error:`, error.message);
+      Alert.alert('Error', error.message);
+      return;
+    }
+
+    console.log(`[handleUploadMultipleImages][${timestamp}] Selected ${uris.length} images`);
+    console.log(`[handleUploadMultipleImages][${timestamp}] URIs:`, uris.map(u => u.substring(0, 30) + '...'));
+
     if (uris.length === 0) {
+      console.log(`[handleUploadMultipleImages][${timestamp}] No images selected (cancelled)`);
       return;
     }
 
     if (uris.length > availableSlots) {
+      console.error(`[handleUploadMultipleImages][${timestamp}] TOO MANY IMAGES - Selected: ${uris.length}, Available: ${availableSlots}`);
       Alert.alert(
         'Too Many Images',
-        `You can only upload ${availableSlots} more image(s). Currently at ${images.length}/20.`
+        `You can only upload ${availableSlots} more image(s). Currently at ${imagesOnly.length}/10.`
       );
       return;
     }
@@ -1733,55 +2298,97 @@ export default function BusinessDetailsScreen() {
     try {
       setUploadingMultiple(true);
       setUploadProgress({ current: 0, total: uris.length });
+      console.log(`[handleUploadMultipleImages][${timestamp}] Starting bulk upload...`);
 
       const { results, successCount, error: uploadError } =
         await uploadMultipleBusinessImages(id, uris, (current, total) => {
+          console.log(`[handleUploadMultipleImages][${timestamp}] Progress: ${current}/${total}`);
           setUploadProgress({ current, total });
         });
 
-      if (uploadError) throw uploadError;
+      console.log(`[handleUploadMultipleImages][${timestamp}] Bulk upload complete - Success: ${successCount}/${uris.length}`);
+      console.log(`[handleUploadMultipleImages][${timestamp}] Results:`, results.map(r => ({ success: r.success, error: r.error?.substring(0, 50) })));
+
+      if (uploadError) {
+        console.error(`[handleUploadMultipleImages][${timestamp}] Upload error:`, uploadError);
+        throw uploadError;
+      }
+
+      // Check if cover image exists, if not set first uploaded image as cover
+      const hasCover = images.some(img => img.image_type === 'cover');
+      const firstSuccessResult = results.find(r => r.success && (r as any).data?.id);
+      if (!hasCover && firstSuccessResult && (firstSuccessResult as any).data?.id) {
+        console.log(`[handleUploadMultipleImages][${timestamp}] No cover exists, setting first uploaded image as cover`);
+        const { error: setCoverError } = await setCoverImage(id, (firstSuccessResult as any).data.id);
+        if (setCoverError) {
+          console.error(`[handleUploadMultipleImages][${timestamp}] Failed to set cover:`, setCoverError);
+        } else {
+          console.log(`[handleUploadMultipleImages][${timestamp}] Cover set successfully`);
+        }
+      }
 
       await loadData();
 
       const failCount = results.length - successCount;
       if (failCount === 0) {
+        console.log(`[handleUploadMultipleImages][${timestamp}] All uploads successful!`);
         Alert.alert(
           'Success',
           `All ${successCount} images uploaded successfully!`
         );
       } else if (successCount === 0) {
+        console.error(`[handleUploadMultipleImages][${timestamp}] ALL UPLOADS FAILED`);
         Alert.alert('Error', 'All uploads failed. Please try again.');
       } else {
+        console.log(`[handleUploadMultipleImages][${timestamp}] Partial success - ${successCount} succeeded, ${failCount} failed`);
         Alert.alert(
           'Partial Success',
           `${successCount} of ${results.length} images uploaded successfully. ${failCount} failed.`
         );
       }
     } catch (error: any) {
+      console.error(`[handleUploadMultipleImages][${timestamp}] EXCEPTION:`, error);
       Alert.alert('Error', error.message || 'Failed to upload images');
     } finally {
       setUploadingMultiple(false);
       setUploadProgress({ current: 0, total: 0 });
+      console.log(`[handleUploadMultipleImages][${timestamp}] END`);
     }
   };
 
   const handleDeleteImage = (image: PortfolioImage) => {
+    const timestamp = new Date().toISOString();
+    const isVideo = image.image_type === 'video';
+    console.log(`[handleDeleteImage][${timestamp}] START - imageId: ${image.id}, type: ${image.image_type}`);
+    
     Alert.alert(
-      'Delete Image',
-      'Are you sure you want to delete this image?',
+      `Delete ${isVideo ? 'Video' : 'Image'}`,
+      `Are you sure you want to delete this ${isVideo ? 'video' : 'image'}?`,
       [
-        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Cancel', 
+          style: 'cancel',
+          onPress: () => {
+            console.log(`[handleDeleteImage][${timestamp}] Cancelled by user`);
+          }
+        },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
             try {
+              console.log(`[handleDeleteImage][${timestamp}] Confirming delete...`);
               const { error } = await deleteBusinessImage(image.id, id);
-              if (error) throw error;
-              await loadData(); // Reload to get updated list
-              Alert.alert('Success', 'Image deleted successfully');
+              if (error) {
+                console.error(`[handleDeleteImage][${timestamp}] Delete error:`, error);
+                throw error;
+              }
+              console.log(`[handleDeleteImage][${timestamp}] Delete successful`);
+              await loadData();
+              Alert.alert('Success', `${isVideo ? 'Video' : 'Image'} deleted successfully`);
             } catch (error: any) {
-              Alert.alert('Error', error.message || 'Failed to delete image');
+              console.error(`[handleDeleteImage][${timestamp}] EXCEPTION:`, error);
+              Alert.alert('Error', error.message || `Failed to delete ${isVideo ? 'video' : 'image'}`);
             }
           },
         },
@@ -1790,12 +2397,27 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleSetCoverImage = async (image: PortfolioImage) => {
+    const timestamp = new Date().toISOString();
+    console.log(`[handleSetCoverImage][${timestamp}] START - imageId: ${image.id}, currentType: ${image.image_type}`);
+    
+    if (image.image_type === 'video') {
+      console.error(`[handleSetCoverImage][${timestamp}] ERROR: Videos cannot be set as cover`);
+      Alert.alert('Error', 'Videos cannot be set as cover image.');
+      return;
+    }
+    
     try {
+      console.log(`[handleSetCoverImage][${timestamp}] Calling setCoverImage...`);
       const { error } = await setCoverImage(id, image.id);
-      if (error) throw error;
-      await loadData(); // Reload to get updated list with cover status
+      if (error) {
+        console.error(`[handleSetCoverImage][${timestamp}] ERROR:`, error);
+        throw error;
+      }
+      console.log(`[handleSetCoverImage][${timestamp}] SUCCESS - Cover image updated`);
+      await loadData();
       Alert.alert('Success', 'Cover image updated successfully');
     } catch (error: any) {
+      console.error(`[handleSetCoverImage][${timestamp}] EXCEPTION:`, error);
       Alert.alert('Error', error.message || 'Failed to set cover image');
     }
   };
@@ -1833,9 +2455,7 @@ export default function BusinessDetailsScreen() {
     if (!editData.contact_person_name || !editData.contact_person_name.trim()) {
       errors.contact_person_name = 'Contact person name is required';
     }
-    if (!editData.business_email || !editData.business_email.trim()) {
-      errors.business_email = 'Email is required';
-    } else {
+    if (editData.business_email && editData.business_email.trim()) {
       const emailErr = getEmailError(editData.business_email);
       if (emailErr) {
         errors.business_email = emailErr;
@@ -1874,10 +2494,8 @@ export default function BusinessDetailsScreen() {
       errors.operating_locations = 'At least one operating location is required';
     }
 
-    // 2. Validate PAN (Required and format)
-    if (!editData.business_registration_number || !editData.business_registration_number.trim()) {
-      errors.business_registration_number = 'PAN number is required';
-    } else {
+    // 2. Validate PAN (Optional but format if provided)
+    if (editData.business_registration_number && editData.business_registration_number.trim()) {
       const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
       if (!panRegex.test(editData.business_registration_number.toUpperCase())) {
         errors.business_registration_number = 'Please enter a valid PAN (e.g., ABCDE1234F)';
@@ -1886,17 +2504,13 @@ export default function BusinessDetailsScreen() {
 
     // 3. Validate GST (format if provided)
     if (editData.gst_number && editData.gst_number.trim()) {
-      const gstRegex = /^\d{2}[A-Z]{5}\d{4}[A-Z]{1}\d{1}Z\d{1}$/;
+      const gstRegex = /^[A-Z0-9]{15}$/;
       if (!gstRegex.test(editData.gst_number.toUpperCase())) {
-        errors.gst_number = 'Please enter a valid GST number';
+        errors.gst_number = 'GST number must be exactly 15 alphanumeric characters';
       }
     }
 
-    // 4. Validate PAN document is uploaded
-    const panDocs = documentsByType['pan'] || [];
-    if (panDocs.length === 0) {
-      errors.panDocument = 'PAN card document is required';
-    }
+
 
     // 5. Validate at least one service category ONLY if categories are loaded
     if (allBusinessCategories.length > 0) {
@@ -1909,16 +2523,6 @@ export default function BusinessDetailsScreen() {
       }
     }
 
-    // 6. Validate at least one event type ONLY if categories are loaded
-    if (allEventCategories.length > 0) {
-      const hasSubEventType = selectedEventIds.some(id => {
-        const cat = allEventCategories.find(c => c.id === id);
-        return cat && cat.parent_category_id !== null;
-      });
-      if (!hasSubEventType) {
-        errors.selectedEventIds = 'At least one event type must be selected';
-      }
-    }
 
     // If there are any validation errors, set them to highlight fields
     if (Object.keys(errors).length > 0) {
@@ -1932,55 +2536,146 @@ export default function BusinessDetailsScreen() {
     try {
       setSavingDetails(true);
 
-      // Extract base_price and pricing_unit from editData as they are not columns on vendor_businesses
-      const { base_price, pricing_unit, businessType: editDataBusinessType, ...businessUpdateData } = editData;
+      // 1. Identify purely business fields supported by the vendor-businesses-update API
+      const SUPPORTED_BUSINESS_FIELDS = [
+        'business_name', 'description', 'address', 'locality', 'district',
+        'city', 'state', 'pincode', 'contact_person_name', 'contact_person_phone',
+        'contact_person_role', 'business_email', 'website_url', 'instagram_url',
+        'facebook_url', 'youtube_url', 'business_registration_number', 'gst_number',
+        'years_experience', 'cover_photo_url',
+        'operating_locations'
+      ];
 
-      // Update business details
-      const finalUpdateData = {
-        ...businessUpdateData
-      };
-      if (finalUpdateData.contact_person_phone) {
-        finalUpdateData.contact_person_phone = stripCountryCode(finalUpdateData.contact_person_phone);
-      }
-      const { data, error } = await updateBusinessDetails(id, finalUpdateData);
-      if (error) throw error;
-      setBusiness(data);
+      // 2. Identify package-level fields
+      const { base_price, pricing_unit } = editData;
 
+      // 3. Build the business update payload: only include changed and supported fields
+      const businessUpdates: Record<string, any> = {};
+      let hasBusinessChanges = false;
 
+      SUPPORTED_BUSINESS_FIELDS.forEach(field => {
+        if (field in editData) {
+          let newValue = editData[field];
+          let oldValue = business[field];
 
-      // Handle Package Update/Creation using the extracted price fields
-      if (base_price && pricing_unit) {
-        const { createPackage, updatePackage } = await import('../lib/packageApi');
+          // Normalize phone for comparison
+          if (field === 'contact_person_phone') {
+            newValue = stripCountryCode(newValue || '');
+            oldValue = stripCountryCode(oldValue || '');
+          }
 
-        if (defaultPackageId) {
-          // Update existing package
-          await updatePackage(defaultPackageId, {
-            base_price: parseFloat(base_price),
-            price_unit: pricing_unit
-          });
+          // Convert years_experience display string to numeric
+          if (field === 'years_experience') {
+            newValue = parseExperienceToYears(newValue);
+            oldValue = typeof oldValue === 'string' ? parseExperienceToYears(oldValue) : oldValue;
+          }
+
+          // Deep comparison for arrays (operating_locations)
+          const isChanged = Array.isArray(newValue)
+            ? JSON.stringify(newValue) !== JSON.stringify(oldValue)
+            : newValue !== oldValue;
+
+          if (isChanged) {
+            businessUpdates[field] = newValue === '' ? null : newValue;
+            hasBusinessChanges = true;
+          }
+        }
+      });
+
+      // Collect errors from each operation to report at the end
+      const operationErrors: string[] = [];
+
+      // Update business details if changes exist
+      if (hasBusinessChanges) {
+        console.log('[handleSaveDetails] Sending businessUpdates:', JSON.stringify(businessUpdates, null, 2));
+        const { data, error } = await updateBusinessDetails(id, businessUpdates);
+        if (error) {
+          console.error('[handleSaveDetails] Business update failed:', error);
+          console.error('[handleSaveDetails] Error details:', JSON.stringify(error, null, 2));
+          operationErrors.push(`Business update failed: ${error.message}`);
         } else {
-          // Create new default package
-          const { data: newPkg } = await createPackage({
-            business_id: id,
-            package_name: 'Standard Package',
-            package_type: 'fixed',
-            base_price: parseFloat(base_price),
-            price_unit: pricing_unit,
-            included_services: [],
-            is_active: true,
-            sort_order: 0
-          });
-          if (newPkg) setDefaultPackageId(newPkg.id ?? null);
+          setBusiness(data);
         }
       }
 
-      const allCategoryIds = [...selectedCategoryIds, ...selectedEventIds];
-      if (allCategoryIds.length > 0) {
-        const { error: mappingError } = await updateBusinessCategoryMappings(id, allCategoryIds);
-        if (mappingError) console.error('Error updating category mappings:', mappingError);
+      // Handle Package Update/Creation using the extracted price fields
+      // This runs INDEPENDENTLY of business update - even if business update fails, pricing should still save
+      const packageChanged =
+        String(base_price) !== String(editData.initial_base_price ?? '') ||
+        pricing_unit !== (editData.initial_pricing_unit ?? '');
+
+      if (packageChanged && base_price && pricing_unit) {
+        const { createPackage, updatePackage } = await import('../lib/packageApi');
+
+        console.log('[handleSaveDetails] Saving package with price:', base_price, 'unit:', pricing_unit);
+
+        try {
+          if (defaultPackageId) {
+            // Update existing package - backend expects 'price' not 'base_price'
+            const { error: pkgError } = await updatePackage(defaultPackageId, {
+              price: parseFloat(base_price),
+              price_unit: pricing_unit
+            } as any);
+            if (pkgError) {
+              console.error('[handleSaveDetails] Package update failed:', pkgError);
+              operationErrors.push(`Pricing update failed: ${pkgError.message}`);
+            }
+          } else {
+            // Create new default package - backend expects 'price' not 'base_price'
+            const { data: newPkg, error: pkgError } = await createPackage({
+              business_id: id,
+              package_name: 'Standard Package',
+              package_type: 'fixed',
+              price: parseFloat(base_price),
+              price_unit: pricing_unit,
+              included_services: [],
+              is_active: true,
+              sort_order: 0
+            } as any);
+            if (pkgError) {
+              console.error('[handleSaveDetails] Package create failed:', pkgError);
+              operationErrors.push(`Pricing save failed: ${pkgError.message}`);
+            } else {
+              console.log('[handleSaveDetails] Created new package:', newPkg);
+              if (newPkg) setDefaultPackageId(newPkg.id ?? null);
+            }
+          }
+        } catch (pkgErr: any) {
+          console.error('[handleSaveDetails] Package operation error:', pkgErr);
+          operationErrors.push(`Pricing save failed: ${pkgErr.message}`);
+        }
       }
 
-      Alert.alert('Success', 'Business details updated successfully');
+      // 5. Update category mappings if they have changed
+      // Comparison logic for categories
+      const currentCategoryIds = [...selectedCategoryIds, ...selectedEventIds].sort();
+      const initialCategoryIds = [...(editData.initial_category_ids || [])].sort();
+
+      const categoriesChanged = JSON.stringify(currentCategoryIds) !== JSON.stringify(initialCategoryIds);
+
+      if (categoriesChanged && currentCategoryIds.length > 0) {
+        const { error: mappingError } = await updateBusinessCategoryMappings(id, currentCategoryIds);
+        if (mappingError) {
+          console.error('Error updating category mappings:', mappingError);
+          operationErrors.push(`Category update failed: ${(mappingError as any).message}`);
+        }
+      }
+
+      // Show appropriate message based on results
+      if (operationErrors.length > 0) {
+        // Some operations failed - show partial success warning
+        const hasSuccess = !hasBusinessChanges || (hasBusinessChanges && !operationErrors.some(e => e.includes('Business update failed')));
+        const title = hasSuccess ? 'Partially Saved' : 'Save Failed';
+        const message = operationErrors.join('\n');
+        Alert.alert(title, message, [{ text: 'OK' }]);
+      } else {
+        // All operations succeeded
+        Alert.alert(
+          'Success',
+          'Business details updated successfully',
+          [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
+        );
+      }
       await loadData(); // Reload to refresh the display
       await loadVerificationDocuments(); // Reload documents
     } catch (error: any) {
@@ -2007,7 +2702,7 @@ export default function BusinessDetailsScreen() {
     <View key={offer.id} style={styles.offerCard}>
       {offer.banner_image_url && (
         <Image
-          source={{ uri: offer.banner_image_url }}
+          source={{ uri: resolveBusinessMediaUrl(offer.banner_image_url) || '' }}
           style={styles.offerBanner}
           resizeMode="cover"
         />
@@ -2051,73 +2746,6 @@ export default function BusinessDetailsScreen() {
       </View>
     </View>
   );
-
-  const renderImageItem = ({ item }: { item: PortfolioImage }) => {
-    const imageSource = item.image_base64 || item.image_url;
-    const isCover = item.image_type === 'cover';
-    const isMenuOpen = activeMenuImageId === item.id;
-
-    return (
-      <View style={styles.imageGridItemContainer}>
-        <TouchableOpacity
-          style={styles.imageGridItem}
-          activeOpacity={0.9}
-          onPress={() => {
-            if (activeMenuImageId) {
-              setActiveMenuImageId(null);
-            } else {
-              setPreviewImageUrl(imageSource);
-              setShowImagePreview(true);
-            }
-          }}
-        >
-          <Image source={{ uri: imageSource || undefined }} style={styles.galleryImage} resizeMode="cover" />
-          {isCover && (
-            <View style={styles.coverBadge}>
-              <Text style={styles.coverBadgeText}>Cover</Text>
-            </View>
-          )}
-
-          {/* Gradient overlay for text readability if needed, but kept clean for now */}
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.menuButton}
-          onPress={() => setActiveMenuImageId(isMenuOpen ? null : item.id)}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <View style={styles.menuButtonCircle}>
-            <MoreVertical size={18} color="#fff" />
-          </View>
-        </TouchableOpacity>
-
-        {isMenuOpen && (
-          <View style={styles.menuOptions}>
-            <TouchableOpacity
-              style={styles.menuOptionItem}
-              onPress={() => {
-                setActiveMenuImageId(null);
-                handleSetCoverImage(item);
-              }}
-            >
-              <Text style={styles.menuOptionText}>Set Cover Image</Text>
-            </TouchableOpacity>
-            <View style={styles.menuDivider} />
-            <TouchableOpacity
-              style={styles.menuOptionItem}
-              onPress={() => {
-                setActiveMenuImageId(null);
-                handleDeleteImage(item);
-              }}
-            >
-              <Text style={[styles.menuOptionText, styles.menuDeleteText]}>Delete</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-    );
-  };
-
 
   if (loading) {
     return (
@@ -2255,36 +2883,58 @@ export default function BusinessDetailsScreen() {
               <View style={styles.sectionHeader}>
                 <View>
                   <Text style={styles.sectionTitle}>Business Gallery</Text>
-                  <Text style={styles.sectionSubtitle}>{images.length}/20 images uploaded</Text>
+                  <View style={styles.sectionSubtitleContainer}>
+                    <Text style={styles.sectionSubtitle}>
+                      {images.filter(img => img.image_type !== 'video').length}/10 images
+                    </Text>
+                    <Text style={[styles.sectionSubtitle, { marginLeft: 10 }]}>
+                      {images.filter(img => img.image_type === 'video').length}/5 videos
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.buttonGroup}>
+                <View style={[styles.buttonGroup, { flexWrap: 'wrap', justifyContent: 'flex-end', gap: 6 }]}>
                   <TouchableOpacity
                     style={[styles.addButton, styles.smallButton,
-                    (uploading || uploadingMultiple || images.length >= 20) && styles.addButtonDisabled]}
+                    (uploading || uploadingMultiple || images.filter(img => img.image_type !== 'video').length >= 10) && styles.addButtonDisabled]}
                     onPress={handleUploadImage}
-                    disabled={uploading || uploadingMultiple || images.length >= 20}
+                    disabled={uploading || uploadingMultiple || images.filter(img => img.image_type !== 'video').length >= 10}
                   >
                     {uploading ? (
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
                       <>
                         <Plus size={16} color="#fff" />
-                        <Text style={styles.smallButtonText}>Single</Text>
+                        <Text style={styles.smallButtonText}>Image</Text>
                       </>
                     )}
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.addButton, styles.smallButton,
-                    (uploading || uploadingMultiple || images.length >= 20) && styles.addButtonDisabled]}
+                    (uploading || uploadingMultiple || images.filter(img => img.image_type !== 'video').length >= 10) && styles.addButtonDisabled]}
                     onPress={handleUploadMultipleImages}
-                    disabled={uploading || uploadingMultiple || images.length >= 20}
+                    disabled={uploading || uploadingMultiple || images.filter(img => img.image_type !== 'video').length >= 10}
                   >
                     {uploadingMultiple ? (
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
                       <>
                         <ImageIcon size={16} color="#fff" />
-                        <Text style={styles.smallButtonText}>Multiple</Text>
+                        <Text style={styles.smallButtonText}>Bulk</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.addButton, styles.smallButton, { backgroundColor: '#6c7ef7' },
+                    (uploading || images.filter(img => img.image_type === 'video').length >= 5) && styles.addButtonDisabled]}
+                    onPress={handleUploadVideo}
+                    disabled={uploading || images.filter(img => img.image_type === 'video').length >= 5}
+                  >
+                    {uploading ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Video size={16} color="#fff" />
+                        <Text style={styles.smallButtonText}>Video</Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -2320,7 +2970,19 @@ export default function BusinessDetailsScreen() {
               ) : (
                 <FlatList
                   data={images}
-                  renderItem={renderImageItem}
+                  renderItem={({ item, index }) => (
+                    <ImageGridItem
+                      item={item}
+                      index={index}
+                      activeMenuImageId={activeMenuImageId}
+                      setActiveMenuImageId={setActiveMenuImageId}
+                      setPreviewInitialIndex={setPreviewInitialIndex}
+                      setCurrentPreviewIndex={setCurrentPreviewIndex}
+                      setShowImagePreview={setShowImagePreview}
+                      handleSetCoverImage={handleSetCoverImage}
+                      handleDeleteImage={handleDeleteImage}
+                    />
+                  )}
                   keyExtractor={(item) => item.id}
                   numColumns={2}
                   columnWrapperStyle={styles.imageRow}
@@ -2427,7 +3089,7 @@ export default function BusinessDetailsScreen() {
 
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.business_name && styles.editLabelError]}>Business Name *</Text>
+                  <Text style={styles.editLabel}>Business Name *</Text>
                   <TextInput
                     style={[styles.editInput, validationErrors.business_name && styles.validationInputInvalid]}
                     value={editData.business_name || ''}
@@ -2445,7 +3107,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.contact_person_name && styles.editLabelError]}>Contact Person Name *</Text>
+                  <Text style={styles.editLabel}>Contact Person Name *</Text>
                   <TextInput
                     ref={contactPersonNameRef}
                     style={[styles.editInput, validationErrors.contact_person_name && styles.validationInputInvalid]}
@@ -2458,28 +3120,13 @@ export default function BusinessDetailsScreen() {
                     placeholderTextColor="#999"
                     returnKeyType="next"
                     onFocus={handleFieldFocus}
-                    onSubmitEditing={() => contactPersonRoleRef.current?.focus()}
+                    onSubmitEditing={() => businessEmailRef.current?.focus()}
                   />
                   {validationErrors.contact_person_name && <Text style={styles.validationErrorText}>{validationErrors.contact_person_name}</Text>}
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Contact Person Role</Text>
-                  <TextInput
-                    ref={contactPersonRoleRef}
-                    style={styles.editInput}
-                    value={editData.contact_person_role || ''}
-                    onChangeText={(text) => setEditData({ ...editData, contact_person_role: text })}
-                    placeholder="e.g., Owner, Manager, Director"
-                    placeholderTextColor="#999"
-                    returnKeyType="next"
-                    onFocus={handleFieldFocus}
-                    onSubmitEditing={() => businessEmailRef.current?.focus()}
-                  />
-                </View>
-
-                <View style={styles.editField}>
-                  <Text style={[styles.editLabel, (validationErrors.business_email || emailError) && styles.editLabelError]}>Email *</Text>
+                  <Text style={styles.editLabel}>Email</Text>
                   <TextInput
                     ref={businessEmailRef}
                     style={[styles.editInput, (emailError || validationErrors.business_email) && styles.validationInputInvalid]}
@@ -2506,7 +3153,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.contact_person_phone && styles.editLabelError]}>Business Contact Number *</Text>
+                  <Text style={styles.editLabel}>Business Contact Number *</Text>
                   <TextInput
                     ref={contactPersonPhoneRef}
                     style={[styles.editInput, validationErrors.contact_person_phone && styles.validationInputInvalid]}
@@ -2542,7 +3189,7 @@ export default function BusinessDetailsScreen() {
                       <View style={[styles.radioOuter, businessType === 'services' && styles.radioOuterSelected]}>
                         {businessType === 'services' && <View style={styles.radioInner} />}
                       </View>
-                      <Text style={styles.radioText}>Services</Text>
+                      <Text style={styles.radioText}>Service based</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.radioButton}
@@ -2552,32 +3199,147 @@ export default function BusinessDetailsScreen() {
                       <View style={[styles.radioOuter, businessType === 'rental' && styles.radioOuterSelected]}>
                         {businessType === 'rental' && <View style={styles.radioInner} />}
                       </View>
-                      <Text style={styles.radioText}>Rental</Text>
+                      <Text style={styles.radioText}>Rental based</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, (validationErrors.selectedCategoryIds || validationErrors.selectedRootCategoryId) && styles.editLabelError]}>Business Category *</Text>
-                  <Dropdown
-                    options={rootCategoriesForDropdown.map((n: any) => ({
-                      label: n.icon ? `${n.icon} ${n.name}` : n.name,
-                      value: n.id,
-                    }))}
-                    value={selectedRootCategoryId || ''}
-                    placeholder="Select a category"
-                    onChange={(value: string) => {
-                      handleRootSelection(value);
-                      if (validationErrors.selectedCategoryIds) setValidationErrors(prev => { const { selectedCategoryIds, ...rest } = prev; return rest; });
+                  <Text style={styles.editLabel}>Primary Category *</Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.dropdownTrigger,
+                      (validationErrors.selectedRootCategoryId || validationErrors.selectedCategoryIds) && styles.validationInputInvalid,
+                    ]}
+                    onPress={() => setIsPrimaryModalOpen(true)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.dropdownText, !selectedRootCategoryId && styles.placeholder]}>
+                      {selectedRootCategoryId
+                        ? rootCategoriesForDropdown.find((c: any) => c.id === selectedRootCategoryId)?.name || 'Select a category'
+                        : 'Select a category'}
+                    </Text>
+                    <ChevronDown size={20} color="#666" />
+                  </TouchableOpacity>
+
+                  <Modal
+                    visible={isPrimaryModalOpen}
+                    transparent
+                    animationType="fade"
+                    onRequestClose={() => {
+                      setIsPrimaryModalOpen(false);
+                      setPrimarySearchQuery('');
                     }}
-                    open={isRootDropdownOpen}
-                    onOpenChange={setIsRootDropdownOpen}
-                    error={validationErrors.selectedCategoryIds}
-                  />
+                  >
+                    <Pressable
+                      style={styles.modalOverlay}
+                      onPress={() => {
+                        setIsPrimaryModalOpen(false);
+                        setPrimarySearchQuery('');
+                      }}
+                    >
+                      <Pressable
+                        style={styles.categoryModalContent}
+                        onPress={(e) => e.stopPropagation()}
+                      >
+                        <View style={styles.categoryModalHeader}>
+                          <Text style={styles.categoryModalTitle}>Select Category</Text>
+                          <TouchableOpacity
+                            onPress={handleClearAllPrimary}
+                            style={styles.closeButton}
+                          >
+                            <X size={24} color="#666" />
+                          </TouchableOpacity>
+                        </View>
+
+                        <TextInput
+                          style={styles.modalSearchInput}
+                          placeholder="Search Category or Specialization..."
+                          placeholderTextColor="#999"
+                          value={primarySearchQuery}
+                          onChangeText={setPrimarySearchQuery}
+                        />
+
+                        <ScrollView style={styles.modalCategoryTree}>
+                          <Text style={[styles.sectionTitleModal, { marginTop: 0, marginBottom: 4 }]}>Primary Categories</Text>
+                          {filteredPrimaryResults.length === 0 ? (
+                            <Text style={styles.emptyText}>No matching primary categories</Text>
+                          ) : (
+                            filteredPrimaryResults.map((cat: any) => (
+                              <TouchableOpacity
+                                key={cat.id}
+                                style={styles.categoryListItemCompact}
+                                onPress={() => {
+                                  handleRootSelection(cat.id);
+                                }}
+                              >
+                                <Text style={[
+                                  styles.categoryListItemText,
+                                  selectedRootCategoryId === cat.id && styles.categoryListItemTextSelected
+                                ]}>
+                                  {cat.name}
+                                </Text>
+                              </TouchableOpacity>
+                            ))
+                          )}
+
+                          {primarySearchQuery.trim().length > 0 && (
+                            <>
+                              <View style={[styles.sectionHeaderRow, { marginTop: 12, marginBottom: 4 }]}>
+                                <Text style={styles.sectionTitleModal}>Specializations</Text>
+                              </View>
+                              {filteredSpecializationResults.length === 0 ? (
+                                <Text style={styles.emptyText}>No matching specializations</Text>
+                              ) : (
+                                filteredSpecializationResults.map((cat: any) => (
+                                  <TouchableOpacity
+                                    key={cat.id}
+                                    style={styles.categoryListItemCompact}
+                                    onPress={() => handleSpecializationSearchSelection(cat.id, cat.rootCategoryId)}
+                                  >
+                                    <View style={styles.checkboxLeft}>
+                                      {selectedCategoryIds.includes(cat.id) ? (
+                                        <View style={styles.checkboxSelectedSmall}>
+                                          <Check size={12} color="#fff" strokeWidth={3} />
+                                        </View>
+                                      ) : (
+                                        <View style={styles.checkboxUnselectedSmall} />
+                                      )}
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                      <Text style={[
+                                        styles.categoryListItemText,
+                                        selectedCategoryIds.includes(cat.id) && styles.categoryListItemTextSelected
+                                      ]}>
+                                        {cat.path}
+                                      </Text>
+                                    </View>
+                                  </TouchableOpacity>
+                                ))
+                              )}
+                            </>
+                          )}
+                        </ScrollView>
+                        {primarySearchQuery.trim().length > 0 && (
+                          <View style={styles.modalFooter}>
+                            <TouchableOpacity
+                              style={styles.doneButton}
+                              onPress={() => {
+                                setIsPrimaryModalOpen(false);
+                                setPrimarySearchQuery('');
+                              }}
+                            >
+                              <Text style={styles.doneButtonText}>Done</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      </Pressable>
+                    </Pressable>
+                  </Modal>
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.selectedCategoryIds && styles.editLabelError]}>Services Offered *</Text>
+                  <Text style={styles.editLabel}>Specialization *</Text>
                   <TouchableOpacity
                     style={[
                       styles.dropdownTrigger,
@@ -2598,10 +3360,10 @@ export default function BusinessDetailsScreen() {
                       {!selectedRootCategoryId
                         ? 'Select a category first'
                         : selectedCategoriesWithPaths.length === 0
-                          ? 'Select services offered'
+                          ? 'Select Specialization'
                           : selectedCategoriesWithPaths.length === 1
                             ? selectedCategoriesWithPaths[0].path
-                            : `${selectedCategoriesWithPaths.length} services selected`}
+                            : `${selectedCategoriesWithPaths.length} Specialization selected`}
                     </Text>
                     <ChevronDown size={20} color={selectedRootCategoryId ? '#666' : '#ccc'} />
                   </TouchableOpacity>
@@ -2628,7 +3390,7 @@ export default function BusinessDetailsScreen() {
                           <TouchableOpacity
                             onPress={() => {
                               if (selectedCategoryIds.length <= 1) {
-                                Alert.alert('Validation Error', 'At least one service category must be selected.');
+                                Alert.alert('Validation Error', 'At least one Specialization must be selected.');
                                 return;
                               }
                               toggleCategorySelection(item.id);
@@ -2659,8 +3421,8 @@ export default function BusinessDetailsScreen() {
                         <View style={styles.categoryModalHeader}>
                           <Text style={styles.categoryModalTitle}>
                             {subtreeForSelectedRoot
-                              ? `Services offered under ${subtreeForSelectedRoot.name}`
-                              : 'Select Services offered'}
+                              ? `Specialization under ${subtreeForSelectedRoot.name}`
+                              : 'Select Specialization'}
                           </Text>
                           <TouchableOpacity
                             onPress={handleCategoryModalClose}
@@ -2672,11 +3434,25 @@ export default function BusinessDetailsScreen() {
 
                         <TextInput
                           style={styles.modalSearchInput}
-                          placeholder="Search services offered..."
+                          placeholder="Search Specialization..."
                           placeholderTextColor="#999"
                           value={searchQuery}
                           onChangeText={setSearchQuery}
                         />
+
+                        {/* Select All strip */}
+                        <TouchableOpacity
+                          style={styles.selectAllRow}
+                          onPress={handleSelectAllServices}
+                          activeOpacity={0.7}
+                        >
+                          <View style={[styles.selectAllCheck, isAllServicesSelected() && styles.selectAllCheckActive]}>
+                            {isAllServicesSelected() && <Check size={12} color="#fff" strokeWidth={3} />}
+                          </View>
+                          <Text style={[styles.selectAllText, isAllServicesSelected() && styles.selectAllTextActive]}>
+                            {isAllServicesSelected() ? 'Deselect All' : 'Select All'}
+                          </Text>
+                        </TouchableOpacity>
 
                         <ScrollView
                           style={styles.modalCategoryTree}
@@ -2686,8 +3462,8 @@ export default function BusinessDetailsScreen() {
                           {filteredSubtreeChildren.length === 0 ? (
                             <Text style={styles.emptyText}>
                               {subtreeForSelectedRoot?.children?.length === 0
-                                ? 'No services offered'
-                                : 'No matching services offered'}
+                                ? 'No Specialization'
+                                : 'No matching Specialization'}
                             </Text>
                           ) : (
                             renderSubCategoryTreeForModal(filteredSubtreeChildren)
@@ -2708,28 +3484,28 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.selectedEventIds && styles.editLabelError]}>Event Types *</Text>
+                  <Text style={styles.editLabel}>Events you serve</Text>
 
                   {/* Event Dropdown Trigger */}
                   <TouchableOpacity
-                    style={[styles.dropdownTrigger, validationErrors.selectedEventIds && styles.validationInputInvalid]}
+                    style={styles.dropdownTrigger}
                     onPress={handleEventModalOpen}
                     activeOpacity={0.7}
                   >
-                    <Text style={[styles.dropdownText, selectedEventsWithPaths.length === 0 && styles.placeholder]}>
+                    <Text style={[styles.dropdownText, selectedEventNames.length === 0 && styles.placeholder]}>
                       {getEventDropdownDisplayText()}
                     </Text>
                     <ChevronDown size={20} color="#666" />
                   </TouchableOpacity>
 
                   {/* Selected Events Display */}
-                  {selectedEventsWithPaths.length > 0 && (
+                  {selectedEventNames.length > 0 && (
                     <View style={styles.selectedContainer}>
                       <View style={styles.selectedHeader}>
                         <Text style={[styles.selectedLabel, { marginBottom: 0 }]}>
-                          Selected Events ({selectedEventsWithPaths.length}):
+                          Selected Events ({selectedEventNames.length}):
                         </Text>
-                        {selectedEventsWithPaths.length > 3 && (
+                        {selectedEventNames.length > 3 && (
                           <TouchableOpacity onPress={() => setIsEventsExpanded(!isEventsExpanded)}>
                             <ChevronDown
                               size={20}
@@ -2739,16 +3515,16 @@ export default function BusinessDetailsScreen() {
                           </TouchableOpacity>
                         )}
                       </View>
-                      {(isEventsExpanded ? selectedEventsWithPaths : selectedEventsWithPaths.slice(0, 3)).map((item) => {
-                        const eventCategory = allEventCategories.find((c) => c.id === item.id);
+                      {(isEventsExpanded ? selectedEventIds : selectedEventIds.slice(0, 3)).map((id) => {
+                        const eventCategory = allEventCategories.find((c) => c.id === id);
+                        if (!eventCategory) return null;
                         return (
-                          <View key={item.id} style={styles.selectedChip}>
+                          <View key={id} style={styles.selectedChip}>
                             <Text style={styles.selectedChipText}>
-                              {eventCategory?.icon ? `${eventCategory.icon} ` : ''}
-                              {item.path}
+                              {eventCategory.name}
                             </Text>
                             <TouchableOpacity
-                              onPress={() => toggleEventSelection(item.id)}
+                              onPress={() => toggleEventSelection(id)}
                               style={styles.removeButton}
                             >
                               <X size={16} color="#fff" />
@@ -2793,16 +3569,30 @@ export default function BusinessDetailsScreen() {
                           onChangeText={setEventSearchQuery}
                         />
 
-                        {/* Event Category Tree */}
+                        {/* Select All strip */}
+                        <TouchableOpacity
+                          style={styles.selectAllRow}
+                          onPress={handleSelectAllEvents}
+                          activeOpacity={0.7}
+                        >
+                          <View style={[styles.selectAllCheck, isAllEventsSelected() && styles.selectAllCheckActive]}>
+                            {isAllEventsSelected() && <Check size={12} color="#fff" strokeWidth={3} />}
+                          </View>
+                          <Text style={[styles.selectAllText, isAllEventsSelected() && styles.selectAllTextActive]}>
+                            {isAllEventsSelected() ? 'Deselect All' : 'Select All'}
+                          </Text>
+                        </TouchableOpacity>
+
+                        {/* Event List */}
                         <ScrollView
                           style={styles.modalCategoryTree}
                           nestedScrollEnabled={true}
                           showsVerticalScrollIndicator={true}
                         >
-                          {filteredEventTree.length === 0 ? (
+                          {filteredRootEvents.length === 0 ? (
                             <Text style={styles.emptyText}>No events found</Text>
                           ) : (
-                            renderEventCategoryTreeForModal(filteredEventTree)
+                            renderEventListForModal(filteredRootEvents)
                           )}
                         </ScrollView>
 
@@ -2820,7 +3610,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.description && styles.editLabelError]}>Business Description *</Text>
+                  <Text style={styles.editLabel}>Business Description *</Text>
                   <TextInput
                     ref={businessDescriptionRef}
                     style={[styles.editInput, styles.textArea, validationErrors.description && styles.validationInputInvalid]}
@@ -2841,7 +3631,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.years_experience && styles.editLabelError]}>Years of Experience *</Text>
+                  <Text style={styles.editLabel}>Years of Experience *</Text>
                   <Dropdown
                     options={EXPERIENCE_OPTIONS.map((exp) => ({
                       label: exp,
@@ -2858,7 +3648,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.base_price && styles.editLabelError]}>Base Price (₹) *</Text>
+                  <Text style={styles.editLabel}>Base Price (₹) *</Text>
                   <TextInput
                     style={[styles.editInput, validationErrors.base_price && styles.validationInputInvalid]}
                     value={editData.base_price ? String(editData.base_price) : ''}
@@ -2877,7 +3667,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.pricing_unit && styles.editLabelError]}>Pricing Unit *</Text>
+                  <Text style={styles.editLabel}>Pricing Unit *</Text>
                   <Dropdown
                     options={pricingUnitOptions.map((unit) => ({
                       label: unit,
@@ -2906,7 +3696,7 @@ export default function BusinessDetailsScreen() {
                 <Text style={styles.editSectionTitle}>Location</Text>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.address && styles.editLabelError]}>Business Address *</Text>
+                  <Text style={styles.editLabel}>Business Address *</Text>
                   <TextInput
                     ref={addressRef}
                     style={[styles.editInput, validationErrors.address && styles.validationInputInvalid]}
@@ -2925,7 +3715,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.pincode && styles.editLabelError]}>Pincode *</Text>
+                  <Text style={styles.editLabel}>Pincode *</Text>
                   <View style={styles.inputWithStatus}>
                     <TextInput
                       ref={pincodeRef}
@@ -3094,7 +3884,7 @@ export default function BusinessDetailsScreen() {
                 </View>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, validationErrors.operating_locations && styles.editLabelError]}>Operating Locations *</Text>
+                  <Text style={styles.editLabel}>Operating Locations *</Text>
                   <TouchableOpacity
                     style={[styles.dropdownTrigger, validationErrors.operating_locations && styles.validationInputInvalid]}
                     onPress={() => setIsCityModalOpen(true)}
@@ -3130,11 +3920,81 @@ export default function BusinessDetailsScreen() {
               </View>
 
               <View style={styles.editSection}>
-                <Text style={styles.editSectionTitle}>Verification</Text>
+                <Text style={styles.editSectionTitle}>Social Media (Optional)</Text>
 
                 <View style={styles.editField}>
-                  <Text style={[styles.editLabel, (validationErrors.business_registration_number || validationErrors.panDocument) && styles.editLabelError]}>PAN *</Text>
-                  <Text style={styles.editHint}>Required - Permanent Account Number</Text>
+                  <Text style={styles.editLabel}>Website</Text>
+                  <TextInput
+                    ref={websiteUrlRef}
+                    style={styles.editInput}
+                    value={editData.website_url || ''}
+                    onChangeText={(text) => setEditData({ ...editData, website_url: text })}
+                    placeholder="https://www.yourbusiness.com"
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                    keyboardType="url"
+                    returnKeyType="next"
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => instagramUrlRef.current?.focus()}
+                  />
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Instagram</Text>
+                  <TextInput
+                    ref={instagramUrlRef}
+                    style={styles.editInput}
+                    value={editData.instagram_url || ''}
+                    onChangeText={(text) => setEditData({ ...editData, instagram_url: text })}
+                    placeholder="https://instagram.com/yourbusiness"
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                    keyboardType="url"
+                    returnKeyType="next"
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => facebookUrlRef.current?.focus()}
+                  />
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>Facebook</Text>
+                  <TextInput
+                    ref={facebookUrlRef}
+                    style={styles.editInput}
+                    value={editData.facebook_url || ''}
+                    onChangeText={(text) => setEditData({ ...editData, facebook_url: text })}
+                    placeholder="https://facebook.com/yourbusiness"
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                    keyboardType="url"
+                    returnKeyType="next"
+                    onFocus={handleFieldFocus}
+                    onSubmitEditing={() => youtubeUrlRef.current?.focus()}
+                  />
+                </View>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>YouTube</Text>
+                  <TextInput
+                    ref={youtubeUrlRef}
+                    style={styles.editInput}
+                    value={editData.youtube_url || ''}
+                    onChangeText={(text) => setEditData({ ...editData, youtube_url: text })}
+                    placeholder="https://youtube.com/@yourbusiness"
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                    keyboardType="url"
+                    returnKeyType="done"
+                    onFocus={handleFieldFocus}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.editSection}>
+                <Text style={styles.editSectionTitle}>Verification (Optional)</Text>
+
+                <View style={styles.editField}>
+                  <Text style={styles.editLabel}>PAN</Text>
                   <View style={styles.inputActionRow}>
                     <TextInput
                       ref={panRef}
@@ -3149,6 +4009,7 @@ export default function BusinessDetailsScreen() {
                       autoCapitalize="characters"
                       maxLength={10}
                       returnKeyType="next"
+                      onFocus={handleFieldFocus}
                       onSubmitEditing={() => gstNumberRef.current?.focus()}
                     />
                     <TouchableOpacity
@@ -3171,8 +4032,12 @@ export default function BusinessDetailsScreen() {
                     <View style={styles.inlineDocumentsList}>
                       {(documentsByType['pan'] || []).map((doc: any) => (
                         <View key={doc.id} style={styles.documentItem}>
-                          {isImageFile(doc.mime_type || '') && doc.file_url ? (
-                            <Image source={{ uri: doc.file_url }} style={styles.documentThumbnail} />
+                          {isImageFile(doc.mime_type || '') && (doc.image_base64 || doc.file_id) ? (
+                            <Image 
+                              source={{ uri: doc.image_base64 || getVerificationDocumentUrl(doc.file_id) }}
+                              style={styles.documentThumbnail}
+                              onError={(e) => console.warn('[Verification] Image load error PAN:', e.nativeEvent?.error)}
+                            />
                           ) : (
                             <View style={styles.documentIcon}>
                               <FileText size={20} color="#666" />
@@ -3189,8 +4054,8 @@ export default function BusinessDetailsScreen() {
                       ))}
                     </View>
                   )}
-                  {(validationErrors.business_registration_number || validationErrors.panDocument) && (
-                    <Text style={styles.validationErrorText}>{validationErrors.business_registration_number || validationErrors.panDocument}</Text>
+                  {validationErrors.business_registration_number && (
+                    <Text style={styles.validationErrorText}>{validationErrors.business_registration_number}</Text>
                   )}
                 </View>
 
@@ -3199,12 +4064,24 @@ export default function BusinessDetailsScreen() {
                   <View style={styles.inputActionRow}>
                     <TextInput
                       ref={gstNumberRef}
-                      style={[styles.editInput, styles.flexInput]}
+                      style={[styles.editInput, styles.flexInput, validationErrors.gst_number && styles.validationInputInvalid]}
                       value={editData.gst_number || ''}
-                      onChangeText={(text) => setEditData({ ...editData, gst_number: text })}
-                      placeholder="Enter GST number"
+                      onChangeText={(text) => {
+                        const filtered = text.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 15);
+                        setEditData({ ...editData, gst_number: filtered });
+                        if (validationErrors.gst_number) {
+                          setValidationErrors(prev => {
+                            const { gst_number, ...rest } = prev;
+                            return rest;
+                          });
+                        }
+                      }}
+                      placeholder="Enter 15-digit GST number"
                       placeholderTextColor="#999"
+                      autoCapitalize="characters"
+                      maxLength={15}
                       returnKeyType="next"
+                      onFocus={handleFieldFocus}
                       onSubmitEditing={() => websiteUrlRef.current?.focus()}
                     />
                     <TouchableOpacity
@@ -3227,8 +4104,12 @@ export default function BusinessDetailsScreen() {
                     <View style={styles.inlineDocumentsList}>
                       {(documentsByType['gst'] || []).map((doc: any) => (
                         <View key={doc.id} style={styles.documentItem}>
-                          {isImageFile(doc.mime_type || '') && doc.file_url ? (
-                            <Image source={{ uri: doc.file_url }} style={styles.documentThumbnail} />
+                          {isImageFile(doc.mime_type || '') && (doc.image_base64 || doc.file_id) ? (
+                            <Image 
+                              source={{ uri: doc.image_base64 || getVerificationDocumentUrl(doc.file_id) }}
+                              style={styles.documentThumbnail}
+                              onError={(e) => console.warn('[Verification] Image load error GST:', e.nativeEvent?.error)}
+                            />
                           ) : (
                             <View style={styles.documentIcon}>
                               <FileText size={20} color="#666" />
@@ -3245,29 +4126,28 @@ export default function BusinessDetailsScreen() {
                       ))}
                     </View>
                   )}
+                  {validationErrors.gst_number && (
+                    <Text style={styles.validationErrorText}>{validationErrors.gst_number}</Text>
+                  )}
                 </View>
 
                 {/* Verification Documents Section */}
                 <View style={styles.editField}>
                   <Text style={styles.editLabel}>Verification Documents</Text>
 
-                  {/* Document Types - PAN Card first and mandatory */}
                   {[
-                    { code: 'aadhaar', name: 'Aadhaar Card', mandatory: false },
-                    { code: 'bank_statement', name: 'Bank Statement', mandatory: false },
-                    { code: 'general', name: 'General Document', mandatory: false },
-                    { code: 'business_license', name: 'Business License', mandatory: false },
+                    { code: 'business_license', name: 'Business License', hint: 'e.g., GST, FSSAI, or Shop Act license' },
                   ].map((docType) => {
                     const docs = documentsByType[docType.code] || [];
                     const isUploading = uploadingDocument === docType.code;
 
                     return (
-                      <View key={docType.code} style={[styles.documentTypeSection, docType.mandatory && styles.mandatoryDocumentSection]}>
+                      <View key={docType.code} style={styles.documentTypeSection}>
                         <View style={styles.documentTypeHeader}>
                           <View style={styles.documentTypeLabelContainer}>
-                            <Text style={styles.documentTypeName}>{docType.name} {docType.mandatory ? '*' : ''}</Text>
-                            {docType.mandatory && (
-                              <Text style={styles.mandatoryDocumentHint}>Required</Text>
+                            <Text style={styles.documentTypeName}>{docType.name}</Text>
+                            {docType.hint && (
+                              <Text style={styles.mandatoryDocumentHint}>{docType.hint}</Text>
                             )}
                           </View>
                           <TouchableOpacity
@@ -3290,102 +4170,32 @@ export default function BusinessDetailsScreen() {
                         {docs.length > 0 && (
                           <View style={styles.documentsList}>
                             {docs.map((doc) => (
-                              <View key={doc.id} style={styles.documentItem}>
-                                {isImageFile(doc.mime_type || '') && doc.file_url ? (
-                                  <Image source={{ uri: doc.file_url }} style={styles.documentThumbnail} />
-                                ) : (
-                                  <View style={styles.documentIcon}>
-                                    <FileText size={20} color="#666" />
+                                <View key={doc.id} style={styles.documentItem}>
+                                  {isImageFile(doc.mime_type || '') && (doc.image_base64 || doc.file_id) ? (
+                                    <Image 
+                                      source={{ uri: doc.image_base64 || getVerificationDocumentUrl(doc.file_id) }}
+                                      style={styles.documentThumbnail}
+                                      onError={(e) => console.warn('[Verification] Image load error:', e.nativeEvent?.error)}
+                                    />
+                                  ) : (
+                                    <View style={styles.documentIcon}>
+                                      <FileText size={20} color="#666" />
+                                    </View>
+                                  )}
+                                  <View style={styles.documentInfo}>
+                                    <Text style={styles.documentName} numberOfLines={1}>{doc.file_name || doc.document_type_name || 'Document'}</Text>
+                                    <Text style={styles.documentStatus}>Status: {doc.verification_status}</Text>
                                   </View>
-                                )}
-                                <View style={styles.documentInfo}>
-                                  <Text style={styles.documentName} numberOfLines={1}>
-                                    {doc.file_name || 'Document'}
-                                  </Text>
-                                  <Text style={styles.documentStatus}>
-                                    Status: {doc.verification_status}
-                                  </Text>
+                                  <TouchableOpacity style={styles.deleteDocumentButton} onPress={() => handleDeleteDocument(doc.id)}>
+                                    <X size={16} color="#fff" />
+                                  </TouchableOpacity>
                                 </View>
-                                <TouchableOpacity
-                                  style={styles.deleteDocumentButton}
-                                  onPress={() => handleDeleteDocument(doc.id)}
-                                >
-                                  <X size={16} color="#fff" />
-                                </TouchableOpacity>
-                              </View>
                             ))}
                           </View>
                         )}
                       </View>
                     );
                   })}
-                </View>
-              </View>
-
-              <View style={styles.editSection}>
-                <Text style={styles.editSectionTitle}>Social Media</Text>
-
-                <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Website</Text>
-                  <TextInput
-                    ref={websiteUrlRef}
-                    style={styles.editInput}
-                    value={editData.website_url || ''}
-                    onChangeText={(text) => setEditData({ ...editData, website_url: text })}
-                    placeholder="https://www.yourbusiness.com"
-                    placeholderTextColor="#999"
-                    autoCapitalize="none"
-                    keyboardType="url"
-                    returnKeyType="next"
-                    onSubmitEditing={() => instagramUrlRef.current?.focus()}
-                  />
-                </View>
-
-                <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Instagram</Text>
-                  <TextInput
-                    ref={instagramUrlRef}
-                    style={styles.editInput}
-                    value={editData.instagram_url || ''}
-                    onChangeText={(text) => setEditData({ ...editData, instagram_url: text })}
-                    placeholder="https://instagram.com/yourbusiness"
-                    placeholderTextColor="#999"
-                    autoCapitalize="none"
-                    keyboardType="url"
-                    returnKeyType="next"
-                    onSubmitEditing={() => facebookUrlRef.current?.focus()}
-                  />
-                </View>
-
-                <View style={styles.editField}>
-                  <Text style={styles.editLabel}>Facebook</Text>
-                  <TextInput
-                    ref={facebookUrlRef}
-                    style={styles.editInput}
-                    value={editData.facebook_url || ''}
-                    onChangeText={(text) => setEditData({ ...editData, facebook_url: text })}
-                    placeholder="https://facebook.com/yourbusiness"
-                    placeholderTextColor="#999"
-                    autoCapitalize="none"
-                    keyboardType="url"
-                    returnKeyType="next"
-                    onSubmitEditing={() => youtubeUrlRef.current?.focus()}
-                  />
-                </View>
-
-                <View style={styles.editField}>
-                  <Text style={styles.editLabel}>YouTube</Text>
-                  <TextInput
-                    ref={youtubeUrlRef}
-                    style={styles.editInput}
-                    value={editData.youtube_url || ''}
-                    onChangeText={(text) => setEditData({ ...editData, youtube_url: text })}
-                    placeholder="https://youtube.com/@yourbusiness"
-                    placeholderTextColor="#999"
-                    autoCapitalize="none"
-                    keyboardType="url"
-                    returnKeyType="done"
-                  />
                 </View>
               </View>
 
@@ -3550,13 +4360,50 @@ export default function BusinessDetailsScreen() {
             >
               <X size={32} color="#fff" />
             </TouchableOpacity>
-            {previewImageUrl && (
-              <Image
-                source={{ uri: previewImageUrl }}
-                style={styles.previewImage}
-                resizeMode="contain"
-              />
-            )}
+
+            <PagerView
+              style={styles.previewPager}
+              initialPage={previewInitialIndex}
+              pageMargin={10}
+              onPageSelected={(e) => setCurrentPreviewIndex(e.nativeEvent.position)}
+            >
+              {images.map((item, index) => {
+                const imageSource = item.image_base64 || resolveBusinessMediaUrl(item.image_url);
+                const isVideo = item.image_type === 'video' || 
+                               (typeof item.image_url === 'string' && 
+                                (item.image_url.toLowerCase().endsWith('.mp4') || 
+                                 item.image_url.toLowerCase().endsWith('.mov') || 
+                                 item.image_url.toLowerCase().endsWith('.avi')));
+                const videoSource = resolveBusinessMediaUrl(item.image_url);
+
+                return (
+                  <View key={`${item.id}-${index}`} style={styles.previewSlide}>
+                    {isVideo ? (
+                      <ExpoVideo
+                        source={{ uri: videoSource || '' }}
+                        style={styles.previewImage}
+                        useNativeControls
+                        resizeMode={ResizeMode.CONTAIN}
+                        shouldPlay={index === currentPreviewIndex}
+                        isLooping
+                      />
+                    ) : (
+                      <Image
+                        source={{ uri: imageSource || undefined }}
+                        style={styles.previewImage}
+                        resizeMode="contain"
+                      />
+                    )}
+                  </View>
+                );
+              })}
+            </PagerView>
+
+            <View style={styles.previewFooter}>
+              <Text style={styles.previewCounterText}>
+                {currentPreviewIndex + 1} / {images.length}
+              </Text>
+            </View>
           </View>
         </Modal>
         <Modal
@@ -3944,6 +4791,29 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  imageHidden: {
+    opacity: 0,
+  },
+  imageLoadingContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+  },
+  imageErrorContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+  },
   menuButton: {
     position: 'absolute',
     top: 8,
@@ -4277,7 +5147,33 @@ const styles = StyleSheet.create({
   },
   previewImage: {
     width: Dimensions.get('window').width,
-    height: Dimensions.get('window').height * 0.8,
+    height: Dimensions.get('window').height,
+  },
+  previewPager: {
+    flex: 1,
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+  },
+  previewSlide: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  previewFooter: {
+    position: 'absolute',
+    bottom: 50,
+    width: '100%',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  previewCounterText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
   },
   dropdownTrigger: {
     flexDirection: 'row',
@@ -4394,6 +5290,38 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  selectAllRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    backgroundColor: '#fafafa',
+  },
+  selectAllCheck: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#ccc',
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  selectAllCheckActive: {
+    backgroundColor: '#6aa3ce',
+    borderColor: '#6aa3ce',
+  },
+  selectAllText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
+  },
+  selectAllTextActive: {
+    color: '#6aa3ce',
   },
   categoryModalFooter: {
     padding: 16,
@@ -4646,8 +5574,7 @@ const styles = StyleSheet.create({
   },
   validationInputInvalid: {
     borderColor: '#FF3B30',
-    borderWidth: 2,
-    backgroundColor: '#fff5f5',
+    borderWidth: 1,
   },
   editLabelError: {
     color: '#FF3B30',
@@ -4940,5 +5867,102 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#1a1a1a',
     fontWeight: '500',
+  },
+  sectionSubtitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  videoPlaceholder: {
+    backgroundColor: '#f3f4f6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  videoPlaceholderText: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '500',
+  },
+  videoBadge: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    borderRadius: 4,
+    padding: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionTitleModal: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#666',
+    marginTop: 24,
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 24,
+    marginBottom: 12,
+  },
+  selectAllLink: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  categoryListItemCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    marginBottom: 2,
+  },
+  categoryListItemSelected: {
+    backgroundColor: 'transparent',
+  },
+  categoryListItemText: {
+    fontSize: 16,
+    color: '#1a1a1a',
+    flex: 1,
+  },
+  categoryListItemTextSelected: {
+    fontWeight: '700',
+    color: '#007AFF',
+  },
+  categoryPathText: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 2,
+  },
+  categoryIconStyles: {
+    fontSize: 18,
+    marginRight: 8,
+  },
+  checkboxLeft: {
+    marginRight: 10,
+  },
+  checkboxUnselectedSmall: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    backgroundColor: '#fff',
+  },
+  checkboxSelectedSmall: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });

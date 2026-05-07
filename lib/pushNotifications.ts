@@ -51,6 +51,8 @@ export async function checkNotificationPermission(): Promise<boolean> {
     return false;
 }
 
+import { registerPushToken } from './api/notifications';
+
 /**
  * Register the device's push token with the backend
  */
@@ -73,40 +75,14 @@ export async function registerPushTokenFromDevice() {
         console.log('🚀 [FCM TOKEN]:', token);
         console.log('--------------------------------------------------');
 
-        await registerPushToken(token, platform);
+        const { error } = await registerPushToken(token, platform);
+        if (error) {
+            console.warn(`[PUSH] Server failed to register token: ${error.error}`);
+        } else {
+            console.log('[PUSH] ✅ Token registered successfully with backend');
+        }
     } catch (error) {
         console.error('[PUSH] Failed to register push token:', error);
-    }
-}
-
-/**
- * API call to register the token
- */
-export async function registerPushToken(pushToken: string, platform: 'ios' | 'android') {
-    const url = `${supabaseUrl}/functions/v1/push-register-token`;
-
-    console.log(`[PUSH] Registering token for ${platform}...`);
-    try {
-        const response = await apiFetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                pushToken,
-                platform
-            })
-        });
-
-        if (!response.ok) {
-            const text = await response.text();
-            console.warn(`[PUSH] Server returned ${response.status}: ${text}`);
-            return;
-        }
-
-        console.log('[PUSH] ✅ Token registered successfully with backend');
-    } catch (err) {
-        console.error('[PUSH] ❌ Error in registerPushToken API call:', err);
     }
 }
 
@@ -120,10 +96,15 @@ export function handleNotificationNavigation(remoteMessage: any, router: any) {
     const title = (typeof notification.title === 'string' ? notification.title : typeof data.title === 'string' ? data.title : '').toLowerCase();
     const body = (typeof notification.body === 'string' ? notification.body : typeof data.body === 'string' ? data.body : '').toLowerCase();
     const leadId = data.leadId;
+    const reviewId = data.reviewId;
+    const screen = data.screen;
 
-    console.log('[PUSH] Notification tapped:', { title, body, leadId, data });
+    console.log('[PUSH] Notification tapped:', { title, body, leadId, reviewId, screen, data });
 
-    if (leadId) {
+    if (reviewId || screen === 'ReviewDetail' || title.includes('review') || body.includes('reviewed')) {
+        console.log('[PUSH] Review notification. Navigating to reviews screen...');
+        router.push('/(tabs)/reviews');
+    } else if (leadId) {
         console.log('[PUSH] Lead ID found. Navigating to lead details...');
         router.push(`/lead-detail?id=${leadId}`);
     } else if (title.includes('lead') || body.includes('lead')) {

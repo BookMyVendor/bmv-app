@@ -29,6 +29,8 @@ import {
 } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { getVendorBusiness } from '../lib/api/vendorBusinesses';
+import { resolveBusinessMediaUrl } from '../lib/businessApi';
+import { getCategoryTree } from '../lib/api/categories';
 import { getLeads } from '../lib/api/leads';
 import { getReviews } from '../lib/api/reviews';
 import { getTimeAgo } from '../lib/timeUtils';
@@ -44,12 +46,76 @@ interface Business {
     cover_photo_url: string | null;
 }
 
+/**
+ * Helper to convert a file path to a full URL.
+ * If the input is already a full URL (starts with http), return as-is.
+ * If it's a file path, prepend the API base URL.
+ */
+function getFullImageUrl(filePathOrUrl: string | null | undefined): string | null {
+  return resolveBusinessMediaUrl(filePathOrUrl, 'vendor-media');
+}
+
 interface Review {
     id: string;
     customer_name: string;
     rating: number;
     comment: string | null;
     created_at: string;
+}
+
+/**
+ * Image component with fallback to gradient avatar on error
+ */
+function ImageWithFallback({
+    uri,
+    style,
+    fallbackLetter,
+}: {
+    uri: string | null | undefined;
+    style: any;
+    fallbackLetter: string;
+}) {
+    const [hasError, setHasError] = useState(false);
+    const [imageLoaded, setImageLoaded] = useState(false);
+
+    // Reset error state when URI changes
+    useEffect(() => {
+        setHasError(false);
+        setImageLoaded(false);
+    }, [uri]);
+
+    if (!uri || hasError) {
+        return (
+            <LinearGradient
+                colors={['#6c7ef7', '#8b9dff']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={style}
+            >
+                <Text style={styles.coverAvatarLetter}>{fallbackLetter}</Text>
+            </LinearGradient>
+        );
+    }
+
+    return (
+        <View style={style}>
+            {!imageLoaded && !hasError && (
+                <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#f0f0f0' }]}>
+                    <ActivityIndicator size="small" color="#6aa3ce" />
+                </View>
+            )}
+            <Image
+                source={{ uri }}
+                style={[StyleSheet.absoluteFillObject, !imageLoaded && { opacity: 0 }]}
+                resizeMode="cover"
+                onLoad={() => setImageLoaded(true)}
+                onError={() => {
+                    setHasError(true);
+                    setImageLoaded(true);
+                }}
+            />
+        </View>
+    );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -102,7 +168,6 @@ export default function BusinessProfileScreen() {
 
     // Stats
     const [totalLeads, setTotalLeads] = useState(0);
-    const [wonLeads, setWonLeads] = useState(0);
     const [avgReview, setAvgReview] = useState<number | null>(null);
     const [reviewCount, setReviewCount] = useState(0);
 
@@ -162,16 +227,87 @@ export default function BusinessProfileScreen() {
             const cachedParams = await AsyncStorage.getItem(`business_profile_${id}`);
             if (cachedParams) setBusiness(JSON.parse(cachedParams));
 
-            const { data, error } = await getVendorBusiness(id);
+            // Fetch both business and category tree in parallel
+            const [{ data, error }, categoryTreeRes] = await Promise.all([
+                getVendorBusiness(id),
+                getCategoryTree().catch(err => {
+                    console.error('Failed to fetch category tree:', err);
+                    return { data: null, error: err };
+                })
+            ]);
+
             if (error) throw new Error(error.error);
             if (data) {
                 const raw = data as any;
-                const category = raw.business_category ?? raw.vendor_business_category_mappings?.[0]?.categories?.name ?? 'General';
+
+                // Build category lookup map from category tree
+                const categoryMap = new Map<string, { name: string; category_type?: string; parent_category_id?: string | null }>();
+                if (categoryTreeRes.data && Array.isArray(categoryTreeRes.data)) {
+                    const flattenCategories = (cats: any[]) => {
+                        cats.forEach(cat => {
+                            if (cat && cat.id) {
+                                categoryMap.set(cat.id, {
+                                    name: cat.name || 'Unknown',
+                                    category_type: cat.category_type,
+                                    parent_category_id: cat.parent_category_id,
+                                });
+                                if (cat.children && Array.isArray(cat.children)) {
+                                    flattenCategories(cat.children);
+                                }
+                            }
+                        });
+                    };
+                    flattenCategories(categoryTreeRes.data);
+                }
+
+                // Try multiple possible API response structures for category
+                // Priority: primary_category_id > root business category > other fallbacks
+                let category = 'General';
+                
+                // First check if primary_category_id is available
+                if (raw.primary_category_id) {
+                    const primaryCat = categoryMap.get(raw.primary_category_id);
+                    if (primaryCat?.name) {
+                        category = primaryCat.name;
+                    }
+                }
+                
+                // If not found, check business_category field
+                if (category === 'General' && raw.business_category) {
+                    category = raw.business_category;
+                } else if (category === 'General' && raw.primary_category_name) {
+                    category = raw.primary_category_name;
+                } else if (category === 'General' && raw.category_name) {
+                    category = raw.category_name;
+                } else if (category === 'General' && raw.vendor_business_category_mappings?.length > 0) {
+                    const mapping = raw.vendor_business_category_mappings[0];
+                    category = mapping.categories?.name || mapping.category_name || 'General';
+                } else if (category === 'General' && raw.categories?.name) {
+                    category = raw.categories.name;
+                } else if (category === 'General' && raw.category_ids?.length > 0) {
+                    // Find PRIMARY business category (category_type='business' with no parent)
+                    const primaryCatId = raw.category_ids.find((id: string) => {
+                        const cat = categoryMap.get(id);
+                        return cat && cat.category_type === 'business' && !cat.parent_category_id;
+                    });
+                    // If no primary found, try any business category
+                    const anyBusinessCatId = primaryCatId || raw.category_ids.find((id: string) => {
+                        const cat = categoryMap.get(id);
+                        return cat && cat.category_type === 'business';
+                    });
+                    // Use the found category name or fall back to first category name
+                    const foundCatId = primaryCatId || anyBusinessCatId || raw.category_ids[0];
+                    category = categoryMap.get(foundCatId)?.name || 'General';
+                }
+
+                // Get full URL for cover photo (API returns full MinIO/S3 URLs or file paths)
+                const coverPhotoUrl = getFullImageUrl(data.cover_photo_url || data.cover_image_file_id);
+
                 const businessData: Business = {
                     id: data.id,
-                    business_name: data.business_name,
+                    business_name: data.business_name || data.name || 'Unnamed Business',
                     business_category: category,
-                    cover_photo_url: data.cover_photo_url ?? null,
+                    cover_photo_url: coverPhotoUrl,
                 };
                 setBusiness(businessData);
                 setIsOffline(false);
@@ -193,7 +329,6 @@ export default function BusinessProfileScreen() {
                     const parsedLeads = JSON.parse(cachedLeads);
                     setLeads(parsedLeads);
                     setTotalLeads(parsedLeads.length);
-                    setWonLeads(parsedLeads.filter((l: Lead) => l.lead_status === 'converted').length);
                 }
             } catch (_) {}
 
@@ -203,7 +338,6 @@ export default function BusinessProfileScreen() {
             setLeads(leadsData);
             try { AsyncStorage.setItem(`business_leads_${id}`, JSON.stringify(leadsData)); } catch (_) {}
             setTotalLeads(leadsData.length);
-            setWonLeads(leadsData.filter((l) => l.lead_status === 'converted').length);
         } catch (err) {
             console.error('Error fetching leads:', err);
         } finally {
@@ -226,12 +360,15 @@ export default function BusinessProfileScreen() {
                 }
             } catch (_) {}
 
-            const { data, error } = await getReviews();
-            if (error) throw new Error(error.error);
-            const raw = (data ?? []).filter((r: any) => r.business_id === id);
+            const { data, error } = await getReviews({ business_id: id, limit: 100 });
+            if (error) {
+                console.error('Error fetching reviews:', error);
+                return;
+            }
+            const raw = Array.isArray(data) ? (data as any[]) : [];
             const mapped: Review[] = raw.map((r: any) => ({
                 id: r.id,
-                customer_name: r.customers?.name ?? 'Anonymous',
+                customer_name: r.customer_first_name ?? 'Anonymous',
                 rating: r.rating ?? 0,
                 comment: r.review_text || r.review_title || null,
                 created_at: r.created_at,
@@ -288,6 +425,12 @@ export default function BusinessProfileScreen() {
             setSearchQuery('');
         });
     };
+
+    // ── Derived stats ─────────────────────────────────────────────────────────
+
+    const wonLeads = useMemo(() => {
+        return leads.filter((l) => l.lead_status === 'converted').length;
+    }, [leads]);
 
     // ── Filtered data ─────────────────────────────────────────────────────────
 
@@ -412,13 +555,16 @@ export default function BusinessProfileScreen() {
                 <TouchableOpacity onPress={() => router.back()} style={styles.topBarBtn}>
                     <ArrowLeft size={22} color="#007AFF" strokeWidth={2.2} />
                 </TouchableOpacity>
-                <TouchableOpacity
-                    style={styles.topBarEditBtn}
-                    onPress={() => (router as any).push(`/business-details?id=${id}`)}
-                    activeOpacity={0.7}
-                >
-                    <Edit2 size={18} color="#007AFF" strokeWidth={2} />
-                </TouchableOpacity>
+                <View style={styles.topBarActionContainer}>
+                    <TouchableOpacity
+                        style={styles.topBarEditBtn}
+                        onPress={() => (router as any).push(`/business-details?id=${id}`)}
+                        activeOpacity={0.7}
+                    >
+                        <Edit2 size={18} color="#007AFF" strokeWidth={2.2} />
+                    </TouchableOpacity>
+                    <Text style={styles.topBarEditLabel}>Edit Profile</Text>
+                </View>
             </View>
 
             {isOffline && (
@@ -437,10 +583,10 @@ export default function BusinessProfileScreen() {
                 {/* ── Business Header ── */}
                 <View style={styles.businessHeader}>
                     {business?.cover_photo_url ? (
-                        <Image
-                            source={{ uri: business.cover_photo_url }}
+                        <ImageWithFallback
+                            uri={business.cover_photo_url}
                             style={styles.coverAvatar}
-                            resizeMode="cover"
+                            fallbackLetter={coverLetter}
                         />
                     ) : (
                         <LinearGradient
@@ -688,6 +834,18 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.06,
         shadowRadius: 4,
         elevation: 2,
+    },
+    topBarActionContainer: {
+        alignItems: 'center',
+        paddingTop: 4,
+    },
+    topBarEditLabel: {
+        fontSize: 10,
+        fontWeight: '700',
+        color: '#007AFF',
+        marginTop: 4,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
     },
 
     // Business header

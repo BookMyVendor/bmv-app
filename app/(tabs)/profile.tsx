@@ -25,10 +25,10 @@ import { useAuth } from '../../contexts/AuthContext';
 import { getFileUrl } from '../../lib/api/fileStorage';
 import { uploadProfilePhoto } from '../../lib/api/media';
 import { updateVendorMe } from '../../lib/api/vendors';
+import { resolveBusinessMediaUrl } from '../../lib/businessApi';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
 import { validateEmail } from '../../lib/validation';
-import { sendOTP, resendOTP } from '../../lib/otpAuthApi';
-import { confirmAccountDeletion } from '../../lib/accountDeletionApi';
+import { sendOTP, resendOTP, deleteAccount as confirmAccountDeletion } from '../../lib/authApi';
 import { getAccessToken } from '../../lib/tokenStorage';
 import { stripCountryCode } from '../../lib/formatters';
 import ScreenBackground from '../../components/ScreenBackground';
@@ -37,8 +37,8 @@ const profileSchema = Yup.object().shape({
   firstName: Yup.string().required('First name is required'),
   lastName: Yup.string().required('Last name is required'),
   email: Yup.string()
-    .required('Email is required')
     .test('email-validation', 'Invalid email address', function (value) {
+      if (!value || value.trim() === '') return true;
       return validateEmail(value);
     }),
 });
@@ -47,6 +47,7 @@ export default function ProfileScreen() {
   const { user, profile, signOut, refreshProfile, verifyOTP: authVerifyOTP, isOffline: authIsOffline } = useAuth();
   const insets = useSafeAreaInsets();
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [hasImageError, setHasImageError] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [deletionLoading, setDeletionLoading] = useState(false);
   const [deletionOtp, setDeletionOtp] = useState('');
@@ -63,6 +64,12 @@ export default function ProfileScreen() {
 
   const formattedPhone = () => {
     return stripCountryCode(profile?.phone) || '';
+  };
+
+  const getInitials = (firstName: string, lastName: string) => {
+    const f = firstName.trim() ? firstName.trim()[0] : '';
+    const l = lastName.trim() ? lastName.trim()[0] : '';
+    return (f + l).toUpperCase();
   };
 
   const handleRequestDeletionOtp = async () => {
@@ -179,15 +186,44 @@ export default function ProfileScreen() {
     setResendCountdown(0);
   };
 
-  useEffect(() => {
-    const fetchImageUrl = async () => {
-      if (profile?.image_file_id) {
-        const { data } = await getFileUrl(profile.image_file_id);
-        if (data?.url) setPhotoUri(data.url);
-      }
-    };
-    fetchImageUrl();
-  }, [profile?.image_file_id]);
+    useEffect(() => {
+      const fetchImageUrl = async () => {
+        setHasImageError(false);
+        console.log('[Profile] Fetching image URL, profile data:', { 
+          id: profile?.id, 
+          image_file_id: profile?.image_file_id, 
+          avatar_url: profile?.avatar_url 
+        });
+
+        // 1. If we have a file ID, fetch the URL from storage
+        if (profile?.image_file_id) {
+          try {
+            const result = await getFileUrl(profile.image_file_id);
+            console.log('[Profile] getFileUrl result:', result);
+            if (result.data?.url) {
+              const resolved = resolveBusinessMediaUrl(result.data.url);
+              console.log('[Profile] Resolved URL from file_id:', resolved);
+              setPhotoUri(resolved);
+              return;
+            }
+          } catch (err) {
+            console.error('[Profile] Failed to fetch image from file_id:', err);
+          }
+        }
+        
+        // 2. Fallback to avatar_url if present
+        if (profile?.avatar_url) {
+          const resolved = resolveBusinessMediaUrl(profile.avatar_url);
+          console.log('[Profile] Resolved URL from avatar_url:', resolved);
+          setPhotoUri(resolved);
+        } else {
+          console.log('[Profile] No image found, setting photoUri to null');
+          setPhotoUri(null);
+        }
+      };
+  
+      fetchImageUrl();
+    }, [profile?.id, profile?.image_file_id, profile?.avatar_url]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined;
@@ -309,26 +345,12 @@ export default function ProfileScreen() {
       const isLocalImage = photoUri && !photoUri.startsWith('http://') && !photoUri.startsWith('https://');
 
       if (isLocalImage && photoUri) {
-        const formData = new FormData();
-        if (Platform.OS === 'web') {
-          const response = await fetch(photoUri);
-          if (!response.ok) throw new Error('Failed to load image');
-          const blob = await response.blob();
-          const ext = blob.type?.includes('png') ? 'png' : 'jpg';
-          const name = `${user?.id}-${Date.now()}.${ext}`;
-          formData.append('image', new File([blob], name, { type: blob.type || 'image/jpeg' }));
-        } else {
-          const fs = await import('expo-file-system/legacy');
-          const fileInfo = await fs.getInfoAsync(photoUri);
-          if (!fileInfo.exists) throw new Error('File does not exist');
-          const ext = photoUri.split('.').pop() || 'jpg';
-          const name = `${user?.id}-${Date.now()}.${ext}`;
-          formData.append('image', { uri: photoUri, name, type: `image/${ext === 'jpg' ? 'jpeg' : ext}` } as any);
-        }
-        const uploadResult = await uploadProfilePhoto(formData);
+        const fileExt = photoUri.split('.').pop() || 'jpg';
+        const fileName = `${user?.id}-${Date.now()}.${fileExt}`;
+        const uploadResult = await uploadProfilePhoto(photoUri, fileName);
         if (uploadResult.error) throw new Error(uploadResult.error.error);
         if (uploadResult.data?.file_id) imageFileId = uploadResult.data.file_id;
-        if (uploadResult.data?.url) setPhotoUri(uploadResult.data.url);
+        if (uploadResult.data?.url) setPhotoUri(resolveBusinessMediaUrl(uploadResult.data.url));
       }
 
       const updatePayload: Record<string, unknown> = {
@@ -431,8 +453,23 @@ export default function ProfileScreen() {
                   style={styles.photoContainer}
                   onPress={showImageOptions}
                 >
-                  {photoUri ? (
-                    <Image source={{ uri: photoUri }} style={styles.photo} />
+                  {photoUri && !hasImageError ? (
+                    <Image
+                      key={photoUri}
+                      source={{ uri: photoUri }}
+                      style={styles.photo}
+                      onLoad={() => setHasImageError(false)}
+                      onError={(e) => {
+                        console.error('Profile image load error:', e.nativeEvent.error);
+                        setHasImageError(true);
+                      }}
+                    />
+                  ) : (values.firstName || values.lastName) ? (
+                    <View style={[styles.photo, styles.initialsContainer]}>
+                      <Text style={styles.initialsText}>
+                        {getInitials(values.firstName, values.lastName)}
+                      </Text>
+                    </View>
                   ) : (
                     <View style={styles.photoPlaceholder}>
                       <Camera size={32} color={Colors.text.tertiary} />
@@ -454,7 +491,7 @@ export default function ProfileScreen() {
                   </Text>
                   <TextInput
                     ref={null}
-                    style={styles.input}
+                    style={[styles.input, touched.firstName && errors.firstName && styles.inputError]}
                     placeholder="Enter first name"
                     value={values.firstName}
                     onChangeText={handleChange('firstName')}
@@ -473,7 +510,7 @@ export default function ProfileScreen() {
                   </Text>
                   <TextInput
                     ref={lastNameRef}
-                    style={styles.input}
+                    style={[styles.input, touched.lastName && errors.lastName && styles.inputError]}
                     placeholder="Enter last name"
                     value={values.lastName}
                     onChangeText={handleChange('lastName')}
@@ -497,11 +534,11 @@ export default function ProfileScreen() {
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>
-                    Email Address <Text style={styles.required}>*</Text>
+                    Email Address
                   </Text>
                   <TextInput
                     ref={emailRef}
-                    style={styles.input}
+                    style={[styles.input, touched.email && errors.email && styles.inputError]}
                     placeholder="Enter email address"
                     keyboardType="email-address"
                     autoCapitalize="none"
@@ -698,6 +735,16 @@ const styles = StyleSheet.create({
     height: 120,
     borderRadius: 60,
   },
+  initialsContainer: {
+    backgroundColor: Colors.primary.main,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  initialsText: {
+    color: Colors.neutral.white,
+    fontSize: 40,
+    fontWeight: '700',
+  },
   photoPlaceholder: {
     width: 120,
     height: 120,
@@ -739,12 +786,15 @@ const styles = StyleSheet.create({
   },
   input: {
     backgroundColor: Colors.neutral.white,
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: Colors.neutral.light,
     borderRadius: BorderRadius.md,
     padding: Spacing.lg,
     fontSize: 16,
     color: Colors.text.primary,
+  },
+  inputError: {
+    borderColor: Colors.error.main,
   },
   saveButton: {
     borderRadius: BorderRadius.md,

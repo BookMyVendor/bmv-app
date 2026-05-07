@@ -1,4 +1,4 @@
-import { functionsCall } from '../apiClient';
+import { axiosFunctionsCall } from '../axiosClient';
 
 /** Matches vendor-me-get response vendor shape (API_SPEC_FOR_CONSUMERS.md). */
 export interface MeResponse {
@@ -10,13 +10,13 @@ export interface MeResponse {
   image_file_id: string | null;
   terms_accepted: boolean | null;
   terms_accepted_at: string | null;
-  created_at?: string;
-  updated_at?: string;
-  last_login_at?: string | null;
-  has_business?: boolean;
+  created_at: string;
+  updated_at: string;
+  last_login_at: string | null;
+  has_business: boolean;
   vendor_businesses?: { id: string }[];
 }
 
 export async function getMe() {
-  return functionsCall<MeResponse>('vendor-me-get', {}, 'vendor');
+  return axiosFunctionsCall<MeResponse>('vendor-me-get', {}, 'vendor');
 }

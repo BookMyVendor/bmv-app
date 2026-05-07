@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useFocusEffect } from 'expo-router';
 import { Video, ResizeMode } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -32,8 +33,8 @@ import {
 } from 'lucide-react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { getReviews, updateReview } from '../../lib/api/reviews';
-import FilterModal from '../../components/FilterModal';
-import SortModal from '../../components/SortModal';
+import { getVendorBusinesses } from '../../lib/api/vendorBusinesses';
+import FilterSortModal from '../../components/FilterSortModal';
 import ReplyModal from '../../components/ReplyModal';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
 import ScreenBackground from '../../components/ScreenBackground';
@@ -49,9 +50,9 @@ interface Review {
   vendor_response: string | null;
   responded_at: string | null;
   created_at: string;
-  businesses: {
+  businesses?: {
     business_name: string;
-  };
+  } | null;
   mediaItems?: { url: string; mimeType?: string }[];
 }
 
@@ -73,8 +74,7 @@ export default function ReviewsScreen() {
   const [selectedEventTypes, setSelectedEventTypes] = useState<string[]>([]);
   const [dateFilter, setDateFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<SortOption>('newest');
-  const [showFilterModal, setShowFilterModal] = useState(false);
-  const [showSortModal, setShowSortModal] = useState(false);
+  const [showFilterSortModal, setShowFilterSortModal] = useState(false);
   const [showReplyModal, setShowReplyModal] = useState(false);
   const [selectedReview, setSelectedReview] = useState<Review | null>(null);
   const [selectedMedia, setSelectedMedia] = useState<{
@@ -84,29 +84,84 @@ export default function ReviewsScreen() {
   const [mediaLoadError, setMediaLoadError] = useState(false);
   const { user, isOffline: authIsOffline } = useAuth();
 
-  useEffect(() => {
-    if (user?.id) {
-      fetchReviews();
-    }
-  }, [user?.id]);
-
-  useEffect(() => {
-    if (selectedMedia) setMediaLoadError(false);
-  }, [selectedMedia]);
-
-  const fetchReviews = async () => {
+  const fetchReviews = useCallback(async (isSilentRefresh = false) => {
     try {
       if (!user?.id) return;
-      const isRefresh = refreshing;
-      if (!isRefresh) setLoading(true);
+      if (!isSilentRefresh && !refreshing) setLoading(true);
       try {
         const cachedReviews = await AsyncStorage.getItem(`vendor_reviews_${user.id}`);
         if (cachedReviews) setReviews(JSON.parse(cachedReviews));
       } catch { }
 
+      let apiList: any[] = [];
       const { data, error } = await getReviews();
-      if (error) throw new Error(error.error);
-      const list = (data || []) as Review[];
+      console.log('[BizDebug][Reviews] getReviews(all) response', {
+        hasError: !!error,
+        error: error?.error ?? null,
+        count: Array.isArray(data) ? data.length : 0,
+      });
+
+      if (error && /internal error/i.test(error.error || '')) {
+        console.log('[BizDebug][Reviews] Falling back to business-wise reviews fetch');
+        const { data: businesses, error: businessError } = await getVendorBusinesses();
+        console.log('[BizDebug][Reviews] getVendorBusinesses for fallback', {
+          hasError: !!businessError,
+          error: businessError?.error ?? null,
+          businessCount: Array.isArray(businesses) ? businesses.length : 0,
+        });
+
+        if (businessError) {
+          throw new Error(businessError.error);
+        }
+
+        const businessIds = (businesses || []).map((b: any) => b.id).filter(Boolean);
+        const reviewResponses = await Promise.all(
+          businessIds.map((businessId) => getReviews({ business_id: businessId, limit: 100 }))
+        );
+
+        const fallbackErrors = reviewResponses
+          .map((response) => response.error?.error)
+          .filter((message): message is string => !!message);
+        const merged = reviewResponses.flatMap((response) => (Array.isArray(response.data) ? response.data : []));
+        const deduped = Array.from(
+          merged.reduce((map, item: any) => {
+            if (item?.id) map.set(item.id, item);
+            return map;
+          }, new Map<string, any>()).values()
+        );
+
+        console.log('[BizDebug][Reviews] Fallback reviews result', {
+          requestedBusinessCount: businessIds.length,
+          mergedCount: merged.length,
+          dedupedCount: deduped.length,
+          errorCount: fallbackErrors.length,
+        });
+
+        if (deduped.length === 0 && fallbackErrors.length > 0) {
+          throw new Error(fallbackErrors[0]);
+        }
+
+        apiList = deduped;
+      } else {
+        if (error) throw new Error(error.error);
+        apiList = (data || []) as any[];
+      }
+
+      const list = apiList.map(item => ({
+        id: item.id,
+        customer_name: item.customer_first_name || item.customer_name || 'Anonymous',
+        profile_photo_url: item.profile_photo_url || null,
+        rating: item.rating || 0,
+        comment: item.review_text || item.comment || '',
+        event_type: item.event_type || null,
+        is_flagged: !!item.is_flagged,
+        vendor_response: item.vendor_response || null,
+        responded_at: item.vendor_response_date || item.responded_at || null,
+        created_at: item.created_at,
+        businesses: item.business_name ? { business_name: item.business_name } : null,
+        mediaItems: item.mediaItems || []
+      })) as Review[];
+
       setReviews(list);
       try {
         AsyncStorage.setItem(`vendor_reviews_${user.id}`, JSON.stringify(list));
@@ -117,7 +172,25 @@ export default function ReviewsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [user?.id, refreshing]);
+
+  useEffect(() => {
+    if (user?.id) {
+      fetchReviews();
+    }
+  }, [user?.id, fetchReviews]);
+
+  useEffect(() => {
+    if (selectedMedia) setMediaLoadError(false);
+  }, [selectedMedia]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.id) {
+        fetchReviews(true);
+      }
+    }, [user?.id, fetchReviews])
+  );
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -383,7 +456,7 @@ export default function ReviewsScreen() {
         </View>
       )}
 
-      {item.vendor_response && (
+      {/* {item.vendor_response && (
         <View style={styles.replyContainer}>
           <View style={styles.replyHeader}>
             <MessageSquare size={14} color="#3B82F6" />
@@ -396,7 +469,7 @@ export default function ReviewsScreen() {
           </View>
           <Text style={styles.replyText}>{item.vendor_response}</Text>
         </View>
-      )}
+      )} */}
 
       <View style={styles.reviewFooter}>
         {item.businesses?.business_name ? (
@@ -408,7 +481,7 @@ export default function ReviewsScreen() {
         ) : (
           <View />
         )}
-        <TouchableOpacity
+        {/* <TouchableOpacity
           style={styles.replyButton}
           onPress={() => handleReply(item)}
         >
@@ -416,7 +489,7 @@ export default function ReviewsScreen() {
           <Text style={styles.replyButtonText}>
             {item.vendor_response ? 'Edit Reply' : 'Reply'}
           </Text>
-        </TouchableOpacity>
+        </TouchableOpacity> */}
       </View>
     </View>
   );
@@ -452,41 +525,21 @@ export default function ReviewsScreen() {
         </View>
       </View>
 
-      {/* Filter / Sort row */}
-      <View style={styles.filterSortRow}>
+      {/* Recent Reviews Header row with Filter/Sort button */}
+      <View style={styles.sectionHeaderRow}>
+        <Text style={styles.sectionTitle}>Recent Reviews</Text>
+        
         <TouchableOpacity
-          style={styles.filterButton}
-          onPress={() => setShowFilterModal(true)}
+          style={styles.filterSortButton}
+          onPress={() => setShowFilterSortModal(true)}
+          activeOpacity={0.7}
         >
-          <SlidersHorizontal size={16} color={Colors.secondary.main} />
-          <Text style={styles.filterButtonText}>Filters</Text>
-          {activeFilterCount > 0 && (
-            <View style={styles.filterBadge}>
-              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
-            </View>
-          )}
+          <SlidersHorizontal size={16} color="#3B82F6" />
+          <Text style={styles.filterSortButtonText}>
+            Filter & Sort{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+          </Text>
         </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.sortButton}
-          onPress={() => setShowSortModal(true)}
-        >
-          <ArrowUpDown size={16} color={Colors.secondary.main} />
-          <Text style={styles.sortButtonText}>Sort</Text>
-        </TouchableOpacity>
-
-        {activeFilterCount > 0 && (
-          <TouchableOpacity
-            style={styles.clearButton}
-            onPress={clearAllFilters}
-          >
-            <Text style={styles.clearButtonText}>Clear All</Text>
-          </TouchableOpacity>
-        )}
       </View>
-
-      {/* Recent Reviews label */}
-      <Text style={styles.sectionTitle}>Recent Reviews</Text>
     </>
   );
 
@@ -560,22 +613,20 @@ export default function ReviewsScreen() {
         />
       )}
 
-      <FilterModal
-        visible={showFilterModal}
-        onClose={() => setShowFilterModal(false)}
-        title="Filter by Rating"
-        options={['5', '4', '3', '2', '1']}
-        selectedOptions={selectedRatings}
-        onSelectOptions={setSelectedRatings}
-        multiSelect={true}
-      />
-
-      <SortModal
-        visible={showSortModal}
-        onClose={() => setShowSortModal(false)}
-        selectedSort={sortBy as any}
+      <FilterSortModal
+        visible={showFilterSortModal}
+        onClose={() => setShowFilterSortModal(false)}
+        selectedSort={sortBy}
         onSelectSort={(sort) => setSortBy(sort as SortOption)}
-        context="reviews"
+        sortOptions={[
+          { label: 'Newest first', value: 'newest' },
+          { label: 'Oldest first', value: 'oldest' },
+          { label: 'Highest rated', value: 'highest' },
+          { label: 'Lowest rated', value: 'lowest' },
+        ]}
+        selectedRatings={selectedRatings}
+        onSelectRatings={setSelectedRatings}
+        ratingOptions={['5', '4', '3', '2', '1']}
       />
 
       {selectedReview && (
@@ -722,7 +773,7 @@ const styles = StyleSheet.create({
   statCardsContainer: {
     flexDirection: 'row',
     marginTop: 4,
-    marginBottom: 20,
+    marginBottom: 8,
     gap: 12,
   },
   individualStatCard: {
@@ -760,68 +811,38 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  // ── Section title ───────────────────────────────────
-  sectionTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#1C2340',
-    marginHorizontal: 16,
-    marginBottom: 10,
-    marginTop: 2,
-  },
+  // ── Section Header ────────────────────────────────
 
-  // ── Filter/Sort ─────────────────────────────────────
-  filterSortRow: {
+
+  // ── Header & Filters ────────────────────────────────
+  sectionHeaderRow: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 12,
     paddingHorizontal: 16,
-    marginBottom: 14,
-    gap: 8,
   },
-  filterButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: 9,
-    borderRadius: 20,
-    gap: 6,
-    borderWidth: 1.5,
-    borderColor: '#5B8DB8',
-  },
-  filterButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#5B8DB8',
-  },
-  filterBadge: {
-    backgroundColor: Colors.secondary.main,
-    borderRadius: 10,
-    minWidth: 18,
-    height: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 5,
-  },
-  filterBadgeText: {
-    fontSize: 11,
+  sectionTitle: {
+    fontSize: 18,
     fontWeight: '700',
-    color: '#fff',
+    color: '#1a1a1a',
   },
-  sortButton: {
+  filterSortButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: 9,
-    borderRadius: 20,
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#3B82F6',
     gap: 6,
-    borderWidth: 1.5,
-    borderColor: '#5B8DB8',
   },
-  sortButtonText: {
-    fontSize: 13,
+  filterSortButtonText: {
+    fontSize: 14,
     fontWeight: '600',
-    color: '#5B8DB8',
+    color: '#3B82F6',
   },
   clearButton: {
     backgroundColor: '#fff',

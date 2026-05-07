@@ -15,8 +15,7 @@ export interface PickDocumentResult {
 
 // Allowed MIME types
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png'];
-const ALLOWED_PDF_TYPE = 'application/pdf';
-const ALLOWED_TYPES = [...ALLOWED_IMAGE_TYPES, ALLOWED_PDF_TYPE];
+const ALLOWED_TYPES = [...ALLOWED_IMAGE_TYPES];
 
 // Max file size: 10MB
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
@@ -41,8 +40,7 @@ export const isImageFile = (mimeType: string | null | undefined): boolean => {
  * Validates if a file is a PDF
  */
 export const isPdfFile = (mimeType: string | null | undefined): boolean => {
-  if (!mimeType) return false;
-  return mimeType.toLowerCase() === ALLOWED_PDF_TYPE;
+  return false; // PDF support disabled
 };
 
 /**
@@ -53,9 +51,6 @@ export const getMimeType = (uri: string, name?: string): string | null => {
   const lowerName = (name || '').toLowerCase();
 
   // Check by extension
-  if (lowerName.endsWith('.pdf') || lowerUri.endsWith('.pdf')) {
-    return 'application/pdf';
-  }
   if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg') || lowerUri.includes('.jpg') || lowerUri.includes('.jpeg')) {
     return 'image/jpeg';
   }
@@ -105,11 +100,8 @@ export const pickDocuments = async (allowMultiple: boolean = true): Promise<Pick
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    // Use expo-image-picker with all media types
-    // Note: expo-image-picker may not support PDFs directly on all platforms
-    // For PDFs, we might need to use a different approach or library
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      mediaTypes: ['images'], // Use only images as requested
       allowsMultipleSelection: allowMultiple,
       quality: 0.8,
       allowsEditing: false,
@@ -136,7 +128,7 @@ export const pickDocuments = async (allowMultiple: boolean = true): Promise<Pick
 
     for (const file of files) {
       if (!file.type || !validateFileType(file.type)) {
-        errors.push(`${file.name || 'File'} is not a valid image (jpg, png) or PDF`);
+        errors.push(`${file.name || 'File'} is not a valid image (jpg, png)`);
         continue;
       }
 
@@ -174,7 +166,7 @@ const pickDocumentsWeb = async (allowMultiple: boolean): Promise<PickDocumentRes
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/jpeg,image/jpg,image/png,application/pdf';
+    input.accept = 'image/jpeg,image/jpg,image/png';
     input.multiple = allowMultiple;
 
     input.onchange = async (e) => {
@@ -194,7 +186,7 @@ const pickDocumentsWeb = async (allowMultiple: boolean): Promise<PickDocumentRes
         const mimeType = file.type;
 
         if (!validateFileType(mimeType)) {
-          errors.push(`${file.name} is not a valid image (jpg, png) or PDF`);
+          errors.push(`${file.name} is not a valid image (jpg, png)`);
           continue;
         }
 
@@ -272,7 +264,7 @@ export const pickImages = async (allowMultiple: boolean = true): Promise<PickDoc
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'], // Use array instead of MediaTypeOptions.Images
       allowsMultipleSelection: allowMultiple,
       quality: 0.8,
       allowsEditing: false,
