@@ -18,7 +18,7 @@ import { PackageFormData, PackageType, Category } from '../types/packages';
 import { getBusinessCategories, getCategoryFormFields, createPackage, updatePackage, getPackage } from '../lib/packageApi';
 import { getCategoryConfig } from '../lib/packageConfig';
 import { validatePackageForm } from '../lib/packageValidation';
-import { supabaseCore } from '../lib/supabase';
+import { getVendorBusinesses } from '../lib/api/vendorBusinesses';
 import PackageTypeSelector from '../components/packages/PackageTypeSelector';
 import PackagePricingForm from '../components/packages/PackagePricingForm';
 import IncludedServicesInput from '../components/packages/IncludedServicesInput';
@@ -78,15 +78,10 @@ export default function PackageFormScreen() {
       let actualBusinessId = businessId;
       if (!actualBusinessId && user?.id) {
         // Try to get business ID from user's businesses
-        const { data: businesses, error: businessError } = await supabaseCore
-          .from('vendor_businesses')
-          .select('id')
-          .eq('vendor_id', user.id)
-          .limit(1)
-          .single();
-
-        if (!businessError && businesses) {
-          actualBusinessId = businesses.id;
+        const { data: businessList, error: businessError } = await getVendorBusinesses(user.id);
+        const first = businessList?.[0];
+        if (!businessError && first) {
+          actualBusinessId = (first as any).id;
           setBusinessId(actualBusinessId);
         }
       }

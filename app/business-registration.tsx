@@ -18,10 +18,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ChevronLeft, ChevronRight, X, CheckCircle2 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
-import { supabaseCore } from '../lib/supabase';
+import { registerVendorBusiness } from '../lib/api/vendorBusinesses';
+import { updateBusinessCategoryMappings } from '../lib/api/packages';
 import BasicInformationStep, { BasicInformationStepRef } from '../components/registration/BasicInformationStep';
 import ServicesExperienceStep, { ServicesExperienceStepRef } from '../components/registration/ServicesExperienceStep';
-import { pickMultipleImages, uploadMultipleBusinessImages, uploadMultipleVerificationDocuments, UploadDocumentData, uploadBusinessImage, setCoverImage } from '../lib/businessApi';
+import { pickMultipleImages } from '../lib/businessApi';
 import Dropdown from '../components/Dropdown';
 import { validateEmail, getEmailError } from '../lib/validation';
 import { createPackage } from '../lib/packageApi';
@@ -465,200 +466,128 @@ export default function BusinessRegistrationScreen() {
     setSubmitting(true);
 
     try {
-      const parseYearsOfExperience = (yearsStr: string): number => {
-        if (!yearsStr) return 0;
-        const match = yearsStr.match(/\d+/);
-        if (match) {
-          const num = parseInt(match[0], 10);
-          return num;
-        }
-        if (yearsStr.toLowerCase().includes('more')) {
-          return 10;
-        }
-        return 0;
+      console.log('[BizDebug][Create] Submit started', {
+        userId: user?.id ?? null,
+        businessName: businessData.businessName ?? null,
+        selectedRootCategoryId: businessData.selectedRootCategoryId ?? null,
+        selectedCategoryCount: businessData.selectedCategoryIds?.length ?? 0,
+        selectedEventCount: businessData.selectedEventIds?.length ?? 0,
+      });
+      // Parse contact person name into first_name and last_name
+      const nameParts = (businessData.contactPersonName || '').trim().split(/\s+/);
+      const firstName = nameParts[0] || '';
+      const lastName = nameParts.slice(1).join(' ') || firstName; // If only one name, use it as last name too
+
+      // Determine business_type - map 'services' to 'service'
+      const businessType: 'service' | 'rental' = businessData.businessType === 'rental' ? 'rental' : 'service';
+
+      // Determine pan_india based on operating locations
+      // If operatingLocations has 'Pan India' or is empty, set pan_india to true
+      const isPanIndia = !businessData.operatingLocations ||
+        businessData.operatingLocations.length === 0 ||
+        businessData.operatingLocations.some(loc => loc.toLowerCase() === 'pan india' || loc.toLowerCase() === 'all india');
+
+      // If no cover photo is provided but portfolio images exist, use first portfolio image as cover
+      let coverPhotoUri = businessData.coverPhotoUri;
+      if (!coverPhotoUri && businessData.portfolioImages && businessData.portfolioImages.length > 0) {
+        coverPhotoUri = businessData.portfolioImages[0];
+        console.log('[BizDebug][Register] No cover photo provided, using first portfolio image as cover');
+      }
+
+      // Prepare gallery photos from portfolioImages (excluding cover photo)
+      const galleryPhotos = businessData.portfolioImages
+        ? coverPhotoUri
+          ? businessData.portfolioImages.filter(uri => uri !== coverPhotoUri)
+          : businessData.portfolioImages
+        : [];
+
+      // Build the registration payload
+      const registrationPayload = {
+        first_name: firstName,
+        last_name: lastName,
+        phone: stripCountryCode(businessData.phoneNumber || ''),
+        email: businessData.email || undefined,
+        business_name: businessData.businessName || '',
+        business_type: businessType,
+        pan_india: isPanIndia,
+        operating_locations: isPanIndia ? undefined : businessData.operatingLocations,
+        primary_category_id: businessData.selectedRootCategoryId || '',
+        specialization_category_ids: businessData.selectedCategoryIds || [],
+        event_category_ids: businessData.selectedEventIds || [],
+        cover_photo: coverPhotoUri ? { uri: coverPhotoUri } : undefined,
+        photos: galleryPhotos.map(uri => ({ uri })),
       };
 
-      // Step 1: Create business with all fields (cover photo will be uploaded after)
-      const { data: createdBusiness, error: businessError } = await supabaseCore
-        .from('vendor_businesses')
-        .insert({
-          vendor_id: user?.id,
-          business_name: businessData.businessName,
-          business_email: businessData.email,
-          description: null,
-          address: null,
-          city: null,
-          state: null,
-          pincode: null,
-          locality: null,
-          latitude: null,
-          longitude: null,
-          operating_locations: businessData.operatingLocations || [],
-          service_radius_km: 0,
-          contact_person_name: businessData.contactPersonName,
-          contact_person_phone: stripCountryCode(businessData.phoneNumber), // Ensure no +91
-          contact_person_role: null,
-          business_registration_number: null,
-          website_url: null,
-          instagram_url: null,
-          facebook_url: null,
-          youtube_url: null,
-          cover_photo_url: null,
-          years_experience: 0,
-          gst_number: null,
-          status: 'approved',
-          availability: null,
-          subscription_status: 'trial',
-        })
-        .select()
-        .single();
+      console.log('[BizDebug][Register] Calling registerVendorBusiness', {
+        firstName,
+        lastName,
+        phone: registrationPayload.phone,
+        businessName: registrationPayload.business_name,
+        businessType: registrationPayload.business_type,
+        panIndia: isPanIndia,
+        primaryCategoryId: registrationPayload.primary_category_id,
+        specializationCount: registrationPayload.specialization_category_ids?.length ?? 0,
+        eventCount: registrationPayload.event_category_ids?.length ?? 0,
+        hasCoverPhoto: !!registrationPayload.cover_photo,
+        galleryPhotoCount: registrationPayload.photos?.length ?? 0,
+      });
 
-      if (businessError) throw businessError;
-      if (!createdBusiness) throw new Error('Failed to create business');
+      const { data: registrationResult, error: registrationError } = await registerVendorBusiness(registrationPayload);
 
-      // Step 2: Save businessType to vendor_business_form_data
-      if (businessData.businessType) {
-        const { error: formError } = await supabaseCore
-          .from('vendor_business_form_data')
-          .insert({
-            business_id: createdBusiness.id,
-            field_name: 'businessType',
-            field_value: businessData.businessType
-          });
+      console.log('[BizDebug][Register] registerVendorBusiness response', {
+        hasError: !!registrationError,
+        error: registrationError?.error ?? null,
+        errorCode: registrationError?.code ?? null,
+        vendorId: registrationResult?.vendor_id ?? null,
+        vendorBusinessId: registrationResult?.vendor_business_id ?? null,
+      });
 
-        if (formError) {
-          console.error('Error saving businessType:', formError);
+      if (registrationError) {
+        // Handle duplicate phone error
+        if (registrationError.code === 'DUPLICATE_PHONE') {
+          throw new Error('This phone number is already registered. Please use a different number.');
         }
+        throw new Error(registrationError.error);
       }
+      if (!registrationResult) throw new Error('Failed to register business');
 
-      // Step 3: Upload cover photo if provided (after business is created)
-      if (businessData.coverPhotoUri) {
-        try {
-          const { data: coverImageData, error: coverError } = await uploadBusinessImage(
-            createdBusiness.id,
-            businessData.coverPhotoUri
-          );
-          if (coverError) {
-            console.error('Error uploading cover photo:', coverError);
-            // Don't fail the entire registration if cover photo fails
-          } else if (coverImageData) {
-            // Set the uploaded image as cover
-            const { error: setCoverError } = await setCoverImage(createdBusiness.id, coverImageData.id);
-            if (setCoverError) {
-              console.error('Error setting cover image:', setCoverError);
-            }
-          }
-        } catch (coverError) {
-          console.error('Error uploading cover photo:', coverError);
-          // Don't fail the entire registration if cover photo fails
-        }
-      }
-
-      // Step 4: Upload portfolio images if provided (after business is created)
-      if (businessData.portfolioImages && businessData.portfolioImages.length > 0) {
-        try {
-          // Filter out the cover photo if it was already uploaded in Step 3
-          const otherImages = businessData.coverPhotoUri
-            ? businessData.portfolioImages.filter(uri => uri !== businessData.coverPhotoUri)
-            : businessData.portfolioImages;
-
-          if (otherImages.length > 0) {
-            await uploadMultipleBusinessImages(
-              createdBusiness.id,
-              otherImages,
-              (current, total) => {
-                console.log(`Uploading portfolio images ${current}/${total}`);
-              }
-            );
-          }
-        } catch (imageError) {
-          console.error('Error uploading portfolio images:', imageError);
-          // Don't fail the entire registration if images fail
-        }
-      }
-
-      // Step 5: Upload verification documents if provided
-      if (businessData.verificationDocuments) {
-        try {
-          const documentsToUpload: UploadDocumentData[] = [];
-
-          // Flatten all documents by type into upload format
-          Object.entries(businessData.verificationDocuments).forEach(([typeCode, files]) => {
-            if (Array.isArray(files) && files.length > 0) {
-              files.forEach((file) => {
-                documentsToUpload.push({
-                  documentTypeCode: typeCode,
-                  file: file,
-                });
-              });
-            }
-          });
-
-          if (documentsToUpload.length > 0) {
-            const { data: uploadedDocs, errors } = await uploadMultipleVerificationDocuments(
-              createdBusiness.id,
-              documentsToUpload
-            );
-
-            if (errors.length > 0) {
-              console.error('Some documents failed to upload:', errors);
-              // Don't fail the entire registration if documents fail
-            } else {
-              console.log(`Successfully uploaded ${uploadedDocs.length} verification documents`);
-            }
-          }
-        } catch (docError) {
-          console.error('Error uploading verification documents:', docError);
-          // Don't fail the entire registration if documents fail
-        }
-      }
-
-      // Step 6: Insert category mappings
-      const categoryMappings: any[] = [];
-
-      // Add selected business category IDs (including root categories)
+      // Update category mappings after successful registration
       const allSelectedCategoryIds = [...(businessData.selectedCategoryIds || [])];
-      // Include root category if selected and not already in the list
       if (businessData.selectedRootCategoryId && !allSelectedCategoryIds.includes(businessData.selectedRootCategoryId)) {
         allSelectedCategoryIds.push(businessData.selectedRootCategoryId);
       }
+      const eventIds = businessData.selectedEventIds || [];
+      const allCategoryIds = [...allSelectedCategoryIds, ...eventIds];
 
-      if (allSelectedCategoryIds.length > 0) {
-        allSelectedCategoryIds.forEach((categoryId) => {
-          categoryMappings.push({
-            vendor_id: user?.id,
-            business_id: createdBusiness.id,
-            category_id: categoryId,
-          });
+      if (allCategoryIds.length > 0 && registrationResult.vendor_business_id) {
+        const { error: mappingError } = await updateBusinessCategoryMappings(registrationResult.vendor_business_id, allCategoryIds);
+        if (mappingError) console.error('Error saving category mappings:', mappingError);
+        console.log('[BizDebug][Register] Category mapping result', {
+          businessId: registrationResult.vendor_business_id,
+          categoryCount: allCategoryIds.length,
+          hasError: !!mappingError,
+          error: mappingError?.error ?? null,
         });
       }
 
-      // Add event category IDs
-      if (businessData.selectedEventIds && businessData.selectedEventIds.length > 0) {
-        businessData.selectedEventIds.forEach((categoryId: string) => {
-          categoryMappings.push({
-            vendor_id: user?.id,
-            business_id: createdBusiness.id,
-            category_id: categoryId,
-          });
-        });
-      }
-
-      // Insert all category mappings in a single batch
-      if (categoryMappings.length > 0) {
-        const { error: mappingError } = await supabaseCore
-          .from('vendor_business_category_mappings')
-          .insert(categoryMappings);
-
-        if (mappingError) {
-          console.error('Error inserting category mappings:', mappingError);
-        }
-      }
+      // Create a normalized business object for caching
+      const normalizedCreatedBusiness = {
+        id: registrationResult.vendor_business_id,
+        vendor_id: registrationResult.vendor_id,
+        business_name: businessData.businessName,
+        description: businessData.businessDescription || '',
+        city: businessData.city || '',
+        state: businessData.state || '',
+        cover_photo_url: null,
+      };
 
 
 
       // Clear saved form data before navigating
       await clearSavedData();
+
+      // Set skip flag so layout doesn't redirect back to registration
+      await AsyncStorage.setItem(SKIP_BUSINESS_REGISTRATION_KEY, 'true');
 
       // Reset local state to ensure next registration starts fresh
       setBusinessData({ businessType: 'services' });
@@ -667,10 +596,29 @@ export default function BusinessRegistrationScreen() {
 
       // Update profile in AuthContext to include the new business flag
       await refreshProfile();
+      if (user?.id && registrationResult?.vendor_business_id) {
+        const cacheKey = `dashboard_businesses_${user.id}`;
+        try {
+          const cachedStr = await AsyncStorage.getItem(cacheKey);
+          const cachedBusinesses = cachedStr ? JSON.parse(cachedStr) : [];
+          const list = Array.isArray(cachedBusinesses) ? cachedBusinesses : [];
+          const deduped = list.filter((item: any) => item?.id !== normalizedCreatedBusiness.id);
+          await AsyncStorage.setItem(cacheKey, JSON.stringify([normalizedCreatedBusiness, ...deduped]));
+        } catch {
+          // Cache priming is best-effort; dashboard API remains source of truth.
+        }
+      }
+      console.log('[BizDebug][Register] Submit finished successfully', {
+        vendorBusinessId: registrationResult?.vendor_business_id,
+        businessName: businessData.businessName,
+      });
 
       setShowSuccessModal(true);
     } catch (error: any) {
       console.error('Error submitting business:', error);
+      console.log('[BizDebug][Create] Submit failed', {
+        message: error?.message ?? 'Unknown error',
+      });
       alert(error.message);
     } finally {
       setSubmitting(false);

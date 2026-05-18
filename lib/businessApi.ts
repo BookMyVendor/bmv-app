@@ -1,4 +1,8 @@
-import { supabaseCore, supabaseCms } from './supabase';
+import { getApiBaseUrl } from './apiConfig';
+import * as vendorBusinessApi from './api/vendorBusinesses';
+import * as offersApi from './api/offers';
+import * as mediaApi from './api/media';
+import * as verificationApi from './api/verificationDocuments';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { compressAndConvertToBase64, validateImageUri } from './imageCompression';
@@ -28,6 +32,7 @@ export interface PortfolioImage {
   display_order: number;
   created_at: string;
   image_type?: string; // 'gallery', 'cover', 'portfolio', or 'video'
+  mime_type?: string;
 }
 
 export interface CreateOfferData {
@@ -70,96 +75,140 @@ export const validateImageSize = async (
   maxSize: number
 ): Promise<boolean> => {
   try {
+    if (!uri) return false;
+
+    // Local file/content URIs on RN should use FileSystem, not fetch(blob),
+    // which can throw generic "Internal error" on some Android devices.
+    const isLocalUri = uri.startsWith('file://') || uri.startsWith('content://');
+    if (isLocalUri) {
+      const info = await FileSystem.getInfoAsync(uri);
+      if (info.exists && typeof (info as any).size === 'number') {
+        return ((info as any).size as number) <= maxSize;
+      }
+      // If size is unavailable for a valid local URI, allow upload to proceed.
+      return true;
+    }
+
+    // data/blob/http URLs
     const response = await fetch(uri);
     const blob = await response.blob();
     return blob.size <= maxSize;
   } catch (error) {
     console.error('Error validating image size:', error);
-    return false;
+    // Validation errors should not block uploads; backend will enforce limits.
+    return true;
   }
 };
 
 export const uploadImageToStorage = async (
-  uri: string,
-  bucket: string,
-  path: string
+  _uri: string,
+  _bucket: string,
+  _path: string
 ): Promise<{ data: { path: string } | null; error: Error | null }> => {
-  try {
-    if (!uri || typeof uri !== 'string') {
-      throw new Error('Invalid file URI provided');
-    }
-
-    let base64Data: string;
-    if (Platform.OS === 'web') {
-      // On web, fetch and convert to base64
-      const response = await fetch(uri);
-      const blob = await response.blob();
-      const reader = new FileReader();
-      const dataUri = await new Promise<string>((resolve, reject) => {
-        reader.onloadend = () => {
-          if (typeof reader.result === 'string') {
-            resolve(reader.result);
-          } else {
-            reject(new Error('Failed to convert blob to data URI'));
-          }
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-      base64Data = dataUri.includes(',') ? dataUri.split(',')[1] : dataUri;
-    } else {
-      // On mobile, use FileSystem (New API in Expo 54+)
-      const file = new FileSystem.File(uri);
-      base64Data = await file.base64();
-    }
-
-    if (!base64Data) {
-      throw new Error('Failed to read file data');
-    }
-
-    const byteCharacters = atob(base64Data);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-
-    const fileExt = uri.split('.').pop()?.toLowerCase() || 'jpg';
-    const fileName = `${path}.${fileExt}`;
-    const contentType = `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`;
-
-    const { data, error } = await supabaseCore.storage
-      .from(bucket)
-      .upload(fileName, byteArray, {
-        contentType,
-        upsert: true,
-      });
-
-    if (error) throw error;
-
-    return { data, error: null };
-  } catch (error) {
-    console.error('Upload error:', error);
-    return { data: null, error: error as Error };
-  }
+  return { data: null, error: new Error('Use uploadBusinessImage or uploadProfilePhoto API instead') };
 };
 
-export const getPublicUrl = (bucket: string, path: string): string => {
-  const { data } = supabaseCore.storage.from(bucket).getPublicUrl(path);
-  return data.publicUrl;
+export const getPublicUrl = (_bucket: string, path: string): string => {
+  return path ? `${getApiBaseUrl()}/files/${_bucket}/${path}` : '';
+};
+
+export const resolveBusinessMediaUrl = (
+  filePathOrUrl: string | null | undefined,
+  bucket = 'vendor-media'
+): string | null => {
+  if (!filePathOrUrl) {
+    return null;
+  }
+  
+  const base = getApiBaseUrl().replace(/\/+$/, '');
+  let resolvedUrl: string | null = null;
+
+  // 1. If it's a full URL, check if it's an internal storage URL that needs proxying
+  if (
+    filePathOrUrl.startsWith('http://') || 
+    filePathOrUrl.startsWith('https://')
+  ) {
+    try {
+      const url = new URL(filePathOrUrl);
+      const apiHost = new URL(base).host;
+      
+      // If it's already on our API host, return it as-is
+      if (url.host === apiHost) {
+        return filePathOrUrl;
+      }
+
+      const path = url.pathname;
+      
+      // Pattern 1: /bucket-name/path/to/file
+      if (path.includes(`/${bucket}/`)) {
+        const pathAfterBucket = path.split(`/${bucket}/`)[1];
+        resolvedUrl = `${base}/media/${bucket}/${pathAfterBucket}`;
+        return resolvedUrl;
+      }
+      
+      // Pattern 2: /media/bucket-name/path/to/file
+      if (path.includes('/media/')) {
+        resolvedUrl = `${base}${path}`;
+        return resolvedUrl;
+      }
+
+      // Pattern 3: Any other path that looks like a storage path (e.g. minio host)
+      if (url.host.includes('minio')) {
+        const parts = path.split('/').filter(Boolean);
+        if (parts.length >= 2) {
+           const urlBucket = parts[0];
+           const urlKey = parts.slice(1).join('/');
+           resolvedUrl = `${base}/media/${urlBucket}/${urlKey}`;
+           return resolvedUrl;
+        }
+      }
+    } catch (e) {
+      console.warn('[MediaResolve] URL parsing failed for:', filePathOrUrl);
+    }
+
+    return filePathOrUrl;
+  }
+
+  // 2. Data URLs are returned as-is
+  if (filePathOrUrl.startsWith('data:')) {
+    return filePathOrUrl;
+  }
+
+  // 3. If it's a proxy path (starts with /media, /storage, /files, etc)
+  if (filePathOrUrl.startsWith('/')) {
+    resolvedUrl = `${base}${filePathOrUrl}`;
+    return resolvedUrl;
+  }
+
+  // 4. If it's a relative path containing a slash, assume it's a sub-path
+  if (filePathOrUrl.includes('/')) {
+    resolvedUrl = `${base}/${filePathOrUrl.replace(/^\/+/, '')}`;
+    return resolvedUrl;
+  }
+
+  // 5. Fallback for raw keys/UUIDs:
+  const key = filePathOrUrl.replace(/^\/+/, '');
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  
+  if (!uuidRegex.test(key) && key.includes('.')) {
+     resolvedUrl = `${base}/${key}`;
+     return resolvedUrl;
+  }
+
+  resolvedUrl = `${base}/media/${bucket}/${key}`;
+  return resolvedUrl;
+};
+
+// Helper to rewrite MinIO URLs for local development
+const rewriteMinioUrl = (url: string | null | undefined, bucket = 'vendor-media'): string | null => {
+  return resolveBusinessMediaUrl(url, bucket);
 };
 
 export const deleteImageFromStorage = async (
-  bucket: string,
-  path: string
+  _bucket: string,
+  _path: string
 ): Promise<{ error: Error | null }> => {
-  try {
-    const { error } = await supabaseCore.storage.from(bucket).remove([path]);
-    if (error) throw error;
-    return { error: null };
-  } catch (error) {
-    return { error: error as Error };
-  }
+  return { error: null };
 };
 
 export const createOffer = async (
@@ -178,14 +227,9 @@ export const createOffer = async (
       throw new Error('Expiry date must be in the future');
     }
 
-    const { data, error } = await supabaseCore
-      .from('vendor_business_offers')
-      .insert(offerData)
-      .select()
-      .single();
-
-    if (error) throw error;
-    return { data, error: null };
+    const { data, error } = await offersApi.createOffer(offerData.business_id, offerData as any);
+    if (error) throw new Error(error.error);
+    return { data: data as any as Offer, error: null };
   } catch (error) {
     return { data: null, error: error as Error };
   }
@@ -194,18 +238,9 @@ export const createOffer = async (
 export const getOffers = async (
   businessId: string
 ): Promise<{ data: Offer[] | null; error: Error | null }> => {
-  try {
-    const { data, error } = await supabaseCore
-      .from('vendor_business_offers')
-      .select('*')
-      .eq('business_id', businessId)
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-    return { data, error: null };
-  } catch (error) {
-    return { data: null, error: error as Error };
-  }
+  const { data, error } = await offersApi.getOffers(businessId);
+  if (error) return { data: null, error: new Error(error.error) };
+  return { data: (data || []) as any as Offer[], error: null };
 };
 
 export const updateOffer = async (
@@ -219,23 +254,12 @@ export const updateOffer = async (
     if (offerData.description && offerData.description.length > 500) {
       throw new Error('Description must not exceed 500 characters');
     }
-
-    if (offerData.valid_until) {
-      const validUntil = new Date(offerData.valid_until);
-      if (validUntil < new Date()) {
-        throw new Error('Expiry date must be in the future');
-      }
+    if (offerData.valid_until && new Date(offerData.valid_until) < new Date()) {
+      throw new Error('Expiry date must be in the future');
     }
-
-    const { data, error } = await supabaseCore
-      .from('vendor_business_offers')
-      .update(offerData)
-      .eq('id', offerId)
-      .select()
-      .single();
-
-    if (error) throw error;
-    return { data, error: null };
+    const { data, error } = await offersApi.updateOffer(offerId, offerData as any);
+    if (error) throw new Error(error.error);
+    return { data: data as any as Offer, error: null };
   } catch (error) {
     return { data: null, error: error as Error };
   }
@@ -244,190 +268,116 @@ export const updateOffer = async (
 export const deleteOffer = async (
   offerId: string
 ): Promise<{ error: Error | null }> => {
-  try {
-    const { error } = await supabaseCore.from('vendor_business_offers').delete().eq('id', offerId);
-
-    if (error) throw error;
-    return { error: null };
-  } catch (error) {
-    return { error: error as Error };
-  }
+  const { error } = await offersApi.deleteOffer(offerId);
+  if (error) return { error: new Error(error.error) };
+  return { error: null };
 };
 
 export const getBusinessImages = async (
   businessId: string
 ): Promise<{ data: PortfolioImage[] | null; error: Error | null }> => {
-  try {
-    const { data, error } = await supabaseCms
-      .from('vendor_business_media')
-      .select(`
-        *,
-        file_storage:file_id (
-          file_path,
-          storage_bucket,
-          mime_type
-        )
-      `)
-      .eq('business_id', businessId)
-      .in('image_type', ['gallery', 'cover', 'portfolio'])
-      .order('sort_order', { ascending: true });
-
-    if (error) throw error;
-
-    // Transform data to match PortfolioImage interface
-    const transformedData = data?.map((item: any) => ({
-      id: item.id,
-      business_id: item.business_id,
-      image_url: item.file_storage ? getPublicUrl(item.file_storage.storage_bucket, item.file_storage.file_path) : null,
-      image_base64: null, // No longer stored as base64
-      display_order: item.sort_order,
-      created_at: item.created_at,
-      image_type: item.file_storage?.mime_type?.startsWith('video/') ? 'video' : (item.image_type || 'gallery'),
-    })) || [];
-
-    return { data: transformedData, error: null };
-  } catch (error) {
-    return { data: null, error: error as Error };
+  console.log(`[getBusinessImages] START - businessId: ${businessId}`);
+  const { data, error } = await mediaApi.getBusinessMedia(businessId);
+  if (error) {
+    console.error(`[getBusinessImages] ERROR:`, error);
+    return { data: null, error: new Error(error.error) };
   }
+  console.log(`[getBusinessImages] Raw response count: ${data?.length || 0}`);
+  const firstItem = data?.[0];
+  console.log(`[getBusinessImages] First item sample:`, firstItem ? {
+    id: firstItem.id,
+    url: firstItem.url,
+    image_url: firstItem.image_url,
+    image_type: firstItem.image_type,
+    mime_type: firstItem.mime_type,
+  } : 'no data');
+
+  // Use the direct URL from the API response (the API returns full MinIO/S3 URLs)
+  const transformedData = (data || []).map((item) => ({
+    id: item.id,
+    business_id: item.business_id,
+    image_url: resolveBusinessMediaUrl(item.url ?? item.image_url ?? null, 'vendor-media'),
+    image_base64: null,
+    display_order: item.display_order ?? item.sort_order ?? 0,
+    created_at: item.created_at,
+    image_type: item.image_type || 'gallery',
+    mime_type: item.mime_type,
+  }));
+
+  console.log(`[getBusinessImages] Transformed ${transformedData.length} items`);
+  return { data: transformedData, error: null };
 };
 
 export const uploadBusinessImage = async (
   businessId: string,
   imageUri: string
 ): Promise<{ data: PortfolioImage | null; error: Error | null }> => {
+  const timestamp = new Date().toISOString();
+  console.log(`[uploadBusinessImage][${timestamp}] START - businessId: ${businessId}`);
+  console.log(`[uploadBusinessImage][${timestamp}] imageUri: ${imageUri?.substring(0, 50)}...`);
+  
   try {
-    console.log('uploadBusinessImage: Starting upload for business:', businessId);
     const { data: existingImages } = await getBusinessImages(businessId);
+    console.log(`[uploadBusinessImage][${timestamp}] Existing images count: ${existingImages?.length || 0}`);
+    
     if (existingImages && existingImages.length >= MAX_IMAGES_PER_BUSINESS) {
-      throw new Error(
-        `Maximum ${MAX_IMAGES_PER_BUSINESS} images allowed per business`
-      );
+      console.error(`[uploadBusinessImage][${timestamp}] ERROR: Maximum images limit reached`);
+      throw new Error(`Maximum ${MAX_IMAGES_PER_BUSINESS} images allowed per business`);
     }
-
     if (!validateImageUri(imageUri)) {
+      console.error(`[uploadBusinessImage][${timestamp}] ERROR: Invalid image URI`);
       throw new Error('Invalid image URI');
     }
-
-    console.log('uploadBusinessImage: Compressing image...');
-    const { base64, error: compressionError } = await compressAndConvertToBase64(imageUri);
-    if (compressionError) {
-      console.error('uploadBusinessImage: Compression error:', compressionError);
-      throw compressionError;
-    }
-    if (!base64) throw new Error('Failed to process image');
-    console.log('uploadBusinessImage: Image compressed, base64 length:', base64.length);
-
-    // Extract base64 string from data URI (remove "data:image/jpeg;base64," prefix)
-    const base64Data = base64.includes(',') ? base64.split(',')[1] : base64;
-
-    // Convert base64 to blob for upload
-    const byteCharacters = atob(base64Data);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-
-    const fileExt = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
-    const fileName = `business-${businessId}-${Date.now()}.${fileExt}`;
-    const contentType = `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`;
-
-    // Step 1: Upload to storage
-    console.log('uploadBusinessImage: Uploading to storage, fileName:', fileName);
-    const { data: uploadData, error: uploadError } = await supabaseCore.storage
-      .from('vendor-media')
-      .upload(fileName, byteArray, {
-        contentType,
-        upsert: false,
-      });
-
-    if (uploadError) {
-      console.error('uploadBusinessImage: Storage upload error:', uploadError);
-      throw uploadError;
-    }
-    if (!uploadData) throw new Error('Upload failed');
-    console.log('uploadBusinessImage: Storage upload successful, path:', uploadData.path);
-
-    // Step 2: Create file_storage record
-    console.log('uploadBusinessImage: Creating file_storage record...');
-    const { data: fileData, error: fileError } = await supabaseCms
-      .from('file_storage')
-      .insert({
-        original_filename: fileName,
-        stored_filename: fileName,
-        file_path: uploadData.path,
-        file_size: byteArray.length,
-        mime_type: contentType,
-        file_extension: fileExt,
-        storage_provider: 'supabase',
-        storage_bucket: 'vendor-media',
-        upload_status: 'completed',
-        uploaded_by_type: 'vendor',
-        uploaded_by_id: businessId, // Using businessId as uploaded_by_id
-      })
-      .select()
-      .single();
-
-    if (fileError) {
-      console.error('uploadBusinessImage: file_storage insert error:', fileError);
-      throw fileError;
-    }
-    if (!fileData) throw new Error('Failed to create file record');
-    console.log('uploadBusinessImage: file_storage record created, id:', fileData.id);
-
-    // Step 3: Create vendor_business_media record
-    const hasCover = existingImages?.some(img => img.image_type === 'cover');
-    const imageType = !hasCover ? 'cover' : 'gallery';
-    const nextOrder = existingImages ? existingImages.length : 0;
     
-    console.log('uploadBusinessImage: Creating vendor_business_media record as:', imageType);
-    const { data: mediaData, error: mediaError } = await supabaseCms
-      .from('vendor_business_media')
-      .insert({
-        business_id: businessId,
-        file_id: fileData.id,
-        image_type: imageType,
-        sort_order: nextOrder,
-      })
-      .select()
-      .single();
-
-    if (mediaError) {
-      console.error('uploadBusinessImage: vendor_business_media insert error:', mediaError);
-      throw mediaError;
+    const stripped = imageUri.split('?')[0].split('#')[0];
+    const extractedExt = stripped.split('.').pop()?.toLowerCase() || 'jpg';
+    const safeExt = ['jpg', 'jpeg', 'png', 'webp'].includes(extractedExt) ? extractedExt : 'jpg';
+    
+    // Calculate sort_order as next available position
+    const galleryImages = existingImages?.filter(img => img.image_type !== 'video') || [];
+    const sortOrder = galleryImages.length;
+    console.log(`[uploadBusinessImage][${timestamp}] Calculated sortOrder: ${sortOrder}`);
+    
+    // Use new direct multipart upload with image_type='gallery'
+    console.log(`[uploadBusinessImage][${timestamp}] Calling mediaApi.uploadGalleryImage...`);
+    const result = await mediaApi.uploadGalleryImage(
+      businessId,
+      imageUri,
+      sortOrder,
+      `business-${businessId}-${Date.now()}.${safeExt}`
+    );
+    
+    if (result.error) {
+      console.error(`[uploadBusinessImage][${timestamp}] ERROR from mediaApi:`, result.error);
+      throw new Error(result.error.error);
     }
-    if (!mediaData) throw new Error('Failed to create media record');
-    console.log('uploadBusinessImage: vendor_business_media record created, id:', mediaData.id);
-
-    const imageUrl = getPublicUrl('vendor-media', uploadData.path);
-
-    // Step 4: If this is the first image, also update the business cover_photo_url
-    if (imageType === 'cover') {
-      console.log('uploadBusinessImage: Updating business cover_photo_url');
-      const { error: businessUpdateError } = await supabaseCore
-        .from('vendor_businesses')
-        .update({ cover_photo_url: imageUrl })
-        .eq('id', businessId);
-
-      if (businessUpdateError) {
-        console.error('uploadBusinessImage: Error updating business cover photo:', businessUpdateError);
-      }
+    if (!result.data) {
+      console.error(`[uploadBusinessImage][${timestamp}] ERROR: No data returned`);
+      throw new Error('Upload failed');
     }
-
-    // Return transformed data
+    
+    console.log(`[uploadBusinessImage][${timestamp}] SUCCESS:`, {
+      id: result.data.id,
+      image_type: result.data.image_type,
+      display_order: result.data.display_order,
+      url: result.data.url?.substring(0, 50) + '...',
+    });
+    
     return {
       data: {
-        id: mediaData.id,
+        id: result.data.id,
         business_id: businessId,
-        image_url: imageUrl,
+        image_url: result.data.url ?? result.data.image_url ?? null,
         image_base64: null,
-        display_order: nextOrder,
-        created_at: mediaData.created_at,
-        image_type: imageType,
+        display_order: result.data.display_order ?? sortOrder,
+        created_at: result.data.created_at,
+        image_type: result.data.image_type || 'gallery',
+        mime_type: result.data.mime_type,
       },
       error: null,
     };
   } catch (error) {
+    console.error(`[uploadBusinessImage][${timestamp}] EXCEPTION:`, (error as Error)?.message);
     return { data: null, error: error as Error };
   }
 };
@@ -436,103 +386,64 @@ export const uploadBusinessVideo = async (
   businessId: string,
   videoUri: string
 ): Promise<{ data: PortfolioImage | null; error: Error | null }> => {
+  const timestamp = new Date().toISOString();
+  console.log(`[uploadBusinessVideo][${timestamp}] START - businessId: ${businessId}`);
+  console.log(`[uploadBusinessVideo][${timestamp}] videoUri: ${videoUri?.substring(0, 50)}...`);
+  
   try {
-    const { data: allMedia } = await getBusinessImages(businessId);
-    const existingVideos = allMedia?.filter(m => m.image_type === 'video') || [];
+    const { data: existingMedia } = await getBusinessImages(businessId);
+    console.log(`[uploadBusinessVideo][${timestamp}] Existing media count: ${existingMedia?.length || 0}`);
+    
+    // Check video limit
+    const existingVideos = existingMedia?.filter(img => img.image_type === 'video') || [];
+    console.log(`[uploadBusinessVideo][${timestamp}] Existing videos count: ${existingVideos.length}`);
     
     if (existingVideos.length >= MAX_VIDEOS_PER_BUSINESS) {
+      console.error(`[uploadBusinessVideo][${timestamp}] ERROR: Maximum videos limit reached`);
       throw new Error(`Maximum ${MAX_VIDEOS_PER_BUSINESS} videos allowed per business`);
     }
 
-    // Process video file
-    let videoData: Uint8Array;
-    let fileName: string;
-    let contentType: string;
-    let fileExt: string;
-
-    if (Platform.OS === 'web') {
-      const response = await fetch(videoUri);
-      const blob = await response.blob();
-      const arrayBuffer = await blob.arrayBuffer();
-      videoData = new Uint8Array(arrayBuffer);
-      fileExt = videoUri.split('.').pop()?.split('?')[0].toLowerCase() || 'mp4';
-      contentType = blob.type || `video/${fileExt}`;
-    } else {
-      // On mobile, use FileSystem (New API in Expo 54+)
-      const file = new FileSystem.File(videoUri);
-      const base64 = await file.base64();
-      const byteCharacters = atob(base64);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-      }
-      videoData = new Uint8Array(byteNumbers);
-      fileExt = videoUri.split('.').pop()?.toLowerCase() || 'mp4';
-      contentType = `video/${fileExt}`;
+    // Use new direct multipart upload with image_type='portfolio'
+    const fileExt = videoUri.split('.').pop()?.toLowerCase() || 'mp4';
+    console.log(`[uploadBusinessVideo][${timestamp}] Calling mediaApi.uploadPortfolioVideo...`);
+    
+    const result = await mediaApi.uploadPortfolioVideo(
+      businessId,
+      videoUri,
+      `business-video-${businessId}-${Date.now()}.${fileExt}`
+    );
+    
+    if (result.error) {
+      console.error(`[uploadBusinessVideo][${timestamp}] ERROR from mediaApi:`, result.error);
+      throw new Error(result.error.error);
+    }
+    if (!result.data) {
+      console.error(`[uploadBusinessVideo][${timestamp}] ERROR: No data returned`);
+      throw new Error('Upload failed');
     }
 
-    fileName = `business-video-${businessId}-${Date.now()}.${fileExt}`;
+    console.log(`[uploadBusinessVideo][${timestamp}] SUCCESS:`, {
+      id: result.data.id,
+      image_type: result.data.image_type,
+      display_order: result.data.display_order,
+      url: result.data.url?.substring(0, 50) + '...',
+    });
 
-    // Step 1: Upload to storage
-    const { data: uploadData, error: uploadError } = await supabaseCore.storage
-      .from('vendor-media')
-      .upload(fileName, videoData, {
-        contentType,
-        upsert: false,
-      });
-
-    if (uploadError) throw uploadError;
-
-    // Step 2: Create file_storage record
-    const { data: fileData, error: fileError } = await supabaseCms
-      .from('file_storage')
-      .insert({
-        original_filename: fileName,
-        stored_filename: fileName,
-        file_path: uploadData.path,
-        file_size: videoData.length,
-        mime_type: contentType,
-        file_extension: fileExt,
-        storage_provider: 'supabase',
-        storage_bucket: 'vendor-media',
-        upload_status: 'completed',
-        uploaded_by_type: 'vendor',
-        uploaded_by_id: businessId,
-      })
-      .select()
-      .single();
-
-    if (fileError) throw fileError;
-
-    // Step 3: Create vendor_business_media record
-    const nextOrder = allMedia ? allMedia.length : 0;
-    const { data: mediaData, error: mediaError } = await supabaseCms
-      .from('vendor_business_media')
-      .insert({
-        business_id: businessId,
-        file_id: fileData.id,
-        image_type: 'gallery',
-        sort_order: nextOrder,
-      })
-      .select()
-      .single();
-
-    if (mediaError) throw mediaError;
-
-    const videoUrl = getPublicUrl('vendor-media', uploadData.path);
     return {
       data: {
-        id: mediaData.id,
+        id: result.data.id,
         business_id: businessId,
-        image_url: videoUrl,
+        image_url: result.data.url ?? result.data.image_url ?? null,
         image_base64: null,
-        display_order: nextOrder,
-        created_at: mediaData.created_at,
-        image_type: 'video',
+        display_order: result.data.display_order ?? 0,
+        created_at: result.data.created_at,
+        image_type: result.data.image_type || 'video',
+        mime_type: result.data.mime_type,
       },
       error: null,
     };
   } catch (error) {
+    console.error(`[uploadBusinessVideo][${timestamp}] EXCEPTION:`, (error as Error)?.message);
     return { data: null, error: error as Error };
   }
 };
@@ -549,7 +460,7 @@ export const pickVideo = async (): Promise<{
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      mediaTypes: ['videos'],
       quality: 0.8,
     });
 
@@ -585,260 +496,161 @@ export const uploadMultipleBusinessImages = async (
   successCount: number;
   error: Error | null;
 }> => {
+  const timestamp = new Date().toISOString();
+  console.log(`[uploadMultipleBusinessImages][${timestamp}] START - businessId: ${businessId}`);
+  console.log(`[uploadMultipleBusinessImages][${timestamp}] Total images to upload: ${imageUris.length}`);
+  console.log(`[uploadMultipleBusinessImages][${timestamp}] Image URIs:`, imageUris.map(u => u.substring(0, 30) + '...'));
+  
   const results: UploadResult[] = [];
   let successCount = 0;
-
+  
   try {
     const { data: existingImages } = await getBusinessImages(businessId);
     const currentCount = existingImages?.length || 0;
     const availableSlots = MAX_IMAGES_PER_BUSINESS - currentCount;
-
+    
+    console.log(`[uploadMultipleBusinessImages][${timestamp}] Existing images: ${currentCount}, Available slots: ${availableSlots}`);
+    
     if (imageUris.length > availableSlots) {
+      console.error(`[uploadMultipleBusinessImages][${timestamp}] ERROR: Too many images. Requested: ${imageUris.length}, Available: ${availableSlots}`);
       throw new Error(
         `Can only upload ${availableSlots} more images. Current: ${currentCount}/${MAX_IMAGES_PER_BUSINESS}`
       );
     }
 
     const hasCover = existingImages?.some(img => img.image_type === 'cover');
-    let coverFound = hasCover;
+    console.log(`[uploadMultipleBusinessImages][${timestamp}] Has existing cover: ${hasCover}`);
 
     for (let i = 0; i < imageUris.length; i++) {
-      const imageUri = imageUris[i];
+      console.log(`[uploadMultipleBusinessImages][${timestamp}] Processing image ${i + 1}/${imageUris.length}...`);
       onProgress?.(i + 1, imageUris.length);
-
-      try {
-        if (!validateImageUri(imageUri)) {
-          results.push({
-            success: false,
-            error: 'Invalid image URI',
-          });
-          continue;
-        }
-
-        const { base64, error: compressionError } = await compressAndConvertToBase64(imageUri);
-        if (compressionError) {
-          results.push({
-            success: false,
-            error: compressionError.message,
-          });
-          continue;
-        }
-
-        if (!base64) {
-          results.push({
-            success: false,
-            error: 'Failed to process image',
-          });
-          continue;
-        }
-
-        // Extract base64 string from data URI (remove "data:image/jpeg;base64," prefix)
-        const base64Data = base64.includes(',') ? base64.split(',')[1] : base64;
-
-        // Convert base64 to blob
-        const byteCharacters = atob(base64Data);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-
-        const fileExt = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
-        const fileName = `business-${businessId}-${Date.now()}-${i}.${fileExt}`;
-        const contentType = `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`;
-
-        // Upload to storage
-        const { data: uploadData, error: uploadError } = await supabaseCore.storage
-          .from('vendor-media')
-          .upload(fileName, byteArray, {
-            contentType,
-            upsert: false,
-          });
-
-        if (uploadError) throw uploadError;
-        if (!uploadData) throw new Error('Upload failed');
-
-        // Create file_storage record
-        const { data: fileData, error: fileError } = await supabaseCms
-          .from('file_storage')
-          .insert({
-            original_filename: fileName,
-            stored_filename: fileName,
-            file_path: uploadData.path,
-            file_size: byteArray.length,
-            mime_type: contentType,
-            file_extension: fileExt,
-            storage_provider: 'supabase',
-            storage_bucket: 'vendor-media',
-            upload_status: 'completed',
-            uploaded_by_type: 'vendor',
-            uploaded_by_id: businessId,
-          })
-          .select()
-          .single();
-
-        if (fileError) throw fileError;
-        if (!fileData) throw new Error('Failed to create file record');
-
-        // Create vendor_business_media record
-        const nextOrder = currentCount + successCount;
-        const imageType = !coverFound ? 'cover' : 'gallery';
-
-        const { data: mediaData, error: mediaError } = await supabaseCms
-          .from('vendor_business_media')
-          .insert({
-            business_id: businessId,
-            file_id: fileData.id,
-            image_type: imageType,
-            sort_order: nextOrder,
-          })
-          .select()
-          .single();
-
-        if (mediaError) throw mediaError;
-
-        const imageUrl = getPublicUrl('vendor-media', uploadData.path);
-
-        // Update cover photo if this became the cover
-        if (imageType === 'cover') {
-          coverFound = true;
-          await supabaseCore
-            .from('vendor_businesses')
-            .update({ cover_photo_url: imageUrl })
-            .eq('id', businessId);
-        }
-
-        results.push({
-          success: true,
-          imageUrl: imageUrl,
-        });
+      
+      const { data, error } = await uploadBusinessImage(businessId, imageUris[i]);
+      
+      if (error) {
+        console.error(`[uploadMultipleBusinessImages][${timestamp}] Image ${i + 1} FAILED:`, error.message);
+        results.push({ success: false, error: error.message });
+      } else if (data?.image_url) {
+        console.log(`[uploadMultipleBusinessImages][${timestamp}] Image ${i + 1} SUCCESS:`, data.id);
+        results.push({ success: true, imageUrl: data.image_url });
         successCount++;
-      } catch (error: any) {
-        results.push({
-          success: false,
-          error: error.message || 'Failed to upload image',
-        });
+      } else {
+        console.error(`[uploadMultipleBusinessImages][${timestamp}] Image ${i + 1} FAILED: No data returned`);
+        results.push({ success: false, error: 'Upload failed - no data returned' });
       }
     }
-
+    
+    console.log(`[uploadMultipleBusinessImages][${timestamp}] COMPLETE - Success: ${successCount}/${imageUris.length}`);
+    console.log(`[uploadMultipleBusinessImages][${timestamp}] Results summary:`, results.map(r => ({ success: r.success, error: r.error?.substring(0, 50) })));
+    
     return { results, successCount, error: null };
   } catch (error) {
+    console.error(`[uploadMultipleBusinessImages][${timestamp}] EXCEPTION:`, (error as Error)?.message);
     return { results, successCount, error: error as Error };
   }
 };
 
 export const deleteBusinessImage = async (
-  imageId: string
+  imageId: string,
+  businessId: string
 ): Promise<{ error: Error | null }> => {
-  try {
-    // First get the media record to find file_id
-    const { data: mediaData, error: fetchError } = await supabaseCms
-      .from('vendor_business_media')
-      .select('file_id')
-      .eq('id', imageId)
-      .single();
-
-    if (fetchError) throw fetchError;
-
-    // Delete the media record (this should cascade delete the file_storage record)
-    const { error } = await supabaseCms
-      .from('vendor_business_media')
-      .delete()
-      .eq('id', imageId);
-
-    if (error) throw error;
-    return { error: null };
-  } catch (error) {
-    return { error: error as Error };
+  const timestamp = new Date().toISOString();
+  console.log(`[deleteBusinessImage][${timestamp}] START - imageId: ${imageId}, businessId: ${businessId}`);
+  
+  const { error } = await mediaApi.deleteBusinessImage(businessId, imageId);
+  
+  if (error) {
+    console.error(`[deleteBusinessImage][${timestamp}] ERROR:`, error.error);
+    return { error: new Error(error.error) };
   }
+  
+  console.log(`[deleteBusinessImage][${timestamp}] SUCCESS`);
+  return { error: null };
 };
 
 export const setCoverImage = async (
   businessId: string,
   imageId: string
 ): Promise<{ data: PortfolioImage | null; error: Error | null }> => {
-  try {
-    // First, get the image to find its file_storage info
-    const { data: mediaData, error: fetchError } = await supabaseCms
-      .from('vendor_business_media')
-      .select(`
-        *,
-        file_storage:file_id (
-          file_path,
-          storage_bucket
-        )
-      `)
-      .eq('id', imageId)
-      .eq('business_id', businessId)
-      .single();
-
-    if (fetchError) throw fetchError;
-    if (!mediaData) throw new Error('Image not found');
-
-    // Get the image URL
-    const imageUrl = mediaData.file_storage
-      ? getPublicUrl(mediaData.file_storage.storage_bucket, mediaData.file_storage.file_path)
-      : null;
-
-    // Step 1: Set all other cover images back to gallery
-    const { error: updateOtherError } = await supabaseCms
-      .from('vendor_business_media')
-      .update({ image_type: 'gallery' })
-      .eq('business_id', businessId)
-      .eq('image_type', 'cover')
-      .neq('id', imageId);
-
-    if (updateOtherError) throw updateOtherError;
-
-    // Step 2: Set this image as cover
-    const { data: updatedMedia, error: updateError } = await supabaseCms
-      .from('vendor_business_media')
-      .update({ image_type: 'cover' })
-      .eq('id', imageId)
-      .select()
-      .single();
-
-    if (updateError) throw updateError;
-
-    // Step 3: Update cover_photo_url in vendor_businesses
-    const { error: businessUpdateError } = await supabaseCore
-      .from('vendor_businesses')
-      .update({ cover_photo_url: imageUrl })
-      .eq('id', businessId);
-
-    if (businessUpdateError) throw businessUpdateError;
-
-    return {
-      data: {
-        id: updatedMedia.id,
-        business_id: businessId,
-        image_url: imageUrl,
-        image_base64: null,
-        display_order: updatedMedia.sort_order,
-        created_at: updatedMedia.created_at,
-        image_type: 'cover',
-      },
-      error: null,
-    };
-  } catch (error) {
-    return { data: null, error: error as Error };
+  const timestamp = new Date().toISOString();
+  console.log(`[setCoverImage][${timestamp}] START - businessId: ${businessId}, imageId: ${imageId}`);
+  
+  const { data, error } = await mediaApi.setCoverImage(businessId, imageId);
+  
+  if (error) {
+    console.error(`[setCoverImage][${timestamp}] ERROR:`, error.error);
+    return { data: null, error: new Error(error.error) };
   }
+  
+  const d = data as any;
+  console.log(`[setCoverImage][${timestamp}] SUCCESS:`, {
+    id: d?.id,
+    image_type: 'cover',
+    image_url: d?.image_url?.substring(0, 50) + '...',
+  });
+  
+  return {
+    data: d ? {
+      id: d.id,
+      business_id: businessId,
+      image_url: d.image_url ?? null,
+      image_base64: null,
+      display_order: d.display_order ?? 0,
+      created_at: d.created_at,
+      image_type: 'cover',
+    } : null,
+    error: null,
+  };
 };
 
+/**
+ * Fetch detailed information for a specific business.
+ *
+ * This function calls the vendor-businesses-get API which requires an OBJECT
+ * payload containing the business_id. Sending a raw string will cause a
+ * 500 INTERNAL_ERROR from the backend.
+ *
+ * @param businessId - The UUID of the business to fetch
+ * @returns Object containing business data or error
+ */
 export const getBusinessDetails = async (
   businessId: string
 ): Promise<{ data: any | null; error: Error | null }> => {
-  try {
-    const { data, error } = await supabaseCore
-      .from('vendor_businesses')
-      .select('*')
-      .eq('id', businessId)
-      .single();
+  // Input validation
+  if (!businessId) {
+    console.error('[getBusinessDetails] businessId is missing or empty');
+    return { data: null, error: new Error('Business ID is required') };
+  }
 
-    if (error) throw error;
-    return { data, error: null };
-  } catch (error) {
-    return { data: null, error: error as Error };
+  if (typeof businessId !== 'string') {
+    console.error('[getBusinessDetails] businessId must be a string, got:', typeof businessId);
+    return { data: null, error: new Error('Business ID must be a string') };
+  }
+
+  // UUID format validation (basic check)
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(businessId)) {
+    console.error('[getBusinessDetails] businessId is not a valid UUID format:', businessId);
+    return { data: null, error: new Error('Business ID must be a valid UUID') };
+  }
+
+  console.log(`[getBusinessDetails] Fetching details for businessId: ${businessId}`);
+
+  try {
+    const { data, error } = await vendorBusinessApi.getVendorBusiness(businessId);
+
+    if (error) {
+      console.error(`[getBusinessDetails] API error for businessId ${businessId}:`, error);
+      return { data: null, error: new Error(error.error || 'Failed to fetch business details') };
+    }
+
+    console.log(`[getBusinessDetails] Successfully fetched details for businessId: ${businessId}`);
+
+    // Normalize null/undefined to null safely
+    return { data: data ?? null, error: null };
+  } catch (err: any) {
+    console.error(`[getBusinessDetails] Unexpected error for businessId ${businessId}:`, err);
+    return { data: null, error: new Error(err?.message || 'An unexpected error occurred') };
   }
 };
 
@@ -846,19 +658,9 @@ export const updateBusinessDetails = async (
   businessId: string,
   businessData: any
 ): Promise<{ data: any | null; error: Error | null }> => {
-  try {
-    const { data, error } = await supabaseCore
-      .from('vendor_businesses')
-      .update(businessData)
-      .eq('id', businessId)
-      .select()
-      .single();
-
-    if (error) throw error;
-    return { data, error: null };
-  } catch (error) {
-    return { data: null, error: error as Error };
-  }
+  const { data, error } = await vendorBusinessApi.updateVendorBusiness({ business_id: businessId, ...businessData });
+  if (error) return { data: null, error: new Error(error.error) };
+  return { data: data ?? null, error: null };
 };
 
 export const pickImage = async (): Promise<{
@@ -939,203 +741,48 @@ export interface UploadDocumentData {
  */
 export const uploadVerificationDocument = async (
   businessId: string,
-  documentTypeCode: string,
+  documentTypeId: string,
   file: DocumentFile,
-  userId?: string
+  _userId?: string
 ): Promise<{ data: VerificationDocument | null; error: Error | null }> => {
-  try {
-    // Validate file type
-    const mimeType = file.type || getMimeType(file.uri, file.name);
-    if (!mimeType || !validateFileType(mimeType)) {
-      throw new Error('Invalid file type. Only images (jpg, png) and PDFs are allowed.');
-    }
-
-    // Validate file size
-    if (file.size && file.size > 10 * 1024 * 1024) {
-      throw new Error('File size exceeds 10MB limit');
-    }
-
-    // Get authenticated user ID (vendor_id) first for folder structure
-    let vendorId = userId;
-    if (!vendorId) {
-      const { data: { user } } = await supabaseCore.auth.getUser();
-      if (!user) {
-        throw new Error('User not authenticated');
-      }
-      vendorId = user.id;
-    }
-
-    // Get document type ID
-    const { data: docType, error: docTypeError } = await supabaseCore
-      .from('document_types')
-      .select('id, display_name')
-      .eq('type_code', documentTypeCode)
-      .eq('is_active', true)
-      .maybeSingle();
-
-    if (docTypeError) throw docTypeError;
-    if (!docType) {
-      throw new Error(`Document type '${documentTypeCode}' not found`);
-    }
-
-    // Process file based on type
-    let fileData: Uint8Array;
-    let fileName: string;
-    let contentType: string;
-    let fileExtension: string;
-
-    if (isImageFile(mimeType)) {
-      // For images, compress and convert to base64
-      const { base64, error: compressionError } = await compressAndConvertToBase64(file.uri);
-      if (compressionError) throw compressionError;
-      if (!base64) throw new Error('Failed to process image');
-
-      const base64Data = base64.includes(',') ? base64.split(',')[1] : base64;
-      const byteCharacters = atob(base64Data);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-      }
-      fileData = new Uint8Array(byteNumbers);
-
-      fileExtension = mimeType.includes('png') ? 'png' : 'jpg';
-      fileName = `verification-${Date.now()}.${fileExtension}`;
-      contentType = mimeType;
-    } else if (isPdfFile(mimeType)) {
-      // For PDFs, read as base64 and convert to Uint8Array
-      let base64Data: string;
-
-      if (file.uri.startsWith('data:')) {
-        base64Data = file.uri.includes(',') ? file.uri.split(',')[1] : file.uri;
-      } else {
-        // For file:// URIs or blob: URIs, read the file
-        if (Platform.OS === 'web') {
-          // On web, fetch the blob and convert to base64
-          try {
-            const response = await fetch(file.uri);
-            const blob = await response.blob();
-            const reader = new FileReader();
-            base64Data = await new Promise<string>((resolve, reject) => {
-              reader.onloadend = () => {
-                if (typeof reader.result === 'string') {
-                  const dataUri = reader.result;
-                  resolve(dataUri.includes(',') ? dataUri.split(',')[1] : dataUri);
-                } else {
-                  reject(new Error('Failed to convert blob to base64'));
-                }
-              };
-              reader.onerror = reject;
-              reader.readAsDataURL(blob);
-            });
-          } catch (blobError) {
-            throw new Error('Failed to read PDF file');
-          }
-        } else {
-          // On mobile, use FileSystem
-          try {
-            const base64 = await FileSystem.readAsStringAsync(file.uri, {
-              encoding: 'base64' as any,
-            });
-            base64Data = base64;
-          } catch (fsError) {
-            throw new Error('Failed to read PDF file');
-          }
-        }
-      }
-
-      const byteCharacters = atob(base64Data);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-      }
-      fileData = new Uint8Array(byteNumbers);
-
-      fileExtension = 'pdf';
-      fileName = `verification-${Date.now()}.${fileExtension}`;
-      contentType = 'application/pdf';
-    } else {
-      throw new Error('Unsupported file type');
-    }
-
-    // Create folder structure: vendor-{vendor_id}/{document_type_code}/{filename}
-    const filePath = `vendor-${vendorId}/${documentTypeCode}/${fileName}`;
-
-    // Upload to storage (using document_urls bucket for verification documents)
-    const { data: uploadData, error: uploadError } = await supabaseCore.storage
-      .from('document_urls')
-      .upload(filePath, fileData, {
-        contentType,
-        upsert: false,
-      });
-
-    if (uploadError) throw uploadError;
-    if (!uploadData) throw new Error('Upload failed');
-
-    // Create file_storage record
-    const { data: fileStorageData, error: fileStorageError } = await supabaseCms
-      .from('file_storage')
-      .insert({
-        original_filename: file.name || fileName,
-        stored_filename: fileName,
-        file_path: uploadData.path,
-        file_size: fileData.length,
-        mime_type: contentType,
-        file_extension: fileExtension,
-        storage_provider: 'supabase',
-        storage_bucket: 'document_urls',
-        upload_status: 'completed',
-        uploaded_by_type: 'vendor',
-        uploaded_by_id: businessId,
-      })
-      .select()
-      .single();
-
-    if (fileStorageError) throw fileStorageError;
-    if (!fileStorageData) throw new Error('Failed to create file storage record');
-
-    // Create verification document record
-    const { data: verificationDocData, error: verificationDocError } = await supabaseCms
-      .from('vendor_verification_documents')
-      .insert({
-        business_id: businessId,
-        vendor_id: vendorId, // Include vendor_id for RLS policy
-        document_type_id: docType.id,
-        file_id: fileStorageData.id,
-        verification_status: 'pending',
-        uploaded_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
-
-    if (verificationDocError) throw verificationDocError;
-    if (!verificationDocData) throw new Error('Failed to create verification document record');
-
-    // Get public URL
-    const { data: urlData } = supabaseCore.storage
-      .from('document_urls')
-      .getPublicUrl(uploadData.path);
-
-    const result: VerificationDocument = {
-      id: verificationDocData.id,
-      business_id: businessId,
-      document_type_id: docType.id,
-      document_type_code: documentTypeCode,
-      document_type_name: docType.display_name,
-      file_id: fileStorageData.id,
-      file_url: urlData.publicUrl,
-      file_name: file.name || fileName,
-      mime_type: contentType,
-      verification_status: verificationDocData.verification_status as 'pending' | 'verified' | 'rejected',
-      uploaded_at: verificationDocData.uploaded_at,
-    };
-
-    return { data: result, error: null };
-  } catch (error) {
-    return {
-      data: null,
-      error: error instanceof Error ? error : new Error('Failed to upload verification document'),
-    };
+  const timestamp = new Date().toISOString();
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] START`);
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] businessId: ${businessId}`);
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] documentTypeId: ${documentTypeId}`);
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] file:`, { name: file.name, uri: file.uri?.substring(0, 50), size: file.size });
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] userId: ${_userId}`);
+  
+  const mimeType = file.type || getMimeType(file.uri, file.name);
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] mimeType: ${mimeType}`);
+  
+  if (!mimeType || !validateFileType(mimeType)) {
+    console.error(`[businessApi.uploadVerificationDocument][${timestamp}] Invalid file type`);
+    return { data: null, error: new Error('Invalid file type. Only images (jpg, png) and PDFs are allowed.') };
   }
+  if (file.size && file.size > 10 * 1024 * 1024) {
+    console.error(`[businessApi.uploadVerificationDocument][${timestamp}] File size exceeds 10MB`);
+    return { data: null, error: new Error('File size exceeds 10MB limit') };
+  }
+  
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] Calling verificationApi.uploadVerificationDocument...`);
+  const result = await verificationApi.uploadVerificationDocument(
+    businessId, 
+    documentTypeId, 
+    file.uri, 
+    file.name
+  );
+  
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] Result:`, {
+    error: result.error ? result.error.error : null,
+    dataId: result.data?.id
+  });
+  
+  if (result.error) {
+    console.error(`[businessApi.uploadVerificationDocument][${timestamp}] API error:`, result.error);
+    return { data: null, error: new Error(result.error.error) };
+  }
+  console.log(`[businessApi.uploadVerificationDocument][${timestamp}] SUCCESS`);
+  return { data: result.data || null, error: null };
 };
 
 /**
@@ -1165,153 +812,26 @@ export const uploadMultipleVerificationDocuments = async (
   return { data: results, errors };
 };
 
-/**
- * Gets all verification documents for a business
- */
 export const getBusinessVerificationDocuments = async (
   businessId: string
 ): Promise<{ data: VerificationDocument[] | null; error: Error | null }> => {
-  try {
-    // Fetch verification documents with file_storage (same schema)
-    const { data: documents, error: documentsError } = await supabaseCms
-      .from('vendor_verification_documents')
-      .select(`
-        id,
-        business_id,
-        document_type_id,
-        file_id,
-        verification_status,
-        uploaded_at,
-        file_storage:file_id (
-          file_path,
-          storage_bucket,
-          original_filename,
-          mime_type
-        )
-      `)
-      .eq('business_id', businessId)
-      .order('uploaded_at', { ascending: false });
-
-    if (documentsError) throw documentsError;
-    if (!documents || documents.length === 0) {
-      return { data: [], error: null };
-    }
-
-    // Get unique document_type_ids
-    const documentTypeIds = Array.from(new Set(
-      documents
-        .map((doc: any) => doc.document_type_id)
-        .filter((id: string | null) => id !== null)
-    ));
-
-    // Fetch document_types from core schema
-    let documentTypesMap = new Map<string, { type_code: string; display_name: string }>();
-    if (documentTypeIds.length > 0) {
-      const { data: docTypes, error: docTypesError } = await supabaseCore
-        .from('document_types')
-        .select('id, type_code, display_name')
-        .in('id', documentTypeIds);
-
-      if (docTypesError) {
-        console.error('Error fetching document types:', docTypesError);
-      } else if (docTypes) {
-        docTypes.forEach((dt: any) => {
-          documentTypesMap.set(dt.id, {
-            type_code: dt.type_code,
-            display_name: dt.display_name,
-          });
-        });
-      }
-    }
-
-    // Transform data with manual join
-    const transformedData: VerificationDocument[] = documents.map((item: any) => {
-      const docType = item.document_type_id
-        ? documentTypesMap.get(item.document_type_id)
-        : null;
-      const fileStorage = item.file_storage;
-
-      let fileUrl: string | null = null;
-      if (fileStorage) {
-        const { data: urlData } = supabaseCore.storage
-          .from(fileStorage.storage_bucket || 'vendor-media')
-          .getPublicUrl(fileStorage.file_path);
-        fileUrl = urlData.publicUrl;
-      }
-
-      return {
-        id: item.id,
-        business_id: item.business_id,
-        document_type_id: item.document_type_id,
-        document_type_code: docType?.type_code || '',
-        document_type_name: docType?.display_name || '',
-        file_id: item.file_id,
-        file_url: fileUrl,
-        file_name: fileStorage?.original_filename || null,
-        mime_type: fileStorage?.mime_type || null,
-        verification_status: item.verification_status as 'pending' | 'verified' | 'rejected',
-        uploaded_at: item.uploaded_at,
-      };
-    });
-
-    return { data: transformedData, error: null };
-  } catch (error) {
-    return {
-      data: null,
-      error: error instanceof Error ? error : new Error('Failed to fetch verification documents'),
-    };
-  }
+  const { data, error } = await verificationApi.getVerificationDocuments(businessId);
+  if (error) return { data: null, error: new Error(error.error) };
+  return { data: (data || []) as VerificationDocument[], error: null };
 };
 
-/**
- * Deletes a verification document
- */
+export const getDocumentTypes = async (): Promise<{ data: any[] | null; error: Error | null }> => {
+  const { data, error } = await verificationApi.getDocumentTypes();
+  if (error) return { data: null, error: new Error(error.error) };
+  return { data: data || [], error: null };
+};
+
 export const deleteVerificationDocument = async (
   documentId: string
 ): Promise<{ error: Error | null }> => {
-  try {
-    // First, get the document to find the file_id
-    const { data: doc, error: fetchError } = await supabaseCms
-      .from('vendor_verification_documents')
-      .select('file_id, file_storage:file_id(storage_bucket, file_path)')
-      .eq('id', documentId)
-      .single();
-
-    if (fetchError) throw fetchError;
-    if (!doc) throw new Error('Document not found');
-
-    // Delete the verification document record (this should cascade delete file_storage if configured)
-    const { error: deleteError } = await supabaseCms
-      .from('vendor_verification_documents')
-      .delete()
-      .eq('id', documentId);
-
-    if (deleteError) throw deleteError;
-
-    // Delete from storage if file_storage exists
-    if (doc.file_storage) {
-      const fileStorage = doc.file_storage as any;
-      const bucket = fileStorage.storage_bucket || 'vendor-media';
-      const filePath = fileStorage.file_path;
-
-      if (filePath) {
-        const { error: storageError } = await supabaseCore.storage
-          .from(bucket)
-          .remove([filePath]);
-
-        // Log storage error but don't fail if file doesn't exist
-        if (storageError) {
-          console.warn('Failed to delete file from storage:', storageError);
-        }
-      }
-    }
-
-    return { error: null };
-  } catch (error) {
-    return {
-      error: error instanceof Error ? error : new Error('Failed to delete verification document'),
-    };
-  }
+  const { error } = await verificationApi.deleteVerificationDocument(documentId);
+  if (error) return { error: new Error(error.error) };
+  return { error: null };
 };
 
 export const uploadOfferBanner = async (

@@ -17,7 +17,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Phone, Mail, ChevronRight, Search, X, MoveVertical as MoreVertical, SquareCheck as CheckSquare, Square, WifiOff } from 'lucide-react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useAuth } from '../../contexts/AuthContext';
-import { supabaseCore, supabaseCrm } from '../../lib/supabase';
+import { getVendorBusinesses } from '../../lib/api/vendorBusinesses';
+import { getLeads, updateLead, deleteLead } from '../../lib/api/leads';
+import { getCategories } from '../../lib/api/categories';
 import { getTimeAgo } from '../../lib/timeUtils';
 
 import SortModal, { SortOption } from '../../components/SortModal';
@@ -120,61 +122,47 @@ export default function LeadsScreen() {
         console.error('Error loading cached leads:', cacheError);
       }
 
-      const { data: businessData, error: businessError } = await supabaseCore
-        .from('vendor_businesses')
-        .select('id, business_name, city')
-        .eq('vendor_id', user?.id);
-
-      if (businessError) throw businessError;
-
-      if (!businessData || businessData.length === 0) {
+      const { data: businessData, error: businessError } = await getVendorBusinesses(user?.id!);
+      if (businessError) {
+        console.error('❌ Error fetching businesses in leads:', businessError.error);
+        throw new Error(businessError.error);
+      }
+      
+      const businessList = Array.isArray(businessData) ? businessData : [];
+      if (businessList.length === 0) {
         setLeads([]);
         if (showLoading) setLoading(false);
         hasLoadedLeads.current = true;
         setIsOffline(false);
         return;
       }
+      
+      // Safety check: Filter out any invalid business items before mapping
+      const validatedBusinesses = businessList.filter((b: any) => b && (b.id || b.business_id));
 
-      const businessIds = businessData.map((b) => b.id);
       const businessMap = new Map(
-        businessData.map((b) => [b.id, { name: b.business_name, city: b.city }])
+        validatedBusinesses.map((b: any) => [
+          b.id || b.business_id, 
+          { name: b.business_name || b.name || 'Unknown Business', city: b.city || '' }
+        ])
       );
 
-      // Fetch leads
-      const { data: leadsData, error } = await supabaseCrm
-        .from('customer_leads')
-        .select('*')
-        .eq('vendor_id', user?.id)
-        .order('created_at', { ascending: false });
+      const { data: leadsData, error } = await getLeads({ vendor_id: user?.id! });
+      if (error) throw new Error(error.error);
 
-      if (error) {
-        console.error('❌ Error from Supabase:', error);
-        throw error;
-      }
+      const rawLeads = (leadsData || []).sort(
+        (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+      console.log(`📋 Raw leads from API: ${rawLeads.length}`);
 
-      console.log(`📋 Raw leads from DB: ${leadsData?.length || 0}`);
-      console.log('Lead IDs:', leadsData?.map(l => l.id) || []);
-
-      // Get unique category IDs
-      const categoryIds = [
-        ...new Set((leadsData || []).map((lead) => lead.category_id).filter(Boolean)),
-      ];
-
-      // Fetch category names
+      const categoryIds = [...new Set(rawLeads.map((l: any) => l.category_id).filter(Boolean))];
       const categoryMap = new Map<string, string>();
       if (categoryIds.length > 0) {
-        const { data: categories } = await supabaseCore
-          .from('categories')
-          .select('id, name')
-          .in('id', categoryIds);
-
-        categories?.forEach((cat) => {
-          categoryMap.set(cat.id, cat.name);
-        });
+        const { data: categories } = await getCategories();
+        (categories || []).forEach((cat: any) => categoryMap.set(cat.id, cat.name));
       }
 
-      // Map business names, cities, and event types to leads
-      const leadsWithDetails = (leadsData || []).map((lead) => {
+      const leadsWithDetails = rawLeads.map((lead: any) => {
         const business = lead.business_id ? businessMap.get(lead.business_id) : null;
         const eventType = lead.category_id ? categoryMap.get(lead.category_id) : null;
 
@@ -327,13 +315,9 @@ export default function LeadsScreen() {
 
   const handleBulkStatusChange = async (newStatus: string) => {
     try {
-      const { error } = await supabaseCrm
-        .from('customer_leads')
-        .update({ lead_status: newStatus })
-        .in('id', selectedLeads);
-
-      if (error) throw error;
-
+      await Promise.all(
+        selectedLeads.map((id) => updateLead(id, { lead_status: newStatus }))
+      );
       Alert.alert('Success', `Updated ${selectedLeads.length} leads`);
       setSelectedLeads([]);
       setBulkSelectMode(false);
@@ -355,13 +339,7 @@ export default function LeadsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const { error } = await supabaseCrm
-                .from('customer_leads')
-                .delete()
-                .in('id', selectedLeads);
-
-              if (error) throw error;
-
+              await Promise.all(selectedLeads.map((id) => deleteLead(id)));
               Alert.alert('Success', 'Leads deleted successfully');
               setSelectedLeads([]);
               setBulkSelectMode(false);

@@ -16,7 +16,10 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TrendingUp, Calendar, Eye, X, ChevronRight, Bell, WifiOff } from 'lucide-react-native';
 import { useAuth } from '../../contexts/AuthContext';
-import { supabaseCore, supabaseCrm, supabaseCms } from '../../lib/supabase';
+import { getVendorBusinesses } from '../../lib/api/vendorBusinesses';
+import { resolveBusinessMediaUrl, getBusinessDetails } from '../../lib/businessApi';
+import { getLeads } from '../../lib/api/leads';
+import { getCategoryTree } from '../../lib/api/categories';
 import { checkNotificationPermission, requestNotificationPermission } from '../../lib/pushNotifications';
 import { STATUS_OPTIONS, LeadStatus } from '../../types/leads';
 import { Colors, Shadows, BorderRadius, Spacing } from '../../constants/theme';
@@ -42,6 +45,7 @@ interface Business {
   // Joined fields for mandatory completion checks
   vendor_business_category_mappings?: {
     categories?: {
+      category_level?: number; // Optional in API
       category_type: string;
       parent_category_id: string | null;
     }
@@ -62,6 +66,19 @@ interface Business {
   locality?: string | null;
   image_count?: number;
   document_count?: number;
+  // Fallback fields for profile completion calculation
+  primary_category_id?: string | null;
+  category_ids?: string[] | null;
+  specialization_category_ids?: string[] | null;
+  event_category_ids?: string[] | null;
+  base_price?: number | null;
+  pricing_unit?: string | null;
+  price_range?: string | null;
+  min_price?: number | null;
+  max_price?: number | null;
+  verification_documents?: any[] | null;
+  gallery_images?: any[] | null;
+  media?: any[] | null;
 }
 
 interface LeadStats {
@@ -71,62 +88,232 @@ interface LeadStats {
   byStatus: Record<LeadStatus, number>;
 }
 
+/**
+ * Helper to convert a file path to a full URL.
+ * If the input is already a full URL (starts with http), return as-is.
+ * If it's a file path, prepend the API base URL.
+ */
+function getFullImageUrl(filePathOrUrl: string | null | undefined): string | null {
+  return resolveBusinessMediaUrl(filePathOrUrl, 'vendor-media');
+}
+
+/**
+ * Image component with fallback to gradient avatar on error
+ */
+function ImageWithFallback({
+  uri,
+  fallbackLetter,
+  gradientColors,
+  style,
+}: {
+  uri: string | null | undefined;
+  fallbackLetter: string;
+  gradientColors: readonly [string, string];
+  style: any;
+}) {
+  const [hasError, setHasError] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
+
+  // Reset error state when URI changes
+  useEffect(() => {
+    setHasError(false);
+    setImageLoaded(false);
+  }, [uri]);
+
+  if (!uri || hasError) {
+    return (
+      <LinearGradient
+        colors={gradientColors}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={style}
+      >
+        <Text style={styles.businessAvatarLetter}>{fallbackLetter}</Text>
+      </LinearGradient>
+    );
+  }
+
+  return (
+    <View style={style}>
+      {!imageLoaded && !hasError && (
+        <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#f0f0f0' }]}>
+          <ActivityIndicator size="small" color="#6aa3ce" />
+        </View>
+      )}
+      <Image
+        source={{ uri }}
+        style={[StyleSheet.absoluteFillObject, !imageLoaded && { opacity: 0 }]}
+        resizeMode="cover"
+        onLoad={() => setImageLoaded(true)}
+        onError={(e) => {
+          console.error(`[Dashboard][ImageError] Failed to load image: ${uri}`, e.nativeEvent.error);
+          setHasError(true);
+          setImageLoaded(true);
+        }}
+      />
+    </View>
+  );
+}
+
 // Returns a 0-100 integer representing how complete the business profile is
 function calculateProfileCompletion(business: Business): number {
+  // Helper to check category mappings with fallbacks
+  const hasPrimaryCategory = (): boolean => {
+    // Check joined data first
+    if (business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'business' && m.categories?.parent_category_id === null)) {
+      return true;
+    }
+    // Fallback: check if primary_category_id exists
+    if (business.primary_category_id) return true;
+    // Fallback: check category_ids array
+    if (business.category_ids && business.category_ids.length > 0) return true;
+    // Fallback: check if business has a category name
+    if (business.business_category && business.business_category !== 'General') return true;
+    return false;
+  };
+
+  const hasSpecialization = (): boolean => {
+    // Check joined data first
+    if (business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'business' && m.categories?.parent_category_id !== null)) {
+      return true;
+    }
+    // Fallback: check specialization_category_ids
+    if (business.specialization_category_ids && business.specialization_category_ids.length > 0) return true;
+    // Fallback: check if multiple category_ids exist
+    if (business.category_ids && business.category_ids.length > 1) return true;
+    return false;
+  };
+
+  const hasEventCategories = (): boolean => {
+    // Check joined data first
+    if (business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'event')) {
+      return true;
+    }
+    // Fallback: check event_category_ids
+    if (business.event_category_ids && business.event_category_ids.length > 0) return true;
+    // Fallback: check if any category_ids are event categories (from API category data)
+    const eventCategoryIds = (business as any).event_category_ids;
+    if (eventCategoryIds && eventCategoryIds.length > 0) return true;
+    // Final fallback: if business has any categories, consider event categories satisfied
+    // (API doesn't distinguish event vs business categories in category_ids)
+    if (business.category_ids && business.category_ids.length > 0) return true;
+    return false;
+  };
+
+  // Helpers to check pricing components
+  const hasBasePrice = (): boolean => {
+    const pkg = business.vendor_business_pricing_packages?.[0] as any;
+    const pricingPkg = (business as any).pricing_packages?.[0] as any;
+    const biz = business as any;
+    return !!(pkg?.base_price || pkg?.price || pricingPkg?.base_price || pricingPkg?.price || biz?.base_price || biz?.price);
+  };
+
+  const hasPricingUnit = (): boolean => {
+    const pkg = business.vendor_business_pricing_packages?.[0] as any;
+    const pricingPkg = (business as any).pricing_packages?.[0] as any;
+    const biz = business as any;
+    return !!(pkg?.price_unit || pkg?.unit || pricingPkg?.price_unit || pricingPkg?.unit || biz?.pricing_unit || biz?.price_unit);
+  };
+
   const coreChecks = [
-    // 1-4. Basic Info
+    // 1-3. Basic Info
     !!(business.business_name?.trim()),
     !!(business.contact_person_name?.trim()),
-    !!(business.business_email?.trim()),
     !!(business.contact_person_phone?.trim()),
-    // 5-6. Services & Experience
+    // 4-5. Services & Experience
     !!(business.description?.trim() || business.business_description?.trim()),
     !!(business.years_experience !== null && business.years_experience !== undefined),
-    // 7-9. Location
+    // 6-8. Location
     !!(business.address?.trim()),
     !!(business.pincode?.trim()),
     !!(business.operating_locations && business.operating_locations.length > 0),
-    // 10. Pricing (Base Price & Unit filled)
-    !!(business.vendor_business_pricing_packages?.[0]?.base_price && business.vendor_business_pricing_packages?.[0]?.price_unit),
-    // 11. Primary Category Mapped
-    !!(business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'business' && m.categories?.parent_category_id === null)),
-    // 12. Specialization Mapped
-    !!(business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'business' && m.categories?.parent_category_id !== null)),
-    // 13-15. Detailed Location
-    !!(business.city?.trim()),
-    !!(business.locality?.trim()),
-    !!(business.state?.trim()),
-    // 16. Cover Photo (Required during registration)
-    !!(business.cover_photo_url?.trim()),
+    // 9-10. Pricing
+    hasBasePrice(),
+    hasPricingUnit(),
+    // 11. Primary Category Mapped - with fallbacks
+    hasPrimaryCategory(),
+    // 12. Specialization Mapped - with fallbacks
+    hasSpecialization(),
   ];
 
+
   const optionalChecks = [
+    // 12. Cover Photo
+    !!(business.cover_photo_url?.trim()),
+    // 13-15. Detailed Location (Now optional)
+    !!(business.city?.trim()),
+    !!(business.locality?.trim() || (business as any).district?.trim()),
+    !!(business.state?.trim()),
+    // 16. Business Email (Now optional)
+    !!(business.business_email?.trim()),
     // 17-20. Social Media
     !!(business.website_url?.trim()),
     !!(business.instagram_url?.trim()),
     !!(business.facebook_url?.trim()),
     !!(business.youtube_url?.trim()),
     // 21-22. Tax Info
-    !!(business.business_registration_number?.trim() || business.pan_number?.trim()),
+    !!(business.business_registration_number?.trim() || (business as any).pan_number?.trim()),
     !!(business.gst_number?.trim()),
-    // 23. Verification Documents
-    !!(business.document_count && business.document_count > 0),
-    // 24. Events Mapped (Optional)
-    !!(business.vendor_business_category_mappings?.some(m => m.categories?.category_type === 'event')),
-    // 25. Gallery/Portfolio (Additional images)
-    !!(business.image_count && business.image_count > 0),
+    // 23. Verification Documents (with fallbacks) - check URLs and media
+    !!(business.document_count && business.document_count > 0) || 
+    !!(business.verification_documents && business.verification_documents.length > 0) || 
+    !!((business as any).media?.documents?.length > 0) ||
+    !!((business as any).business_license_url) ||
+    !!((business as any).gst_url) ||
+    !!((business as any).business_registration_number),
+    // 24. Events Mapped (Optional) - with fallbacks
+    hasEventCategories(),
+    // 25. Gallery/Portfolio (Additional images) - with fallbacks
+    !!(business.image_count && business.image_count > 0) || !!(business.gallery_images && business.gallery_images.length > 0) || !!((business as any).media?.gallery?.length > 0),
   ];
+
+  // Debug which checks are failing
+  const coreCheckNames = ['business_name', 'contact_person_name', 'contact_person_phone', 'description', 'years_experience', 'address', 'pincode', 'operating_locations', 'base_price', 'pricing_unit', 'primary_category', 'specialization'];
+  const failedCore = coreCheckNames.filter((_, i) => !coreChecks[i]);
+  const optionalCheckNames = ['cover_photo', 'city', 'locality', 'state', 'business_email', 'website', 'instagram', 'facebook', 'youtube', 'business_reg', 'gst', 'verification_docs', 'event_categories', 'gallery_images'];
+  const failedOptional = optionalCheckNames.filter((_, i) => !optionalChecks[i]);
+  console.log('[ProfileCompletion] Failed checks:', { core: failedCore, optional: failedOptional, corePassed: coreChecks.filter(Boolean).length, optionalPassed: optionalChecks.filter(Boolean).length });
+  
+  // Debug verification docs and event categories specifically
+  if (failedOptional.includes('verification_docs')) {
+    console.log('[ProfileCompletion] verification_docs debug:', {
+      document_count: business.document_count,
+      verification_documents: business.verification_documents?.length,
+      media_documents: (business as any).media?.documents?.length,
+      media_keys: (business as any).media ? Object.keys((business as any).media) : null,
+      business_license_url: (business as any).business_license_url,
+      gst_url: (business as any).gst_url,
+      business_registration_number: (business as any).business_registration_number,
+    });
+  }
+  if (failedOptional.includes('event_categories')) {
+    console.log('[ProfileCompletion] event_categories debug:', {
+      event_category_ids: business.event_category_ids?.length,
+      vendor_business_category_mappings: business.vendor_business_category_mappings?.length,
+      category_ids: business.category_ids?.length,
+    });
+  }
 
   const coreFilled = coreChecks.filter(Boolean).length;
   const optionalFilled = optionalChecks.filter(Boolean).length;
 
+  // DEBUG: Log which checks are failing
+  const checkNames = [
+    'business_name', 'contact_person_name', 'contact_person_phone',
+    'description', 'years_experience', 'address', 'pincode', 'operating_locations',
+    'base_price', 'pricing_unit', 'primary_category', 'specialization'
+  ];
+  const failedChecks = checkNames.filter((_, i) => !coreChecks[i]);
+  const coreScore = (coreFilled / coreChecks.length) * 90;
+  const optionalScore = optionalChecks.length > 0 ? (optionalFilled / optionalChecks.length) * 10 : 0;
+  const totalScore = Math.round(coreScore + optionalScore);
+
+  // Score is calculated but logs are removed to prevent console spam
+
   // Weighting: Core fields account for 90%, Optional fields account for 10%
   // 16 core fields * 5.625% = 90%
   // 9 optional fields * ~1.11% = 10%
-  const coreScore = (coreFilled / coreChecks.length) * 90;
-  const optionalScore = optionalChecks.length > 0 ? (optionalFilled / optionalChecks.length) * 10 : 0;
-
-  return Math.round(coreScore + optionalScore);
+  return totalScore;
 }
 
 function getGreeting(userName?: string) {
@@ -223,102 +410,254 @@ export default function DashboardScreen() {
 
   const fetchBusinesses = async (isSilentRefresh = false) => {
     if (!user?.id) {
+      console.log('[BizDebug][Dashboard] Skipping fetchBusinesses: missing user id');
       setLoading(false);
       return;
     }
+    console.log('[BizDebug][Dashboard] fetchBusinesses started', {
+      userId: user.id,
+      isSilentRefresh,
+      initialDataLoaded,
+    });
 
     // On first load only, show cached data immediately so UI isn't empty
     if (!isSilentRefresh && !initialDataLoaded) {
       try {
         const cachedStr = await AsyncStorage.getItem(`dashboard_businesses_${user.id}`);
         if (cachedStr) {
-          setBusinesses(JSON.parse(cachedStr));
+          const cachedBusinesses = JSON.parse(cachedStr);
+          console.log('[BizDebug][Dashboard] Loaded cached businesses', {
+            count: Array.isArray(cachedBusinesses) ? cachedBusinesses.length : 0,
+          });
+          setBusinesses(cachedBusinesses);
         }
       } catch { }
     }
 
     try {
-      // 1. Fetch businesses with joined data
-      const { data, error } = await supabaseCore
-        .from('vendor_businesses')
-        .select(`
-          *,
-          vendor_business_category_mappings (
-            categories (
-              name,
-              category_type,
-              parent_category_id
-            )
-          ),
-          vendor_business_pricing_packages (
-            id,
-            base_price,
-            price_unit
-          )
-        `)
-        .eq('vendor_id', user.id)
-        .order('created_at', { ascending: false });
+      // Fetch both businesses and category tree in parallel
+      const [{ data, error }, categoryTreeRes] = await Promise.all([
+        getVendorBusinesses(),
+        getCategoryTree().catch(err => {
+          console.error('Failed to fetch category tree:', err);
+          return { data: null, error: err };
+        })
+      ]);
 
-      if (error) throw error;
+      // Clear stale detail caches to ensure fresh data is used for percentage calculation
+      const detailCacheKeys = await AsyncStorage.getAllKeys();
+      const businessDetailKeys = detailCacheKeys.filter(k => k.startsWith('business_details_'));
+      if (businessDetailKeys.length > 0) {
+        try {
+          await AsyncStorage.multiRemove(businessDetailKeys);
+        } catch (e) {
+          console.warn('[Dashboard] Cache clear error:', e);
+        }
+      }
+      console.log('[BizDebug][Dashboard] Cleared detail caches:', businessDetailKeys.length);
 
-      const rawBusinesses = data || [];
+      console.log('[BizDebug][Dashboard] getVendorBusinesses response', {
+        hasError: !!error,
+        error: error?.error ?? null,
+        rawType: Array.isArray(data) ? 'array' : typeof data,
+        rawCount: Array.isArray(data) ? data.length : 0,
+        rawKeys: data && typeof data === 'object' && !Array.isArray(data) ? Object.keys(data as any) : [],
+      });
 
-      // 2. Fetch metadata (image + doc counts) for ALL businesses in parallel
-      //    This must happen BEFORE setting state so percentage is calculated once.
-      const businessIds = rawBusinesses.map((b: any) => b.id);
-      const metadata: Record<string, { images: number; docs: number }> = {};
-
-      if (businessIds.length > 0) {
-        await Promise.all(
-          businessIds.map(async (id: string) => {
-            const [{ count: imageCount }, { count: docCount }] = await Promise.all([
-              supabaseCms
-                .from('vendor_business_media')
-                .select('*', { count: 'exact', head: true })
-                .eq('business_id', id),
-              supabaseCms
-                .from('vendor_verification_documents')
-                .select('*', { count: 'exact', head: true })
-                .eq('business_id', id),
-            ]);
-            metadata[id] = {
-              images: imageCount || 0,
-              docs: docCount || 0,
-            };
-          })
-        );
+      if (error) {
+        console.error('❌ Error fetching businesses:', error);
+        throw new Error(error.error);
       }
 
-      // 3. Build final businesses array with ALL data in one pass
-      const formattedBusinesses = rawBusinesses.map((business: any) => {
-        const rootCategoryMatch = business.vendor_business_category_mappings?.find((m: any) =>
-          m.categories?.category_type === 'business' && m.categories?.parent_category_id === null
-        );
-        const categoryName = rootCategoryMatch?.categories?.name ||
-          business.vendor_business_category_mappings?.find((m: any) => m.categories?.category_type === 'business')?.categories?.name ||
-          business.vendor_business_category_mappings?.[0]?.categories?.name;
+      // Build category lookup map from category tree (store full category object)
+      const categoryMap = new Map<string, { name: string; category_type?: string; parent_category_id?: string | null; category_level?: number }>();
+      if (categoryTreeRes.data) {
+        const flattenCategories = (cats: any[]) => {
+          cats.forEach(cat => {
+            categoryMap.set(cat.id, {
+              name: cat.name,
+              category_type: cat.category_type,
+              parent_category_id: cat.parent_category_id,
+              category_level: cat.category_level,
+            });
+            if (cat.children) flattenCategories(cat.children);
+          });
+        };
+        flattenCategories(categoryTreeRes.data);
+      }
+      console.log('[BizDebug][Dashboard] Category map size:', categoryMap.size);
 
+      const businessesList = Array.isArray(data) ? data : [];
+
+      // CRITICAL: The 'vendor-businesses-list' API only returns a subset of fields.
+      // To calculate 100% profile completion, we need the full details for each business.
+      console.log(`[Dashboard] Fetching full details for ${businessesList.length} businesses...`);
+      const fullDetailsResults = await Promise.all(
+        businessesList.map(b => getBusinessDetails(b.id))
+      );
+
+      // Map API response to frontend format
+      const formattedBusinesses = businessesList.map((business: any, index: number) => {
+        // Use full details if fetch was successful, fallback to list item
+        const fullDetails = fullDetailsResults[index]?.data?.vendor_business || fullDetailsResults[index]?.data || {};
+        const combinedBusiness = { ...business, ...fullDetails };
+
+        // Try multiple possible API response structures for category
+        let category = 'General';
+        
+        if (combinedBusiness.primary_category_id) {
+          const primaryCat = categoryMap.get(combinedBusiness.primary_category_id);
+          if (primaryCat?.name) {
+            category = primaryCat.name;
+          }
+        }
+        
+        if (category === 'General' && combinedBusiness.business_category) {
+          category = combinedBusiness.business_category;
+        } else if (category === 'General' && combinedBusiness.primary_category_name) {
+          category = combinedBusiness.primary_category_name;
+        } else if (category === 'General' && combinedBusiness.category_name) {
+          category = combinedBusiness.category_name;
+        } else if (category === 'General' && combinedBusiness.vendor_business_category_mappings?.length > 0) {
+          const mapping = combinedBusiness.vendor_business_category_mappings[0];
+          category = mapping.categories?.name || mapping.category_name || 'General';
+        } else if (category === 'General' && combinedBusiness.categories?.name) {
+          category = combinedBusiness.categories.name;
+        } else if (category === 'General' && combinedBusiness.category_ids?.length > 0) {
+          const primaryCatId = combinedBusiness.category_ids.find((id: string) => {
+            const cat = categoryMap.get(id);
+            return cat && cat.category_type === 'business' && !cat.parent_category_id;
+          });
+          const anyBusinessCatId = primaryCatId || combinedBusiness.category_ids.find((id: string) => {
+            const cat = categoryMap.get(id);
+            return cat && cat.category_type === 'business';
+          });
+          const foundCatId = primaryCatId || anyBusinessCatId || combinedBusiness.category_ids[0];
+          category = categoryMap.get(foundCatId)?.name || 'General';
+        }
+
+        // Get full URL for cover photo (API returns full MinIO/S3 URLs or file paths)
+        const coverPhotoUrl = getFullImageUrl(combinedBusiness.cover_photo_url || combinedBusiness.cover_image_file_id);
+
+        // Map API field names to frontend field names
         return {
-          ...business,
-          business_description: business.description,
-          business_category: categoryName || 'General',
-          image_count: metadata[business.id]?.images || 0,
-          document_count: metadata[business.id]?.docs || 0,
+          ...combinedBusiness,
+          id: combinedBusiness.id || combinedBusiness.business_id,
+          business_name: combinedBusiness.business_name || combinedBusiness.name || 'Unnamed Business',
+          business_description: combinedBusiness.description || combinedBusiness.business_description || '',
+          contact_person_name: combinedBusiness.contact_person_name || combinedBusiness.contact_name || '',
+          contact_person_phone: combinedBusiness.contact_person_phone || combinedBusiness.phone || combinedBusiness.contact_phone || '',
+          business_email: combinedBusiness.business_email || combinedBusiness.email || '',
+          cover_photo_url: coverPhotoUrl,
+          business_category: category,
+          city: combinedBusiness.city || '',
+          operating_locations: combinedBusiness.operating_locations || combinedBusiness.availability || combinedBusiness.cities || [],
         };
       });
 
+      // DEBUG: Log first business detailed data for profile completion debugging
+      if (formattedBusinesses.length > 0) {
+        const firstBiz = formattedBusinesses[0];
+      }
+      let cachedBusinesses: Business[] = [];
+      try {
+        const cacheKey = `dashboard_businesses_${user.id}`;
+        const cachedStr = await AsyncStorage.getItem(cacheKey);
+        const parsed = cachedStr ? JSON.parse(cachedStr) : [];
+        cachedBusinesses = Array.isArray(parsed) ? parsed : [];
+      } catch { }
+      console.log('[BizDebug][Dashboard] Formatted businesses', {
+        count: formattedBusinesses.length,
+        items: formattedBusinesses.map((b: any) => ({
+          id: b.id,
+          business_name: b.business_name,
+          status: b.status ?? null,
+        })),
+      });
+
+      const mergeBusinessesById = (existing: Business[], incoming: Business[]): Business[] => {
+        if (incoming.length === 0 && existing.length > 0) {
+          return existing;
+        }
+        const merged = new Map<string, Business>();
+        existing.forEach((item) => {
+          if (item?.id) merged.set(item.id, item);
+        });
+        incoming.forEach((item) => {
+          if (!item?.id) return;
+          const previous = merged.get(item.id);
+          // Smart merge: preserve detailed fields from cache if new data doesn't have them
+          const smartMerge = { ...(previous || {}), ...item };
+          // Preserve category data from cache if new data doesn't have it
+          if (!item.category_ids?.length && previous?.category_ids?.length) {
+            smartMerge.category_ids = previous.category_ids;
+          }
+          if (!item.contact_person_name && previous?.contact_person_name) {
+            smartMerge.contact_person_name = previous.contact_person_name;
+          }
+          if (!item.operating_locations?.length && previous?.operating_locations?.length) {
+            smartMerge.operating_locations = previous.operating_locations;
+          }
+          if (!item.years_experience && previous?.years_experience) {
+            smartMerge.years_experience = previous.years_experience;
+          }
+          if (!item.cover_photo_url && previous?.cover_photo_url) {
+            smartMerge.cover_photo_url = previous.cover_photo_url;
+          }
+          // Recalculate category from category_ids if available
+          // Priority: primary_category_id > root business category > other fallbacks
+          if (smartMerge.primary_category_id && categoryMap.size > 0) {
+            const primaryCat = categoryMap.get(smartMerge.primary_category_id);
+            if (primaryCat?.name) {
+              smartMerge.business_category = primaryCat.name;
+            }
+          } else if (smartMerge.category_ids && smartMerge.category_ids.length > 0 && categoryMap.size > 0) {
+            // Find PRIMARY business category (category_type='business' with no parent)
+            const primaryCatId = smartMerge.category_ids.find((id: string) => {
+              const cat = categoryMap.get(id);
+              return cat && cat.category_type === 'business' && !cat.parent_category_id;
+            });
+            // If no primary found, try any business category
+            const anyBusinessCatId = primaryCatId || smartMerge.category_ids.find((id: string) => {
+              const cat = categoryMap.get(id);
+              return cat && cat.category_type === 'business';
+            });
+            const foundCatId = primaryCatId || anyBusinessCatId || smartMerge.category_ids[0];
+            const catObj = categoryMap.get(foundCatId);
+            if (catObj && catObj.name) {
+              smartMerge.business_category = catObj.name;
+            }
+          }
+          merged.set(item.id, smartMerge);
+        });
+        return Array.from(merged.values());
+      };
+      const mergedBusinesses = mergeBusinessesById(
+        mergeBusinessesById(cachedBusinesses, formattedBusinesses),
+        formattedBusinesses
+      );
+
       // 4. Single state update — percentage is computed once, no flicker
-      setBusinesses(formattedBusinesses);
+      setBusinesses(mergedBusinesses);
       setInitialDataLoaded(true);
-      AsyncStorage.setItem(`dashboard_businesses_${user.id}`, JSON.stringify(formattedBusinesses)).catch(() => { });
+
+      const cacheKey = `dashboard_businesses_${user.id}`;
+      AsyncStorage.setItem(cacheKey, JSON.stringify(mergedBusinesses)).catch(() => { });
       setIsOffline(false);
 
+      const businessIds = mergedBusinesses.map(b => b.id);
+      console.log('[BizDebug][Dashboard] Setting businesses completed', {
+        businessIds,
+      });
       // 5. Fetch lead counts (doesn't affect percentage, so can run after)
       if (businessIds.length > 0) {
         fetchBusinessLeadCounts(businessIds);
       }
     } catch (error) {
       console.error('Error fetching businesses:', error);
+      console.log('[BizDebug][Dashboard] fetchBusinesses failed', {
+        message: (error as any)?.message ?? 'Unknown error',
+      });
       setIsOffline(true);
     } finally {
       setLoading(false);
@@ -327,16 +666,26 @@ export default function DashboardScreen() {
 
   const fetchBusinessLeadCounts = async (businessIds: string[]) => {
     try {
+      const cachedStr = await AsyncStorage.getItem(`dashboard_business_counts_${user?.id}`);
+      if (cachedStr) {
+        setBusinessLeadCounts(JSON.parse(cachedStr));
+      }
+    } catch { }
+
+    if (!user?.id) return;
+    try {
+      const { data: leads, error } = await getLeads({
+        // Bearer token identifies the vendor, so vendor_id is not needed in the query
+      });
+      if (error) throw new Error(error.error);
       const counts: Record<string, number> = {};
-      await Promise.all(
-        businessIds.map(async (id) => {
-          const { count } = await supabaseCrm
-            .from('customer_leads')
-            .select('*', { count: 'exact', head: true })
-            .eq('business_id', id);
-          counts[id] = count || 0;
-        })
-      );
+      const leadsList = Array.isArray(leads) ? leads : [];
+      businessIds.forEach((id) => { counts[id] = 0; });
+      leadsList.forEach((lead: any) => {
+        if (lead.business_id && counts[lead.business_id] !== undefined) {
+          counts[lead.business_id]++;
+        }
+      });
       setBusinessLeadCounts(counts);
       AsyncStorage.setItem(`dashboard_business_counts_${user?.id}`, JSON.stringify(counts)).catch(() => { });
       setIsOffline(false);
@@ -357,72 +706,30 @@ export default function DashboardScreen() {
     } catch { }
 
     try {
-      const { data: businessData } = await supabaseCore
-        .from('vendor_businesses')
-        .select('id')
-        .eq('vendor_id', user.id);
-
-      if (!businessData || businessData.length === 0) {
-        setLeadStats({
-          total: 0,
-          monthly: 0,
-          today: 0,
-          byStatus: { new: 0, contacted: 0, quoted: 0, converted: 0, lost: 0 },
-        });
-        return;
-      }
-
-      const statusFilter = selectedStatuses.length > 0 ? selectedStatuses : undefined;
-
-      let totalQuery = supabaseCrm
-        .from('customer_leads')
-        .select('*', { count: 'exact', head: true })
-        .eq('vendor_id', user.id);
-      if (statusFilter) totalQuery = totalQuery.in('lead_status', statusFilter);
-      const { count: totalCount } = await totalQuery;
-
+      const { data: leads, error } = await getLeads({
+        ...(selectedStatuses.length > 0 ? { lead_status: selectedStatuses } : {}),
+      });
+      if (error) throw new Error(error.error);
+      const list = Array.isArray(leads) ? leads : [];
       const startOfMonth = new Date();
       startOfMonth.setDate(1);
       startOfMonth.setHours(0, 0, 0, 0);
-      let monthlyQuery = supabaseCrm
-        .from('customer_leads')
-        .select('*', { count: 'exact', head: true })
-        .eq('vendor_id', user.id)
-        .gte('created_at', startOfMonth.toISOString());
-      if (statusFilter) monthlyQuery = monthlyQuery.in('lead_status', statusFilter);
-      const { count: monthlyCount } = await monthlyQuery;
-
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
-      let todayQuery = supabaseCrm
-        .from('customer_leads')
-        .select('*', { count: 'exact', head: true })
-        .eq('vendor_id', user.id)
-        .gte('created_at', startOfDay.toISOString());
-      if (statusFilter) todayQuery = todayQuery.in('lead_status', statusFilter);
-      const { count: todayCount } = await todayQuery;
-
-      const { data: allLeads } = await supabaseCrm
-        .from('customer_leads')
-        .select('lead_status')
-        .eq('vendor_id', user.id);
-
       const statusCounts: Record<LeadStatus, number> = {
         new: 0, contacted: 0, quoted: 0, converted: 0, lost: 0,
       };
-      allLeads?.forEach((lead) => {
+      list.forEach((lead: any) => {
         if (lead.lead_status in statusCounts) {
           statusCounts[lead.lead_status as LeadStatus]++;
         }
       });
-
       const stats = {
-        total: totalCount || 0,
-        monthly: monthlyCount || 0,
-        today: todayCount || 0,
+        total: list.length,
+        monthly: list.filter((l: any) => new Date(l.created_at) >= startOfMonth).length,
+        today: list.filter((l: any) => new Date(l.created_at) >= startOfDay).length,
         byStatus: statusCounts,
       };
-
       setLeadStats(stats);
       AsyncStorage.setItem(`dashboard_lead_stats_${user.id}_${selectedStatuses.join(',')}`, JSON.stringify(stats)).catch(() => { });
       setIsOffline(false);
@@ -447,7 +754,7 @@ export default function DashboardScreen() {
         <View style={styles.headerLeft}>
           <View>
             <Text style={styles.headerGreeting}>
-              {getGreeting(user?.user_metadata?.full_name || user?.user_metadata?.name)}
+              {getGreeting((user?.user_metadata?.full_name as string) || (user?.user_metadata?.name as string))}
             </Text>
             <Text style={styles.headerTitle}>Dashboard</Text>
           </View>
@@ -628,10 +935,11 @@ export default function DashboardScreen() {
                     <View style={styles.businessRow}>
                       {/* Avatar */}
                       {business.cover_photo_url ? (
-                        <Image
-                          source={{ uri: business.cover_photo_url }}
+                        <ImageWithFallback
+                          uri={business.cover_photo_url}
+                          fallbackLetter={business.business_name.charAt(0).toUpperCase()}
+                          gradientColors={AVATAR_COLORS[index % AVATAR_COLORS.length]}
                           style={styles.businessAvatar}
-                          resizeMode="cover"
                         />
                       ) : (
                         <LinearGradient

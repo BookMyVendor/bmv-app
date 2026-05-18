@@ -15,7 +15,9 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Save } from 'lucide-react-native';
 import { useAuth } from '../contexts/AuthContext';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { supabaseCore, supabaseCrm } from '../lib/supabase';
+import { getCategories } from '../lib/api/categories';
+import { getVendorBusinesses } from '../lib/api/vendorBusinesses';
+import { getLead, createLead, updateLead, createLeadCommunication } from '../lib/api/leads';
 import {
   BUDGET_RANGES,
   STATUS_OPTIONS,
@@ -81,37 +83,23 @@ export default function LeadFormScreen() {
 
   const fetchEventCategories = async () => {
     try {
-      const { data, error } = await supabaseCore
-        .from('categories')
-        .select('id, name')
-        .eq('category_type', 'event')
-        .neq('category_level', 1)
-        .order('sort_order', { ascending: true })
-        .order('name', { ascending: true });
-
-      if (error) throw error;
-      setEventCategories(data || []);
+      const { data, error } = await getCategories({ category_type: 'event', category_level: '2' });
+      if (error) throw new Error(error.error);
+      setEventCategories((data || []).map((c: any) => ({ id: c.id, name: c.name })));
     } catch (error) {
       console.error('Error fetching event categories:', error);
     }
   };
 
   const fetchBusinesses = async () => {
-    if (!user?.id) {
-      return;
-    }
+    if (!user?.id) return;
     try {
-      const { data, error } = await supabaseCore
-        .from('vendor_businesses')
-        .select('id, business_name')
-        .eq('vendor_id', user.id)
-        .order('business_name');
-
-      if (error) throw error;
-      setBusinesses(data || []);
-
-      if (data && data.length > 0 && !isEditMode) {
-        setFormData((prev) => ({ ...prev, business_id: data[0].id }));
+      const { data, error } = await getVendorBusinesses(user.id);
+      if (error) throw new Error(error.error);
+      const list = (data || []).map((b: any) => ({ id: b.id, business_name: b.business_name }));
+      setBusinesses(list);
+      if (list.length > 0 && !isEditMode) {
+        setFormData((prev) => ({ ...prev, business_id: list[0].id }));
       }
     } catch (error) {
       console.error('Error fetching businesses:', error);
@@ -121,30 +109,25 @@ export default function LeadFormScreen() {
 
   const fetchLead = async () => {
     try {
-      const { data, error } = await supabaseCrm
-        .from('customer_leads')
-        .select('*')
-        .eq('id', id)
-        .maybeSingle();
-
-      if (error) throw error;
-
+      const { data, error } = await getLead(id);
+      if (error) throw new Error(error.error);
       if (data) {
+        const d = data as any;
         setFormData({
-          business_id: data.business_id || '',
-          customer_name: data.customer_name || '',
-          customer_email: data.customer_email || '',
-          customer_phone: stripCountryCode(data.customer_phone) || '',
-          category_id: data.category_id || '',
-          event_date: data.event_date || '',
-          event_location: data.event_location || '',
-          guest_count: data.guest_count?.toString() || '',
-          event_duration_hours: data.event_duration_hours?.toString() || '',
-          budget_range: data.budget_range || '',
-          requirements: data.requirements || '',
-          lead_status: data.lead_status || 'new',
-          lead_type: data.lead_type || 'inquiry',
-          lead_source: data.lead_source || 'website',
+          business_id: d.business_id || '',
+          customer_name: d.customer_name || '',
+          customer_email: d.customer_email || '',
+          customer_phone: stripCountryCode(d.customer_phone) || '',
+          category_id: d.category_id || '',
+          event_date: d.event_date || '',
+          event_location: d.event_location || '',
+          guest_count: d.guest_count?.toString() || '',
+          event_duration_hours: d.event_duration_hours?.toString() || '',
+          budget_range: d.budget_range || '',
+          requirements: d.requirements || '',
+          lead_status: d.lead_status || 'new',
+          lead_type: d.lead_type || 'inquiry',
+          lead_source: d.lead_source || 'website',
         });
       }
     } catch (error) {
@@ -227,33 +210,24 @@ export default function LeadFormScreen() {
       };
 
       if (isEditMode) {
-        // Don't update vendor_id on edit - it should remain the same
-        const { vendor_id, ...updateData } = leadData;
-
-        const { error } = await supabaseCrm
-          .from('customer_leads')
-          .update(updateData)
-          .eq('id', id);
-
-        if (error) throw error;
-
+        const { vendor_id: _v, ...updateData } = leadData;
+        const { error } = await updateLead(id, updateData);
+        if (error) throw new Error(error.error);
         Alert.alert('Success', 'Lead updated successfully', [
           { text: 'OK', onPress: () => router.back() },
         ]);
       } else {
-        const { data, error } = await supabaseCrm.from('customer_leads').insert(leadData).select();
-
-        if (error) throw error;
-
-        // Log lead creation activity using lead_communications
-        await supabaseCrm.from('lead_communications').insert({
-          lead_id: data[0].id,
-          vendor_id: user?.id,
-          communication_type: 'message',
-          message: 'New lead added to the system',
-          is_from_vendor: true,
-        });
-
+        const { data: created, error } = await createLead(leadData);
+        if (error) throw new Error(error.error);
+        if (created?.id) {
+          await createLeadCommunication({
+            lead_id: created.id,
+            vendor_id: user?.id,
+            communication_type: 'message',
+            message: 'New lead added to the system',
+            is_from_vendor: true,
+          });
+        }
         Alert.alert('Success', 'Lead created successfully', [
           { text: 'OK', onPress: () => router.back() },
         ]);
